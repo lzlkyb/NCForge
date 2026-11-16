@@ -23,12 +23,10 @@ import org.tmatesoft.svn.core.io.SVNRepository;
 import org.tmatesoft.svn.core.wc.ISVNAnnotateHandler;
 import org.tmatesoft.svn.core.wc.ISVNInfoHandler;
 import org.tmatesoft.svn.core.ISVNLogEntryHandler;
-import org.tmatesoft.svn.core.wc.ISVNStatusHandler;
 import org.tmatesoft.svn.core.wc.SVNRevision;
 import org.tmatesoft.svn.core.wc.SVNClientManager;
 import org.tmatesoft.svn.core.wc.SVNConflictChoice;
 import org.tmatesoft.svn.core.wc.SVNInfo;
-import org.tmatesoft.svn.core.wc.SVNStatus;
 import org.tmatesoft.svn.core.wc.SVNStatusType;
 import org.tmatesoft.svn.core.wc.SVNWCUtil;
 import org.tmatesoft.svn.core.internal.io.dav.DAVRepositoryFactory;
@@ -36,11 +34,17 @@ import org.tmatesoft.svn.core.internal.io.fs.FSRepositoryFactory;
 import org.tmatesoft.svn.core.internal.io.svn.SVNRepositoryFactoryImpl;
 
 /**
- * NCForge 的 SVN 桥（SVNKit 1.3.5）。
+ * NCForge 的 SVN 桥（SVNKit 1.10.11，Maven 最新 release；jar 内 build.properties
+ * 自报 1.10.10，属官方打包版本号未同步，hello 用运行时 API 报真实值）。
  *
- * <p>为什么是 1.3.5：工作副本是 format 10（SVN 1.6 的「每目录一份 .svn」），
- * 命令行 svn 1.7+ 与 SVNKit 1.8+ 都已不支持，只会要求 upgrade —— 而 upgrade 不可逆，
- * 升完 Eclipse 与同事都打不开。所以这里刻意用老版本，且**任何操作都不升级工作副本格式**。
+ * <p>为什么升到 1.10.11：旧版 1.3.5 只认 format 10（SVN 1.6「每目录一份 .svn」），
+ * 用户的 1.7+ 新格式副本（根目录一份 .svn/wc.db）会报「appears to be part of
+ * Subversion 1.7 (SVNKit 1.4) or greater」。1.10.11 内部保留 format 10 的完整旧实现
+ * （wc2.old.*），实测对老副本 commit/update/revert/add/delete/blame **都不升级格式**，
+ * 同时能读写新格式——两头都吃。旧注释「SVNKit 1.8+ 不支持 format 10」是错的。
+ *
+ * <p>红线不变：**任何操作都不升级工作副本格式**。upgrade 不可逆，升完 Eclipse 与
+ * 同事都打不开。写门槛探针（target/test-tmp/svn-fmt-probe）已验证两种格式写后格式不变。
  *
  * <p>协议：stdin 每行一条请求，TAB 分隔；stdout 每行一条 JSON 响应。
  * 请求里出现的 \ 与 TAB、换行由调用方转义成 \\ \t \n（Rust 侧统一处理）。
@@ -120,7 +124,8 @@ public class NcSvnBridge {
 
 	private static String dispatch(String cmd, String[] f) throws Exception {
 		if ("hello".equals(cmd)) {
-			return "{\"protocol\":1,\"svnkit\":\"1.3.5\"}";
+			// 运行时读真实版本，别硬编码：升级 jar 后这里自动跟上，不会漂移。
+			return "{\"protocol\":1,\"svnkit\":\"" + org.tmatesoft.svn.util.Version.getShortVersionString() + "\"}";
 		}
 		if ("quit".equals(cmd)) {
 			return "{}";
@@ -287,6 +292,11 @@ public class NcSvnBridge {
 		if (total == 0) {
 			return result(0, 0, 0, new ArrayList<String>(), new ArrayList<String>());
 		}
+		// 🔴 合并顺序必须用**原始顺序**（根层在前 + 模块字母序），不能用 LPT 重排后的 todo：
+		// 上面那段注释承诺「串行时就是根层 → 按名字排序的模块」，而 `seen.add` 是
+		// 「先到先得」——按 LPT 顺序合并会让同一条目的胜者随上次耗时漂移，
+		// 同一份工作副本两次扫描可能给出不同归属。调度顺序与合并顺序是两件事。
+		final List<Integer> mergeOrder = mergeOrder(todo);
 
 		final int threads = Math.min(STATUS_THREADS, total);
 		final java.util.concurrent.LinkedBlockingQueue<SVNClientManager> free =
@@ -381,7 +391,7 @@ public class NcSvnBridge {
 		List<String> items = new ArrayList<String>();
 		List<String> processed = new ArrayList<String>();
 		java.util.Set<String> seen = new java.util.HashSet<String>();
-		for (Integer idx : todo) {
+		for (Integer idx : mergeOrder) {
 			java.util.LinkedHashMap<String, String> got = perUnit.get(idx);
 			if (got == null) {
 				continue;
@@ -414,6 +424,21 @@ public class NcSvnBridge {
 		return root.getPath() + "\u0000" + name;
 	}
 
+	/**
+	 * 合并顺序 = 单元下标的**原始升序**（根层 "" 在最前，模块按名字排序）。
+	 *
+	 * <p>🔴 调度用 LPT（最慢的先跑），但合并**绝不能**跟着 LPT 走：跨单元去重是
+	 * 「先到先得」（{@code seen.add}），按 LPT 顺序合并会让同一条目的胜者随上次耗时漂移，
+	 * 同一份工作副本两次扫描给出不同归属。抽成静态纯函数是为了能脱库单测这条判据。
+	 *
+	 * <p>入参不被修改：调度顺序还要留给上面的并发派发用。
+	 */
+	static List<Integer> mergeOrder(List<Integer> scheduled) {
+		List<Integer> ordered = new ArrayList<Integer>(scheduled);
+		java.util.Collections.sort(ordered);
+		return ordered;
+	}
+
 	private static long lastMs(File root, String name) {
 		Long v = UNIT_MS.get(unitKey(root, name));
 		return v == null ? 0L : v;
@@ -431,26 +456,32 @@ public class NcSvnBridge {
 	private static int scanInto(SVNClientManager m, File target, SVNDepth depth,
 			final java.util.Map<String, String> got) throws SVNException {
 		final int[] n = new int[1];
-		m.getStatusClient().doStatus(target, SVNRevision.WORKING, depth, false, false, false, false,
-				new ISVNStatusHandler() {
-					public void handleStatus(SVNStatus s) {
-						n[0]++;
-						String path = s.getFile().getPath();
-						SVNStatusType st = s.getContentsStatus();
-						String name = st == null ? "none" : st.toString();
-						if (st == SVNStatusType.STATUS_CONFLICTED
-								|| s.getPropertiesStatus() == SVNStatusType.STATUS_CONFLICTED
-								|| s.getTreeConflict() != null) name = "conflicted";
-						if ("normal".equals(name) || "none".equals(name)) {
-							return;
-						}
-						got.put(path, "{\"path\":" + jstr(path)
-								+ ",\"status\":" + jstr(name)
-								+ ",\"revision\":" + (s.getRevision() == null || s.getRevision().getNumber() < 0 ? -1
-										: s.getRevision().getNumber())
-								+ ",\"dir\":" + (s.getKind() == SVNNodeKind.DIR || s.getFile().isDirectory() ? "true" : "false") + "}");
-					}
-				}, null);
+		// 必须走 wc2 原生 GetStatus，不能用旧 getStatusClient().doStatus()：
+		// 后者的 getContentsStatus() 在 1.7+ 新格式副本上**不报调度状态**——added 报成
+		// modified、deleted 报成 normal、unversioned 报成 none（实测 SVNKit 1.10.11），
+		// 会让新格式副本的改动列表整个为空。wc2 的 getNodeStatus() 两种格式都正确。
+		org.tmatesoft.svn.core.wc2.SvnGetStatus op = m.getOperationFactory().createGetStatus();
+		op.setSingleTarget(org.tmatesoft.svn.core.wc2.SvnTarget.fromFile(target));
+		op.setDepth(depth);
+		op.setReportAll(false);
+		op.setReceiver(new org.tmatesoft.svn.core.wc2.ISvnObjectReceiver<org.tmatesoft.svn.core.wc2.SvnStatus>() {
+			public void receive(org.tmatesoft.svn.core.wc2.SvnTarget t, org.tmatesoft.svn.core.wc2.SvnStatus s) {
+				n[0]++;
+				String path = s.getPath().getPath();
+				SVNStatusType st = s.getNodeStatus();
+				String name = st == null ? "none" : st.toString();
+				if (s.isConflicted() || st == SVNStatusType.STATUS_CONFLICTED
+						|| s.getPropertiesStatus() == SVNStatusType.STATUS_CONFLICTED) name = "conflicted";
+				if ("normal".equals(name) || "none".equals(name)) {
+					return;
+				}
+				got.put(path, "{\"path\":" + jstr(path)
+						+ ",\"status\":" + jstr(name)
+						+ ",\"revision\":" + (s.getRevision() < 0 ? -1 : s.getRevision())
+						+ ",\"dir\":" + (s.getKind() == SVNNodeKind.DIR || s.getPath().isDirectory() ? "true" : "false") + "}");
+			}
+		});
+		op.run();
 		return n[0];
 	}
 
@@ -536,11 +567,16 @@ public class NcSvnBridge {
 		// 先整体查一遍冲突，再做任何写动作。以前冲突检查混在「逐文件 doAdd」的循环里：
 		// 第 3 个文件有冲突时，前两个已经被 add 成 scheduled 状态——提交失败了，工作副本
 		// 却被改了，用户下次提交会莫名带上它们。冲突是可以在动手之前就知道的。
-		java.util.Map<String, SVNStatus> statuses = new java.util.HashMap<String, SVNStatus>();
+		// 预检必须走 wc2：旧 doStatus().getContentsStatus() 在 1.7+ 新格式副本上把
+		// unversioned 报成 none（实测 1.10.11），下面「未纳管就自动 add」的分支永远不进，
+		// doCommit 直接报 E200009 not under version control。冲突检测同理用 isConflicted()。
+		java.util.Map<String, org.tmatesoft.svn.core.wc2.SvnStatus> statuses =
+				new java.util.HashMap<String, org.tmatesoft.svn.core.wc2.SvnStatus>();
 		for (String p : paths) {
-			SVNStatus st = manager().getStatusClient().doStatus(new File(p), false);
+			org.tmatesoft.svn.core.wc2.SvnStatus st = wc2Status(new File(p));
 			statuses.put(p, st);
-			if (st != null && st.getContentsStatus() == SVNStatusType.STATUS_CONFLICTED) {
+			if (st != null && (st.isConflicted() || st.getNodeStatus() == SVNStatusType.STATUS_CONFLICTED
+					|| st.getPropertiesStatus() == SVNStatusType.STATUS_CONFLICTED)) {
 				throw new IllegalStateException("文件仍有冲突，不能提交: " + p);
 			}
 		}
@@ -564,8 +600,8 @@ public class NcSvnBridge {
 		}
 		for (String p : paths) {
 			File f = new File(p);
-			SVNStatus st = statuses.get(p);
-			if (st == null || st.getContentsStatus() == SVNStatusType.STATUS_UNVERSIONED) {
+			org.tmatesoft.svn.core.wc2.SvnStatus st = statuses.get(p);
+			if (st == null || st.getNodeStatus() == SVNStatusType.STATUS_UNVERSIONED) {
 				manager().getWCClient().doAdd(f, false, false, true, SVNDepth.EMPTY, false, false);
 				added.add(f.getPath());
 			}
@@ -579,6 +615,22 @@ public class NcSvnBridge {
 		return "{\"revision\":" + info.getNewRevision() + ",\"author\":"
 				+ jstr(info.getAuthor() == null ? "" : info.getAuthor())
 				+ ",\"added\":[" + join(quoteAll(added)) + "]}";
+	}
+
+	/** 单文件 wc2 状态查询（commit 预检用）。EMPTY 深度 + reportAll，未纳管文件也能报出。 */
+	private static org.tmatesoft.svn.core.wc2.SvnStatus wc2Status(File f) throws SVNException {
+		org.tmatesoft.svn.core.wc2.SvnGetStatus op = manager().getOperationFactory().createGetStatus();
+		op.setSingleTarget(org.tmatesoft.svn.core.wc2.SvnTarget.fromFile(f));
+		op.setDepth(SVNDepth.EMPTY);
+		op.setReportAll(true);
+		final org.tmatesoft.svn.core.wc2.SvnStatus[] box = new org.tmatesoft.svn.core.wc2.SvnStatus[1];
+		op.setReceiver(new org.tmatesoft.svn.core.wc2.ISvnObjectReceiver<org.tmatesoft.svn.core.wc2.SvnStatus>() {
+			public void receive(org.tmatesoft.svn.core.wc2.SvnTarget t, org.tmatesoft.svn.core.wc2.SvnStatus s) {
+				box[0] = s;
+			}
+		});
+		op.run();
+		return box[0];
 	}
 
 	private static String update(File root) throws SVNException {
@@ -821,14 +873,20 @@ public class NcSvnBridge {
 		org.tmatesoft.svn.core.wc.ISVNOptions options = configDir == null
 				? SVNWCUtil.createDefaultOptions(true)
 				: SVNWCUtil.createDefaultOptions(configDir, true);
-		if (user.isEmpty()) {
-			return SVNClientManager.newInstance(options, configDir == null
-					? SVNWCUtil.createDefaultAuthenticationManager()
-					: SVNWCUtil.createDefaultAuthenticationManager(configDir));
-		}
-		return SVNClientManager.newInstance(options, configDir == null
-				? SVNWCUtil.createDefaultAuthenticationManager(user, pass)
-				: SVNWCUtil.createDefaultAuthenticationManager(configDir, user, pass));
+		org.tmatesoft.svn.core.auth.ISVNAuthenticationManager auth = user.isEmpty()
+				? (configDir == null
+						? SVNWCUtil.createDefaultAuthenticationManager()
+						: SVNWCUtil.createDefaultAuthenticationManager(configDir))
+				: (configDir == null
+						? SVNWCUtil.createDefaultAuthenticationManager(user, pass)
+						: SVNWCUtil.createDefaultAuthenticationManager(configDir, user, pass));
+		// 用 SvnOperationFactory 承载 options+auth，再交给 SVNClientManager：这样
+		// getOperationFactory() 非空，status 能走 wc2 原生 GetStatus（见 scanInto）。
+		// 旧式 newInstance(options, auth) 不初始化工厂，getOperationFactory() 返回 null。
+		org.tmatesoft.svn.core.wc2.SvnOperationFactory factory = new org.tmatesoft.svn.core.wc2.SvnOperationFactory();
+		factory.setOptions(options);
+		factory.setAuthenticationManager(auth);
+		return SVNClientManager.newInstance(factory);
 	}
 
 	private static SVNClientManager manager() {

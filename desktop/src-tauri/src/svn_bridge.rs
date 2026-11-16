@@ -4,20 +4,32 @@
 //! `%APPDATA%\Subversion\auth`，实测会把已缓存的密码**改写成只剩用户名**（踩过两次，
 //! 见 `docs/交接清单-2026-10-27.md` 的 5.5 节）。
 //!
-//! Jar 列表固定在 `BRIDGE_JARS`：工作副本是 format 10（SVN 1.6 时代「每目录一份元数据」），
-//! 命令行 svn 1.7+ 与 SVNKit 1.8+ 都不支持，只能带 SVNKit 1.3.5。
+//! Jar 列表固定在 `BRIDGE_JARS`。SVNKit 用 **1.10.11**：它内部保留了 format 10
+//! （SVN 1.6「每目录一份元数据」）的完整旧实现（`wc2.old.*`），实测对老副本做
+//! commit/update/revert/add/delete/blame **不会升级工作副本格式**；同时能读 1.7+
+//! 新格式（根目录一份 `.svn/wc.db`）。旧注释「SVNKit 1.8+ 不支持 format 10」是错的。
+//! 之前带 1.3.5 只能读 format 10，遇到用户的新格式副本会报
+//! 「appears to be part of Subversion 1.7 (SVNKit 1.4) or greater」——升级即为修这个。
+//!
+//! 文件名**不带版本号**：升级只换内容不改名，`BRIDGE_JARS`/打包清单/错误文案都稳定。
+//! 依赖按官方 1.10.11 pom 对齐：sqljet 1.1.15 / antlr-runtime 3.4 / sequence-library 1.0.4 /
+//! lz4-java 1.4.1（commit 必需，缺了报 `NoClassDefFoundError: net.jpountz.lz4.LZ4Factory`）/
+//! trilead-ssh2 build222（svn+ssh）。jna/sshd/jsch 是可选 keyring/SSH 传输，桥用自有
+//! config 目录 + trilead，不需要。
 
 use std::path::{Path, PathBuf};
 
 pub use crate::java_bridge::{encode_request, Bridge, BridgeEnv, BridgeError};
 
 /// 桥需要的 jar 列表（顺序无所谓，classpath 是并列的）。
-pub const BRIDGE_JARS: [&str; 5] = [
+pub const BRIDGE_JARS: [&str; 7] = [
     "ncsvn.jar",
     "svnkit.jar",
     "trilead.jar",
-    "sqljet.1.0.4.jar",
-    "antlr-runtime-3.1.3.jar",
+    "sqljet.jar",
+    "antlr-runtime.jar",
+    "sequence-library.jar",
+    "lz4-java.jar",
 ];
 
 /// 在候选目录里找齐所有 jar，返回 (jar 列表, 所在目录)。

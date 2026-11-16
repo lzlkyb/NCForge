@@ -53,17 +53,50 @@ public class NcSvnHistoryContractTest {
         catch (InvocationTargetException error) { refused = error.getCause() instanceof IllegalArgumentException; }
         check(refused, "oversized local file rejected before reading");
     }
+    /**
+     * 🔴 调度顺序（LPT，最慢先跑）与合并顺序（原始升序）是两件事。
+     * 跨单元去重是「先到先得」，按 LPT 顺序合并会让同一条目的胜者随上次耗时漂移。
+     */
+    @SuppressWarnings("unchecked")
+    private static void mergeOrderContracts() throws Exception {
+        Method mergeOrder = NcSvnBridge.class.getDeclaredMethod("mergeOrder", java.util.List.class);
+        mergeOrder.setAccessible(true);
+        // LPT 把最慢的模块（下标 3）排到最前，根层 0 被挤到后面
+        java.util.List<Integer> scheduled = new java.util.ArrayList<Integer>(java.util.Arrays.asList(3, 0, 2, 1));
+        java.util.List<Integer> merged = (java.util.List<Integer>) mergeOrder.invoke(null, scheduled);
+        check(merged.equals(java.util.Arrays.asList(0, 1, 2, 3)),
+                "merge order must be the original ascending unit order, got " + merged);
+        check(merged.get(0) == 0, "root unit (index 0) must win cross-unit dedup");
+        check(scheduled.equals(java.util.Arrays.asList(3, 0, 2, 1)),
+                "merge order must not mutate the scheduling order");
+        // 同一份输入无论调度怎么排，合并结果必须一致（去重胜者不漂移）
+        java.util.List<Integer> other = (java.util.List<Integer>) mergeOrder.invoke(null,
+                new java.util.ArrayList<Integer>(java.util.Arrays.asList(2, 1, 3, 0)));
+        check(merged.equals(other), "merge order must be independent of LPT scheduling");
+        check(((java.util.List<Integer>) mergeOrder.invoke(null, new java.util.ArrayList<Integer>())).isEmpty(),
+                "empty schedule merges to empty");
+    }
     public static void main(String[] args) throws Exception {
         File temporary = new File(args[0]).getCanonicalFile();
         if (!temporary.getName().startsWith("svn-history-contract-")) throw new IllegalArgumentException("临时测试目录无效");
         readLimits(temporary);
+        mergeOrderContracts();
         FSRepositoryFactory.setup();
         File config = new File(temporary, "config"); config.mkdirs();
-        SVNClientManager manager = SVNClientManager.newInstance(org.tmatesoft.svn.core.wc.SVNWCUtil.createDefaultOptions(config, true), org.tmatesoft.svn.core.wc.SVNWCUtil.createDefaultAuthenticationManager(config));
+        // 与生产 newManager() 同构造：factory 承载 options/auth，getOperationFactory() 非空，
+        // 否则 wc2 的 status/commit 预检拿不到工厂直接 NPE。
+        org.tmatesoft.svn.core.wc2.SvnOperationFactory factory = new org.tmatesoft.svn.core.wc2.SvnOperationFactory();
+        factory.setOptions(org.tmatesoft.svn.core.wc.SVNWCUtil.createDefaultOptions(config, true));
+        factory.setAuthenticationManager(org.tmatesoft.svn.core.wc.SVNWCUtil.createDefaultAuthenticationManager(config));
+        SVNClientManager manager = SVNClientManager.newInstance(factory);
         Field cm = NcSvnBridge.class.getDeclaredField("cm"); cm.setAccessible(true); cm.set(null, manager);
         dispatch = NcSvnBridge.class.getDeclaredMethod("dispatch", String.class, String[].class); dispatch.setAccessible(true);
         SVNURL url = SVNRepositoryFactory.createLocalRepository(new File(temporary, "repository"), true, false);
         File a = new File(temporary, "a"); File b = new File(temporary, "b");
+        // out 的替换覆盖到测试结束：反射直调不经过 main()，out 初始为 null，
+        // status/commit 都会写 progress，不接管会 NPE。声明在 try 外供 finally 恢复。
+        Field out = NcSvnBridge.class.getDeclaredField("out"); out.setAccessible(true);
+        java.io.PrintStream original = (java.io.PrintStream) out.get(null);
         try {
             manager.getUpdateClient().doCheckout(url, a, SVNRevision.HEAD, SVNRevision.HEAD, SVNDepth.INFINITY, false);
             File text = new File(a, "A.java"); write(text, "first\nbase\n");
@@ -107,16 +140,12 @@ public class NcSvnHistoryContractTest {
             // 且与最终结果同源（同一条目、同一字段）。把 out 换到缓冲里接住这些行。
             File fresh = new File(a, "Stream.java"); write(fresh, "streaming\n");
             java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
-            Field out = NcSvnBridge.class.getDeclaredField("out"); out.setAccessible(true);
-            java.io.PrintStream original = (java.io.PrintStream) out.get(null);
             out.set(null, new java.io.PrintStream(captured, true, "UTF-8"));
             String statusResult;
-            try {
-                java.lang.reflect.Method status = NcSvnBridge.class
-                        .getDeclaredMethod("status", String.class, File.class, String.class);
-                status.setAccessible(true);
-                statusResult = (String) status.invoke(null, "t", a, "");
-            } finally { out.set(null, original); }
+            java.lang.reflect.Method status = NcSvnBridge.class
+                    .getDeclaredMethod("status", String.class, File.class, String.class);
+            status.setAccessible(true);
+            statusResult = (String) status.invoke(null, "t", a, "");
             String streamed = captured.toString("UTF-8");
             check(statusResult.contains("\"entries\":["), "status 最终结果带 entries: " + statusResult);
             check(statusResult.contains("\"status\":\"unversioned\"") && statusResult.contains("\"revision\":-1"),
@@ -135,7 +164,22 @@ public class NcSvnHistoryContractTest {
                     "单元条目带 path/status/revision/dir: " + streamed);
             check(streamed.contains("Stream.java") && statusResult.contains("Stream.java"),
                     "单元条目与最终结果指向同一批文件");
+            // 1.7+ 新格式回归：SVNKit 1.10.11 的 checkout 造的就是 wc.db 式副本。
+            // 旧 status API 在这种副本上把 unversioned 报成 none，曾让改动列表整个为空、
+            // 让 commit 预检的「未纳管自动 add」分支失效（E200009）。这两条钉死 wc2 路径。
+            check(new File(a, ".svn/wc.db").isFile(), "契约副本是 1.7+ 新格式（wc.db），否则下面的回归没有意义");
+            // 走生产 commit 命令：unversioned 新文件必须被自动 add 并提交成功
+            File viaBridge = new File(a, "ViaBridge.java"); write(viaBridge, "via bridge\n");
+            File msg = new File(temporary, "commit-msg.txt"); write(msg, "contract: bridge commit auto-add");
+            String committed = call("commit", msg.getPath(), viaBridge.getPath());
+            check(committed.contains("\"revision\":") && committed.contains("ViaBridge.java"),
+                    "新格式副本上桥 commit 自动 add unversioned 文件: " + committed);
+            // 提交后再改一次，status 必须报 modified（旧 API 在新格式上报 normal 被滤掉）
+            write(viaBridge, "via bridge modified\n");
+            String afterCommit = call("status", a.getPath(), "");
+            check(afterCommit.contains("\"status\":\"modified\"") && afterCommit.contains("ViaBridge.java"),
+                    "新格式副本上 modified 不被误报成 normal: " + afterCommit);
             System.out.println("SVN history contract passed: " + checks + " checks");
-        } finally { manager.dispose(); cm.set(null, null); }
+        } finally { manager.dispose(); cm.set(null, null); out.set(null, original); }
     }
 }

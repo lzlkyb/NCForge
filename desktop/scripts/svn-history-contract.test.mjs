@@ -12,10 +12,10 @@ test('SVNKit file repository: fixed history, blame and preserved conflict merge'
   const cache=join(desktop,'.cache');mkdirSync(cache,{recursive:true});
   const temporary=mkdtempSync(join(cache,'svn-history-contract-'));
   assert.ok(resolve(temporary).startsWith(resolve(cache)+sep));
-  const cp=['ncsvn.jar','svnkit.jar','antlr-runtime-3.1.3.jar','trilead.jar','sqljet.1.0.4.jar'].map(file=>join(resources,file)).join(sep==='\\'?';':':');
+  const cp=['ncsvn.jar','svnkit.jar','antlr-runtime.jar','trilead.jar','sqljet.jar','sequence-library.jar','lz4-java.jar'].map(file=>join(resources,file)).join(sep==='\\'?';':':');
   try {
     execFileSync(join(jdk,'bin/javac.exe'),['-encoding','UTF-8','-cp',cp,'-d',temporary,join(desktop,'src-tauri/svn-bridge/NcSvnHistoryContractTest.java')],{encoding:'utf8'});
     const output=execFileSync(join(jdk,'bin/java.exe'),['-Dfile.encoding=UTF-8','-cp',cp+(sep==='\\'?';':':')+temporary,'NcSvnHistoryContractTest',temporary],{encoding:'utf8',timeout:60000});
-    assert.match(output,/SVN history contract passed: 25 checks/);
+    assert.match(output,/SVN history contract passed: 33 checks/);
   } finally { if(resolve(temporary).startsWith(resolve(cache)+sep))rmSync(temporary,{recursive:true,force:true}); }
 });

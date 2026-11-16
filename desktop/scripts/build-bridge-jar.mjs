@@ -37,8 +37,8 @@ const BRIDGES = {
   svn: {
     src: join(ta, 'svn-bridge', 'NcSvnBridge.java'),
     out: join(ta, 'resources', 'svnkit', 'ncsvn.jar'),
-    // svnkit 及其依赖（antlr / trilead / sqljet）编桥时要在 classpath 上
-    cp: ['antlr-runtime-3.1.3.jar', 'svnkit.jar', 'trilead.jar', 'sqljet.1.0.4.jar'].map((f) =>
+    // svnkit 及其依赖编桥时要在 classpath 上（文件名不带版本号，见 svn_bridge.rs）
+    cp: ['antlr-runtime.jar', 'svnkit.jar', 'trilead.jar', 'sqljet.jar', 'sequence-library.jar', 'lz4-java.jar'].map((f) =>
       join(ta, 'resources', 'svnkit', f),
     ),
     label: 'NcSvnBridge',
