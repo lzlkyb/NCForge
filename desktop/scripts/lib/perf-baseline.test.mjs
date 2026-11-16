@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { CHANNELS, buildRows, formatTable, parseBootLog, parseEcjPerf, splitIndexRound, summarize, verdictOf } from "./perf-baseline.mjs";
+import { CHANNELS, buildRows, formatTable, parseBootLog, parseEcjPerf, parseIncrementalPerf, splitIndexRound, summarize, verdictOf } from "./perf-baseline.mjs";
 
 test("清单：id 唯一、五指标都在、目标与方案 §4.2 一致", () => {
   const ids = CHANNELS.map((c) => c.id);
@@ -82,13 +82,49 @@ test("全部输入缺席时：每行都未测，且不抛", () => {
   assert.ok(rows.every((r) => r.note.length > 0), "未测也要说清楚为什么");
 });
 
-test("增量编译永远标未测：ecj 的数字不许顶替它", () => {
+test("增量编译：ecj 的数字不许顶替它（两条独立通道）", () => {
+  // 只给 ecj、不给 incremental：incremental 必须仍未测，绝不能借用 ecj 的 p50。
   const rows = buildRows({ ecj: { ok: true, n: 20, min: 90, p50: 118, max: 200, mean: 130 } });
   assert.equal(rows.find((r) => r.id === "compile").verdict, "达标");
   const inc = rows.find((r) => r.id === "incremental");
   assert.equal(inc.value, null);
   assert.equal(inc.verdict, "未测");
-  assert.match(inc.note, /未接探针/);
+  assert.match(inc.note, /--only=incremental/);
+});
+
+test("增量编译：有自己的 PERF 行就取自己的 p50", () => {
+  const rows = buildRows({
+    ecj: { ok: true, n: 20, min: 90, p50: 118, max: 200, mean: 130 },
+    incremental: { ok: true, n: 20, files: 5, min: 300, p50: 800, max: 1200, mean: 850 },
+  });
+  const inc = rows.find((r) => r.id === "incremental");
+  assert.equal(inc.value, 800);
+  assert.equal(inc.verdict, "达标"); // 800 < 1500
+  assert.match(inc.note, /5 文件/);
+  // compile 仍取 ecj 的 118，不被 incremental 影响
+  assert.equal(rows.find((r) => r.id === "compile").value, 118);
+});
+
+test("增量编译 PERF 行解析：正常出六个数（含 files）", () => {
+  const r = parseIncrementalPerf("PERF incremental-compile n=20 files=5 min=300 p50=800 max=1200 mean=850\n");
+  assert.deepEqual(r, { ok: true, n: 20, files: 5, min: 300, p50: 800, max: 1200, mean: 850 });
+});
+
+test("增量编译 PERF 行解析：跳过 / 失败 / 没输出三种分开，且不认 ecj 的行", () => {
+  assert.match(parseIncrementalPerf("跳过：本机没有 java / ecj").reason, /java/);
+  assert.match(parseIncrementalPerf("PERF incremental-compile failed: 2 个错误").reason, /编译失败/);
+  assert.match(parseIncrementalPerf("error: could not compile").reason, /没拿到 PERF incremental-compile/);
+  // 🔴 ecj 的单文件行绝不能被增量通道认走
+  assert.equal(parseIncrementalPerf("PERF single-file-compile n=20 min=90 p50=118 max=200 mean=130").ok, false);
+  assert.equal(parseIncrementalPerf(null).ok, false);
+});
+
+test("增量编译失败绝不变成耗时数字", () => {
+  const rows = buildRows({ incremental: parseIncrementalPerf("PERF incremental-compile failed: boom") });
+  const inc = rows.find((r) => r.id === "incremental");
+  assert.equal(inc.value, null);
+  assert.equal(inc.verdict, "未测");
+  assert.match(inc.note, /编译失败/);
 });
 
 test("索引拆段：把 OSGi 引导与状态推进分开（2026-11-15 实测数）", () => {
@@ -126,6 +162,23 @@ test("索引备注不许把引导差异说成缓存收益", () => {
   assert.match(note, /索引 4355/);
   assert.ok(!note.includes("缓存复用节省"), "这个措辞会把 OSGi 引导的差记到索引账上");
   assert.match(note, /别当缓存收益/);
+});
+
+test("索引备注：root 模式标明真实工程与 IProject 数", () => {
+  const rows = buildRows({
+    index: {
+      mode: "root",
+      projects: ["AppService", "medPM", "phm"],
+      fileCount: 1245,
+      verdict: { firstImportMs: 43299 },
+      rounds: [{ label: "fresh", totalMs: 43299, statuses: [{ at: 1000 }, { at: 20519 }] }],
+    },
+  });
+  const note = rows.find((r) => r.id === "index").note;
+  assert.match(note, /真实工程 3 个 IProject/);
+  assert.match(note, /1245 个 java/);
+  assert.match(note, /引导 23780/);
+  assert.match(note, /索引 19519/);
 });
 
 test("四路齐全：取数各归各的通道，不串台", () => {

@@ -17,21 +17,21 @@
  *
  * `source` 决定这一行从哪儿取数：
  *   ecj    → Rust `#[ignore]` 测试 `单文件编译_p50` 的 `PERF ` 输出行
+ *   incremental → Rust `#[ignore]` 测试 `增量编译_p50` 的 `PERF incremental-compile` 行
  *   gaps   → `target/test-tmp/editor-gaps.json`
  *   index  → `target/test-tmp/lang-index-bench.json`
  *   boot   → 真机运行日志里的「冷启动：进程启动 → 前端首帧 N ms」
- *   none   → 还没有探针，只能标未测（写出来是为了让缺口可见，而不是假装只有五项）
  *
  * `target: null` = 这一项只作代价基线，方案没给目标值，不参与达标判定。
  */
 export const CHANNELS = [
   { id: "boot", name: "冷启动 → 首帧可编辑", target: 2000, source: "boot" },
-  { id: "index", name: "jdt.ls 全量索引（fixture）", target: 60000, source: "index" },
+  { id: "index", name: "jdt.ls 全量索引", target: 60000, source: "index" },
   { id: "compile", name: "单文件保存 → 出 class（p50）", target: 400, source: "ecj" },
   { id: "completion", name: "补全 p50（普通文件·热）", target: 150, source: "gaps" },
   { id: "bigfile", name: "大文件 didOpen → 首批诊断", target: null, source: "gaps" },
   { id: "bigfile-completion", name: "大文件补全 p50", target: null, source: "gaps" },
-  { id: "incremental", name: "1–5 文件增量编译", target: 1500, source: "none" },
+  { id: "incremental", name: "1–5 文件增量编译", target: 1500, source: "incremental" },
 ];
 
 /** 判定口径：方案写的是「< 0.4 s」，所以是严格小于，等于目标算超标。 */
@@ -61,6 +61,26 @@ export function parseEcjPerf(text) {
   const skipped = /跳过：(.+)/.exec(src);
   if (skipped) return { ok: false, reason: skipped[1].trim().slice(0, 120) };
   return { ok: false, reason: "没拿到 PERF 行（测试没跑起来？）" };
+}
+
+/**
+ * 解析 Rust 侧的 `PERF incremental-compile n=… files=… min=… p50=… max=… mean=…`。
+ *
+ * 与 ecj 同一套「三种非正常结局分开报」的口径：跳过 / 编译失败 / 没输出。
+ * 🔴 绝不能拿 ecj 的单文件数字顶替增量——那是两条不同的路径（见 buildRows）。
+ */
+export function parseIncrementalPerf(text) {
+  const src = String(text ?? "");
+  const hit = /PERF incremental-compile n=(\d+) files=(\d+) min=(\d+) p50=(\d+) max=(\d+) mean=(\d+)/.exec(src);
+  if (hit) {
+    const [, n, files, min, p50, max, mean] = hit.map(Number);
+    return { ok: true, n, files, min, p50, max, mean };
+  }
+  const failed = /PERF incremental-compile failed: (.+)/.exec(src);
+  if (failed) return { ok: false, reason: `编译失败：${failed[1].trim().slice(0, 120)}` };
+  const skipped = /跳过：(.+)/.exec(src);
+  if (skipped) return { ok: false, reason: skipped[1].trim().slice(0, 120) };
+  return { ok: false, reason: "没拿到 PERF incremental-compile 行（测试没跑起来？）" };
 }
 
 /**
@@ -110,12 +130,12 @@ export function splitIndexRound(round) {
 }
 
 /**
- * 把四路输入拼成一张表。任何一路缺席都不影响其余行。
+ * 把五路输入拼成一张表。任何一路缺席都不影响其余行。
  *
- * @param {{ecj?: object|null, gaps?: object|null, index?: object|null, boot?: object|null}} inputs
+ * @param {{ecj?: object|null, incremental?: object|null, gaps?: object|null, index?: object|null, boot?: object|null}} inputs
  */
 export function buildRows(inputs = {}) {
-  const { ecj = null, gaps = null, index = null, boot = null } = inputs;
+  const { ecj = null, incremental = null, gaps = null, index = null, boot = null } = inputs;
   const latency = gaps?.diagnosticsLatency ?? {};
   const valueOf = {
     boot: () => num(boot?.firstFrameMs),
@@ -124,7 +144,7 @@ export function buildRows(inputs = {}) {
     completion: () => num(gaps?.completion?.p50Ms),
     bigfile: () => num(latency.bigFileMs),
     "bigfile-completion": () => num(latency.bigFileCompletionP50Ms),
-    incremental: () => null,
+    incremental: () => (incremental?.ok ? num(incremental.p50) : null),
   };
   const noteOf = {
     boot: () => (boot ? `日志里 ${boot.runs} 次启动，取最后一次` : "需真机跑一次，把 stderr 存成文件后 --boot-log=<路径>"),
@@ -133,13 +153,16 @@ export function buildRows(inputs = {}) {
       const fresh = splitIndexRound((index.rounds ?? []).find((r) => r.label === "fresh"));
       // 只报拆分后的两段，不报「缓存节省 X ms」：那个差值主要来自 OSGi 引导，不是索引。
       const seg = fresh.boot === null ? "" : `（引导 ${fresh.boot} + 索引 ${fresh.progress}）`;
-      return `${index.fileCount ?? "?"} 个 java${seg}；冷热差异在引导段，别当缓存收益`;
+      const scope = index.mode === "root" ? `真实工程 ${index.projects?.length ?? "?"} 个 IProject` : "fixture";
+      return `${scope} · ${index.fileCount ?? "?"} 个 java${seg}；冷热差异在引导段，别当缓存收益`;
     },
     compile: () => (ecj?.ok ? `n=${ecj.n}，${ecj.min}~${ecj.max} ms` : (ecj?.reason ?? "跑 --only=compile")),
     completion: () => (gaps ? `冷 ${num(gaps.completion?.coldMs) ?? "?"} ms，n=${gaps.completion?.samples ?? 0}` : "跑 npm run test:editor-gaps"),
     bigfile: () => (gaps ? `${latency.bigFileLines ?? "?"} 行` : "跑 npm run test:editor-gaps"),
     "bigfile-completion": () => (gaps ? "降级只关 quickSuggestions，`.` 与 Ctrl+Space 仍在" : "跑 npm run test:editor-gaps"),
-    incremental: () => "未接探针：ecj 只覆盖单文件，改 3 个文件的流程还没打点",
+    incremental: () => (incremental?.ok
+      ? `n=${incremental.n}，${incremental.files} 文件，${incremental.min}~${incremental.max} ms`
+      : (incremental?.reason ?? "跑 --only=incremental")),
   };
   return CHANNELS.map((c) => {
     const value = valueOf[c.id]();

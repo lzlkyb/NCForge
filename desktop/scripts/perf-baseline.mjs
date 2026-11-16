@@ -6,11 +6,12 @@
  * 拿来卡 CI 只会让人去调阈值。所以**本地一键出表、CI 不跑**；表里的目标值只作判定，
  * 不作为退出码依据（除非显式 --strict）。
  *
- * 三路探针各跑各的，谁缺席就标未测：
- *   compile → cargo 的 `单文件编译_p50`（#[ignore]，要显式点名）
- *   gaps    → code-editor-gaps-live.mjs（补全 p50 / 诊断延迟 / 大文件）
- *   index   → lang-index-bench.mjs（首次导入 / 缓存复用 / 排除产物目录）
- *   boot    → 只能从真机日志读，用 --boot-log=<文件> 传进来
+ * 各路探针各跑各的，谁缺席就标未测：
+ *   compile     → cargo 的 `单文件编译_p50`（#[ignore]，要显式点名）
+ *   incremental → cargo 的 `增量编译_p50`（#[ignore]，1–5 文件走常驻 worker）
+ *   gaps        → code-editor-gaps-live.mjs（补全 p50 / 诊断延迟 / 大文件）
+ *   index       → lang-index-bench.mjs（首次导入 / 缓存复用 / 排除产物目录）
+ *   boot        → 只能从真机日志读，用 --boot-log=<文件> 传进来
  *
  * 用法（在 desktop/ 下）：
  *   npm run test:perf                          # 三路全跑（约 5~10 分钟）
@@ -30,7 +31,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildRows, formatTable, parseBootLog, parseEcjPerf, summarize } from "./lib/perf-baseline.mjs";
+import { buildRows, formatTable, parseBootLog, parseEcjPerf, parseIncrementalPerf, summarize } from "./lib/perf-baseline.mjs";
 
 const desktop = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /**
@@ -128,6 +129,19 @@ if (wanted("compile") && !REUSE) {
   ecj = readJson("perf-ecj.json");
 }
 
+// —— incremental：1–5 文件增量编译。与 compile 分开两条 Rust 测试，数字不互相顶替。
+let incremental = null;
+if (wanted("incremental") && !REUSE) {
+  const { out } = run("1–5 文件增量编译 p50（ecj 常驻 worker）", process.execPath, [
+    "scripts/rust-gate.mjs", "test", "--lib", "--", "--ignored", "增量编译_p50", "--nocapture",
+  ]);
+  incremental = parseIncrementalPerf(out);
+  writeFileSync(join(base, "perf-incremental.json"), JSON.stringify({ generatedAt: new Date().toISOString(), ...incremental }, null, 2));
+  if (!incremental.ok) console.log(`   ⚠️ ${incremental.reason}`);
+} else {
+  incremental = readJson("perf-incremental.json");
+}
+
 // —— gaps：补全 p50 与大文件代价。
 if (wanted("gaps") && !REUSE) {
   run("补全 / 诊断 / 大文件（jdt.ls 真机）", process.execPath, ["scripts/code-editor-gaps-live.mjs"]);
@@ -152,7 +166,7 @@ if (bootLog) {
 }
 if (boot) writeFileSync(join(base, "perf-boot.json"), JSON.stringify(boot, null, 2));
 
-const rows = buildRows({ ecj, gaps, index, boot });
+const rows = buildRows({ ecj, incremental, gaps, index, boot });
 const table = formatTable(rows);
 const sum = summarize(rows);
 
@@ -163,7 +177,7 @@ if (boot?.stages && Object.keys(boot.stages).length) {
   console.log(`启动分段：${Object.entries(boot.stages).map(([k, v]) => `${k} ${v} ms`).join(" / ")}`);
 }
 
-const report = { generatedAt: new Date().toISOString(), rows, summary: sum, inputs: { ecj, gaps, index, boot } };
+const report = { generatedAt: new Date().toISOString(), rows, summary: sum, inputs: { ecj, incremental, gaps, index, boot } };
 const outJson = join(base, "perf-baseline.json");
 const outMd = join(base, "perf-baseline.md");
 writeFileSync(outJson, JSON.stringify(report, null, 2));

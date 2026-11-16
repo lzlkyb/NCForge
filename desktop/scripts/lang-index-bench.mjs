@@ -13,6 +13,10 @@
 //
 // 跑法：node scripts/lang-index-bench.mjs [--files=600]
 //       node scripts/lang-index-bench.mjs --files=600 --skip-old
+//       node scripts/lang-index-bench.mjs --root=D:/NC65/nc65newwork   # 真实工程，只读
+//
+// 🔴 --root 模式对真实工程**只读**：jdt.ls 的 -data / config 全写探针自己的临时
+//    目录，绝不往用户工程落任何东西。--root 与 --files 互斥（真实工程不造盘）。
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -20,6 +24,8 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmdirSync, sta
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+
+import { countJava, resolveRoot } from './lib/lang-index-root.mjs';
 
 const desktop = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ls = process.env.NCFORGE_JDTLS_DIR ?? join(desktop, 'src-tauri/resources/jdtls');
@@ -37,6 +43,17 @@ const arg = (name, fallback) => {
 };
 const FILE_COUNT = arg('files', 600);
 const SKIP_OLD = process.argv.includes('--skip-old');
+const ROOT_RAW = (() => {
+  const hit = process.argv.find((a) => a.startsWith('--root='));
+  return hit ? hit.slice('--root='.length) : null;
+})();
+// --root 与 --files 互斥：真实工程不造盘，--files 没有意义。
+if (ROOT_RAW !== null && process.argv.some((a) => a.startsWith('--files='))) {
+  console.error('--root 与 --files 不能同时用：真实工程不造 fixture');
+  process.exit(1);
+}
+// 真实工程入口：解析失败立刻退出（别静默拿空索引冒充测过）。
+const ROOT = ROOT_RAW !== null ? resolveRoot(ROOT_RAW) : null;
 
 // 与 `lsp.rs::IMPORT_EXCLUSIONS` 保持一致；两边不一致时以 Rust 为准（这里是探针）。
 const NEW_EXCLUSIONS = ['**/.svn/**', '**/.git/**', '**/classes/**', '**/bin/**', '**/hotwebs/**', '**/nclogs/**', '**/temp/**', '**/backup/**'];
@@ -63,8 +80,13 @@ function forceRemove(dir) {
   try { rmdirSync(dir); } catch { /* 非空或已删 */ }
 }
 
-const project = join(fixture, 'bench');
+// fixture 模式：project 是临时工作副本。root 模式：project 指向真实工程（只读），
+// workspaceFolders 用它下面的各 IProject。两种模式的 -data/config 都在 fixture 里。
+const project = ROOT ? ROOT.root : join(fixture, 'bench');
 const srcRoot = join(project, 'src/bench');
+const folders = ROOT
+  ? ROOT.projects.map((p) => ({ uri: pathToFileURL(p).href, name: p.split(/[\\/]/).pop() }))
+  : [{ uri: pathToFileURL(project).href, name: 'bench' }];
 
 /** 造工作副本：源码 + 每层 `.svn` + NC 自带的大目录（`hotwebs` / `nclogs` / `classes`）。 */
 function makeProject() {
@@ -162,7 +184,7 @@ function runOnce({ label, exclusions, dataDir }) {
       if (message.id !== undefined && message.method) {
         const result = message.method === 'workspace/configuration'
           ? (message.params?.items ?? []).map(() => settings)
-          : message.method === 'workspace/workspaceFolders' ? [{ uri: rootUri, name: 'bench' }] : null;
+          : message.method === 'workspace/workspaceFolders' ? folders : null;
         send({ jsonrpc: '2.0', id: message.id, result });
       } else if (message.id !== undefined) {
         const item = pending.get(message.id);
@@ -183,7 +205,7 @@ function runOnce({ label, exclusions, dataDir }) {
     try {
       await request('initialize', {
         processId: process.pid, rootUri, rootPath: project,
-        workspaceFolders: [{ uri: rootUri, name: 'bench' }],
+        workspaceFolders: folders,
         capabilities: { workspace: { workspaceFolders: true, configuration: true, applyEdit: false }, textDocument: { publishDiagnostics: {}, completion: {} } },
         initializationOptions: { settings, extendedClientCapabilities: { classFileContentsSupport: true } },
       });
@@ -204,11 +226,27 @@ function runOnce({ label, exclusions, dataDir }) {
   })();
 }
 
-const report = { generatedAt: new Date().toISOString(), fileCount: FILE_COUNT, rounds: [] };
+const report = {
+  generatedAt: new Date().toISOString(),
+  mode: ROOT ? 'root' : 'fixture',
+  fileCount: ROOT ? countJava(ROOT.projects) : FILE_COUNT,
+  rounds: [],
+};
+if (ROOT) {
+  report.root = ROOT.root;
+  report.projects = ROOT.projects.map((p) => p.split(/[\\/]/).pop());
+  report.readOnly = true; // -data/config 全在 fixture 临时目录，真实工程零写入
+}
 try {
   const t = Date.now();
-  makeProject();
-  console.log(`fixture：${FILE_COUNT} 个 java + .svn×40 + hotwebs×300 + nclogs×40 + classes×200，造盘 ${Date.now() - t} ms`);
+  if (ROOT) {
+    console.log(`真实工程（只读）：${ROOT.root}`);
+    console.log(`   ${ROOT.projects.length} 个 IProject（${report.projects.join('、')}），共 ${report.fileCount} 个 java`);
+    console.log(`   -data/config 写临时目录 ${fixture}，不碰工程本身`);
+  } else {
+    makeProject();
+    console.log(`fixture：${FILE_COUNT} 个 java + .svn×40 + hotwebs×300 + nclogs×40 + classes×200，造盘 ${Date.now() - t} ms`);
+  }
 
   const freshData = join(fixture, 'data-fresh');
   const oldData = join(fixture, 'data-old');
