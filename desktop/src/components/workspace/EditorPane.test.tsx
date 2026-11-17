@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
     onDidDispose: vi.fn(),
     onKeyDown: vi.fn(() => ({ dispose: vi.fn() })),
     onDidChangeCursorPosition: vi.fn(),
+    // 光标 / 滚动的视图现场会写盘（`lib/editorViews`）：挂载时会订阅滚动
+    onDidScrollChange: vi.fn(() => ({ dispose: vi.fn() })),
     // 自动保存（内容变化）与 Error Lens（装饰集合 + 切 model）也要有人应答，
     // 否则挂载即炸：这两个入口是随编辑器偏好一起加的
     onDidChangeModelContent: vi.fn(() => ({ dispose: vi.fn() })),

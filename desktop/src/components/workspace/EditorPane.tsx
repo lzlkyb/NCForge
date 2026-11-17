@@ -3,6 +3,7 @@ import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { javaSuggestOptions } from "../../lib/javaSuggestOptions";
 import { getModel, pathOfModel, touchModel, onModelLifecycle } from "../../lib/editorStore";
 import { readGroupView, storeGroupView } from "../../lib/editorGroupViews";
+import { createViewReporter, pickRestoreView } from "../../lib/editorViews";
 import type { EditorGroupId } from "../../lib/editorGroups";
 import { registerLangProviders } from "../../lib/langProviders";
 import { registerExtraLangProviders } from "../../lib/langProvidersExtra";
@@ -49,6 +50,8 @@ interface Props {
 }
 
 type Editor = ReturnType<typeof monaco.editor.create>;
+/** `monaco.editor.ICodeEditorViewState`——从实例方法上取，免得依赖 monaco 的全局命名空间可用。 */
+type EditorViewState = Parameters<Editor["restoreViewState"]>[0];
 
 /**
  * Monaco 编辑器。整个组件只创建一个编辑器实例，切换标签页 = 换 model（见 lib/editorStore），
@@ -64,6 +67,8 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
   onSaveRef.current = onSave;
   onCursorRef.current = onCursor;
   const focusRef = useRef({ focused, onFocus, groupId }); focusRef.current = { focused, onFocus, groupId };
+  // 视图现场的上报器要跨 effect 用（切文件那个 effect 里也要落一次）
+  const reporterRef = useRef<ReturnType<typeof createViewReporter> | null>(null);
 
   // 创建一次
   useEffect(() => {
@@ -101,7 +106,19 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     const saveNow = () => onSaveRef.current(() => formatBeforeSave(editor));
     // 键位表与按键分发在创建时装配一次，独立成模块；这里只管订阅与清理。
     const keyboard = registerEditorBindings(editor, saveNow);
-    editor.onDidChangeCursorPosition((e) => onCursorRef.current(e.position.lineNumber, e.position.column));
+    // 视图现场（光标 / 滚动）写盘，节流 300ms。少了这条，「停在某个文件里直接关窗口」
+    // 就什么都留不下——只在切文件时保存的那份覆盖不到最常见的一种退出方式。
+    const reporter = createViewReporter();
+    reporterRef.current = reporter;
+    const captureView = () => {
+      const model = editor.getModel();
+      reporter.report((model ? pathOfModel(model) : null) ?? null, () => editor.saveViewState());
+    };
+    editor.onDidChangeCursorPosition((e) => {
+      onCursorRef.current(e.position.lineNumber, e.position.column);
+      captureView();
+    });
+    const scrollSub = editor.onDidScrollChange(captureView);
     // 记录编辑位置（Ctrl+Shift+Backspace 用）+ 自动保存（可关，默认关）。
     // 两件事都在内容变化时触发，合并一个订阅：拆成两个会让每次按键多一次回调。
     let autoSaveTimer: number | undefined;
@@ -149,7 +166,15 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       focusSub.dispose();
       releaseCurrentEditor(editor);
       // 注意只销毁编辑器实例，model 留在 editorStore（切到别的页签再回来还在）。
-      if (shownRef.current) storeGroupView(focusRef.current.groupId, shownRef.current, editor.saveViewState());
+      const lastView = editor.saveViewState();
+      if (shownRef.current) {
+        storeGroupView(focusRef.current.groupId, shownRef.current, lastView);
+        // 内存里的视图会随进程消失，这里同步落一份到磁盘（跨重启恢复用）
+        reporter.flush(shownRef.current, () => lastView);
+      }
+      reporter.dispose();
+      reporterRef.current = null;
+      scrollSub.dispose();
       keyboard.dispose();
       editor.dispose();
       editorRef.current = null;
@@ -168,7 +193,10 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     const editor = editorRef.current;
     if (!editor) return;
     if (shownRef.current && shownRef.current !== activePath) {
-      storeGroupView(focusRef.current.groupId, shownRef.current, editor.saveViewState());
+      const last = editor.saveViewState();
+      storeGroupView(focusRef.current.groupId, shownRef.current, last);
+      // 上一个文件的位置立刻落内存，别等 300ms 节流（切完可能马上就是别的页了）
+      reporterRef.current?.flush(shownRef.current, () => last);
     }
     const model = activePath ? getModel(activePath) : undefined;
     editor.setModel(model ?? null);
@@ -177,8 +205,9 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       // 预览身份（peek 队列里）的模型被显示时保活：转正路径已摘牌，这里是二道网，
       // 免得正在看的这个正好是下一个被淘汰的
       touchModel(activePath);
-      const vs = readGroupView(focusRef.current.groupId, activePath);
-      if (vs) editor.restoreViewState(vs);
+      // 同一次运行里切回来用内存；进程重启后内存是空的，退到磁盘快照
+      const vs = pickRestoreView(readGroupView(focusRef.current.groupId, activePath), activePath);
+      if (vs) editor.restoreViewState(vs as EditorViewState);
       // 恢复视图不会触发 onDidChangeCursorPosition，切页回来时状态栏会停在「第 1 行」。
       // 这里主动把恢复后的位置报上去。
       const pos = editor.getPosition();

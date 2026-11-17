@@ -85,9 +85,17 @@ export function useTabPersistence(
   }, [root, tabs, activePath, splitPath]);
   // 卸载时补写一次。文件页是按 tab 切的，切走那一刻现场必须落盘——否则
   // 「开/关标签后立刻切页再退出」会丢掉最后 400ms 内的改动，重启后标签少几条。
-  useEffect(() => () => {
-    const v = latest.current;
-    if (v.root) saveTabSnapshot(v.root, { tabs: v.tabs.map((x) => x.path), activePath: v.activePath, splitPath: v.splitPath });
+  //
+  // 🔴 `pagehide` 是另一条路，不能省：进程被强杀 / 关窗口时 React 的清理函数不一定
+  // 有机会跑（WebView 直接没了），那一笔防抖里的改动就永远丢了。`dbHistory` 与
+  // `editorViews` 都是同一套写法。
+  useEffect(() => {
+    const flush = () => {
+      const v = latest.current;
+      if (v.root) saveTabSnapshot(v.root, { tabs: v.tabs.map((x) => x.path), activePath: v.activePath, splitPath: v.splitPath });
+    };
+    window.addEventListener("pagehide", flush);
+    return () => { window.removeEventListener("pagehide", flush); flush(); };
   }, []);
 }
 
