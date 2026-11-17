@@ -56,6 +56,7 @@
     "states:audit": "node scripts/three-states-report.mjs",
     "visual:update": "node scripts/visual-baseline.mjs --update",
     "visual:check": "node scripts/visual-baseline.mjs",
+    "modals:audit": "node scripts/modal-width-audit.mjs",
     "ui:check": "node scripts/check-ui-contract.mjs",
     "ui:update": "node scripts/check-ui-contract.mjs --update",
     "bundle:check": "node scripts/check-bundle-size.mjs",
