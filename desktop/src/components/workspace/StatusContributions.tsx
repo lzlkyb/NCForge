@@ -11,6 +11,13 @@ import { openLinkedDialog } from "../../lib/linkedDialog";
 import { Icon } from "../ui/icon";
 import { Menu, MenuItem } from "../ui/Menu";
 import { PrimarySessionSummary } from "../db/PrimarySessionSummary";
+import { invoke } from "../../lib/tauri";
+
+/** 与 Rust 侧 `diagnostics_cmds::CrashSummary` 对应。 */
+interface CrashSummary {
+  startedAtMs: number;
+  tail: string;
+}
 
 /**
  * 状态栏的各页贡献。
@@ -65,6 +72,15 @@ export function StatusContributions({ activeTool }: { activeTool: string }) {
       (!!a && !!b && a.connId === b.connId && a.name === b.name && a.status === b.status && JSON.stringify(a.pending) === JSON.stringify(b.pending) && a.running === b.running),
   );
 
+  // 上次运行崩过才提示：`crash_summary` 只在**确有 panic 记录**时返回非空，
+  // 断电/强杀留下的空标记不报（详见 `crash.rs` 头注释）。只查一次，staleTime 无穷。
+  const crash = useQuery({
+    queryKey: ["crash-summary"],
+    queryFn: () => invoke<CrashSummary | null>("crash_summary"),
+    staleTime: Infinity,
+    retry: false,
+  });
+
   const locateSession = (session: PendingDbSession) => {
     if (!db?.connId) return;
     if (!session.tabId) { setPrimaryConn(db.connId); return; }
@@ -84,6 +100,20 @@ export function StatusContributions({ activeTool }: { activeTool: string }) {
 
   return (
     <>
+      {/* 崩溃提示排最前：它是「上次发生了什么」的唯一线索，比编译/问题更该被看见。
+          点击去设置页导出诊断包——不要要求用户自己去某个目录里挑文件。 */}
+      {crash.data && (
+        <button
+          type="button"
+          className="wb-status-chip"
+          data-tone="bad"
+          title={`上次运行发生了后端崩溃（${new Date(crash.data.startedAtMs).toLocaleString()}）。点击去设置导出诊断包`}
+          onClick={() => window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "settings" }))}
+        >
+          <span className="wb-status-dot" data-tone="bad" />
+          上次崩溃
+        </button>
+      )}
       {compiling && (
         <button
           type="button"

@@ -10,9 +10,15 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ svnStatus: vi.fn(), svnInfo: vi.fn(), openLinkedDialog: vi.fn() }));
+const mocks = vi.hoisted(() => ({ svnStatus: vi.fn(), svnInfo: vi.fn(), openLinkedDialog: vi.fn(), invoke: vi.fn() }));
 vi.mock("../../lib/svn", () => ({ svnStatus: mocks.svnStatus, svnInfo: mocks.svnInfo }));
 vi.mock("../../lib/linkedDialog", () => ({ openLinkedDialog: mocks.openLinkedDialog }));
+// 状态栏会查一次 `crash_summary`；默认「上次没崩」。
+vi.mock("../../lib/tauri", () => ({
+  invoke: mocks.invoke,
+  invokeOrToast: vi.fn(),
+  listen: vi.fn(() => Promise.resolve(() => {})),
+}));
 
 import { StatusContributions } from "./StatusContributions";
 import { getSession, setSession } from "../../lib/workspaceSession";
@@ -42,6 +48,8 @@ beforeEach(() => {
   window.addEventListener("ncforge-navigate", nav);
   mocks.svnStatus.mockReset();
   mocks.svnInfo.mockReset();
+  mocks.invoke.mockReset();
+  mocks.invoke.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -200,8 +208,21 @@ describe("状态栏贡献", () => {
     expect(el.textContent).toContain("查询中");
   });
 
-  it("汇总当前连接的主会话和独立槽，同槽去重并可定位单个标签", () => {
-    const first = openSqlTab("c1");
+  it("上次崩过才露出崩溃胶囊，点击去设置导出诊断包", async () => {
+    // 「没崩过时不显示」由其余用例隐含覆盖：它们的 `invoke` 都返回 null，
+    // 且没有任何一条出现过「上次崩溃」。
+    mocks.invoke.mockResolvedValue({ startedAtMs: Date.now() - 60_000, tail: "thread 'x' panicked at src/db_rust.rs:1:1" });
+    const el = render("files");
+    await flush();
+
+    const chip = button(el, "上次崩溃") as HTMLButtonElement;
+    expect(chip).toBeTruthy();
+    expect(chip.dataset.tone).toBe("bad");
+    act(() => chip.click());
+    expect((nav.mock.calls[nav.mock.calls.length - 1][0] as CustomEvent).detail).toBe("settings");
+  });
+
+  it("汇总当前连接的主会话和独立槽，同槽去重并可定位单个标签", () => {    const first = openSqlTab("c1");
     const sameSlot = openSqlTab("c1");
     const second = openSqlTab("c1");
     const other = openSqlTab("c2");

@@ -70,9 +70,15 @@
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
-  --radius: var(--radius);
+  /* 🔴 2026-11-17 统一：`rounded` 此前指向 `:root` 的 `--radius: 0.375rem`（恒 6px），
+     而 `rounded-md`/`rounded-lg` 指向 `--r-control`（随外观档 6/8px）——同一个「普通控件」
+     两种类给出两种圆角，glass 档下差 2px。DESIGN.md §5 记的最后一条真几何债。
+     现在四档全部走 `--r-control`：classic 6px、glass 8px，改一档只动几何矩阵。
+     ⚠️ `:root` 的 `--radius` 保留不删：`notice.tsx:59,207` 还在用
+     `calc(var(--radius)+2px/3px)` 做「比控件略大」的相对表达，删了会失效。 */
+  --radius: var(--r-control);
 
-  /* 已确认的一体化工作台：普通控件 6px，菜单与弹窗按角色使用独立档位。 */
+  /* 已确认的一体化工作台：普通控件走 --r-control，菜单与弹窗按角色使用独立档位。 */
   --radius-md: var(--r-control);
   --radius-lg: var(--r-control);
   --radius-xl: var(--r-dialog);
@@ -1003,6 +1009,31 @@ pre, code, .font-mono { font-variant-ligatures: none; }
 .app-main {
   min-width: 0;
   min-height: 0;
+  /* 程序化聚焦（跳过导航后）不该在内容区画一圈焦点环——焦点环是给「还能按 Tab 走」的元素用的。 */
+  outline: none;
+}
+
+/* 跳到主内容（WCAG 2.4.1）。
+   🔴 用 transform 移出视口而不是 display:none / visibility:hidden：后者会让链接
+   拿不到焦点，Skip link 就彻底失效了（这是最常见的实现错误）。 */
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 2000;
+  padding: 6px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-control);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  transform: translateY(-200%);
+  transition: transform var(--dur) var(--ease-standard);
+}
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
 }
 .app-side[data-collapsed] .app-side-head { justify-content: center; padding: 0; }
 .app-side[data-collapsed] .app-side-brand { display: none; }

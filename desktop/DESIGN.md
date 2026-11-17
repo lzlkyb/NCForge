@@ -156,12 +156,14 @@ UI 不得暗示"已保存 / 已提交 / 已完成"，除非有证据。
 
 | 项 | 现状 | 目标 |
 |---|---|---|
-| `rounded` 用 `--radius`(6px)，`rounded-md` 用 `--r-control`(8px) | 两者不一致 | 统一到 `--r-control`，随档位变化 |
+| `rounded` 与 `rounded-md` 圆角不一致 | **已统一**（2026-11-17）：`index.css:79` 的 `--radius` 从恒 `0.375rem` 改为 `var(--r-control)`，四类（`rounded`/`-md`/`-lg` 及 `notice.tsx` 的 `calc`）现在同源。实测 2 外观档 × 3 密度档 6 组全为 8px；红灯验证（退回 6px）6/6 组精确报不一致 | 保持。⚠️ `:root` 的 `--radius: 0.375rem` **保留不删**：`notice.tsx:59,207` 用 `calc(var(--radius)+2px/3px)` 做相对表达 |
 | 裸色值 | **0 处**（2026-11-16 清零，基线置空） | 保持 0，新增即红 |
 | `--r-{shell,pane,work,inset}` | 仅 material 档有意义 | 保持，但文档化（已在矩阵区） |
 | 弹层宽度 | **已收敛**（2026-11-17）：迁移前 16 种宽度、四套体系，现统一取 `--w-modal-*` 六档 | 保持，`tokens:check` 强制；新增弹层只挑档位 |
-| `InfoPopover` | 零引用 | 删除 |
+| `InfoPopover` | ~~零引用~~ 🔴 **2026-11-17 复核：判定错误，有 3 处真实引用，删了会坏**。`SettingsRow.tsx:3,68` 与 `ToggleRow.tsx:4,63` 都 import 并渲染（`info` 属性走它）；`App.tsx:299` 的注释还依赖它「非模态 `role=dialog`」这一特性 | **撤销「删除」目标，保持**。它是非模态浮层，`Modal` 不能替代 |
 | 弹层组件关系 | `Modal` 是唯一原语；`Dialog` 只是它的 sm 档预设（曾误标为「两代并存」） | 保持；`Menu` 无替代实现，同样保持 |
+| 空/载/错三态 | **已全绿**（2026-11-17 实跑 `npm run states:audit`：「所有含数据请求的组件都具备空/载/错三态」，0 候选） | 保持；新增数据请求组件必须同时给三态 |
+| 视觉基线 | **已生成**（2026-11-17，`24e07d2`）：`visual-baseline/` 六张 PNG（classic 三档 + glass 明暗） | 保持；改几何/密度后复跑比对 |
 
 ---
 

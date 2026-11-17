@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { JavaSymbolIcon } from "./JavaSymbolIcon";
 import { TreeTypeMarker } from "./TreeTypeMarker";
 import { TreeRowNote } from "./TreeRow";
+import { treeRowInset } from "./treeRowInset";
 import { javaSymbolKind } from "../../lib/treeFileKind";
 import { treeRowId } from "../../lib/treeNav";
 import type { TreeMembers, JavaTreeMember } from "../../lib/javaTreeMembers";
@@ -14,7 +15,7 @@ export function JavaMemberRows({ state, depth, selected, onJump }: {
 }) {
   if (state.status !== "ready" || !state.rows.length) {
     const note = state.status === "loading" ? "正在读取 Java 成员…" : state.status === "error" ? "无法读取成员，收起后可重试。" : "未识别到声明";
-    return <TreeRowNote padLeft={26 + depth * 14}>{note}</TreeRowNote>;
+    return <TreeRowNote padLeft={treeRowInset(depth, true, true)}>{note}</TreeRowNote>;
   }
   const parents = new Set(state.rows.map(member => member.parent));
   return <>{state.rows.map(member => {
@@ -26,7 +27,7 @@ export function JavaMemberRows({ state, depth, selected, onJump }: {
       aria-description={`${kind.label}，第 ${member.line} 行`}
       data-selected={selected === member.id || undefined}
       title={`${member.name} · ${kind.label} · 第 ${member.line} 行`}
-      style={{ "--wb-tree-pad": `${26 + (depth + member.depth) * 14}px` } as CSSProperties}
+      style={{ "--wb-tree-pad": `${treeRowInset(depth + member.depth, true, true)}px` } as CSSProperties}
       onClick={() => onJump(member)}>
       {kind.badge ? <TreeTypeMarker kind={kind} /> : <JavaSymbolIcon kind={member.kind} />}
       <span className="wb-row-name">{member.name}</span>

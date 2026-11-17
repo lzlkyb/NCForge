@@ -14,12 +14,13 @@ export function problemDescription(mark?: ProblemMark): string {
   ].filter(Boolean).join(" · ");
 }
 
-export function ProblemBadge({ mark, path, name, scope = "file", tabStop }: {
+export function ProblemBadge({ mark, path, name, scope = "file", tabStop, compact }: {
   mark?: ProblemMark;
   path: string;
   name: string;
   scope?: ProblemPathScope;
   tabStop?: boolean;
+  compact?: boolean;
 }) {
   if (!mark) return null;
   const severity = mark.errors ? "error" : "warning";
@@ -34,6 +35,6 @@ export function ProblemBadge({ mark, path, name, scope = "file", tabStop }: {
         <circle cx="8" cy="8" r="6" /><path d="m6 6 4 4m0-4-4 4" />
       </svg>
     ) : <Icon name="alertTriangle" size={12} />}
-    {scope === "file" && (total > 99 ? "99+" : total)}
+    {scope === "file" && !compact && (total > 99 ? "99+" : total)}
   </button>;
 }

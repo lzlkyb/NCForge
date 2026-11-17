@@ -158,6 +158,23 @@ describe("标签键盘与子按钮",()=>{  it.each(["Enter"," "])("关闭按钮�
     expect(e.defaultPrevented).toBe(false);expect(onSelect).not.toHaveBeenCalled();
     act(()=>x.click());expect(onClose).toHaveBeenCalledOnce();expect(onSelect).not.toHaveBeenCalled();
   });
+
+  it("标签切换只滚动当前编辑器组，超宽标签从文件名开头显示", () => {
+    const tabs = [tab("C:\\w\\A.java"), tab("C:\\w\\B.java"), tab("C:\\w\\VeryLongServiceImplementation.java")];
+    render(tabs, tabs[0].path);
+    const strip = container.querySelector<HTMLElement>(".wb-tabs-scroll")!;
+    const rows = Array.from(strip.querySelectorAll<HTMLElement>("[role=tab]"));
+    Object.defineProperty(strip, "clientWidth", { value: 220 });
+    vi.spyOn(strip, "getBoundingClientRect").mockReturnValue(new DOMRect(400, 20, 220, 30));
+    vi.spyOn(rows[1], "getBoundingClientRect").mockImplementation(() => new DOMRect(720 - strip.scrollLeft, 20, 180, 30));
+    vi.spyOn(rows[2], "getBoundingClientRect").mockImplementation(() => new DOMRect(920 - strip.scrollLeft, 20, 330, 30));
+
+    render(tabs, tabs[1].path);
+    expect(strip.scrollLeft).toBe(288);
+    render(tabs, tabs[2].path);
+    expect(strip.scrollLeft).toBe(520);
+    expect(rows[2].querySelector(".wb-tab-name")?.textContent).toBe("VeryLongServiceImplementation.java");
+  });
   it("标签自身方向键漫游仍生效，组合输入不选中",()=>{
     render([tab("C:\\w\\A.java"),tab("C:\\w\\B.java")],"C:\\w\\A.java");
     const row=container.querySelector<HTMLElement>('[role="tab"]')!;

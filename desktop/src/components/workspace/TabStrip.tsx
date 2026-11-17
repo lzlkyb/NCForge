@@ -91,12 +91,23 @@ export function TabStrip({
     const el = activePath ? tabRefs.current.get(activePath) : null;
     const strip = el?.parentElement;
     if (!el || !strip) return;
-    // offsetLeft 相对最近的定位祖先（`.wb-editor-groups`），而 scrollLeft 相对滚动容器：
-    // 分屏时两者差了一个左组的宽度，直接用会把标签滚过头。减去容器自身的 offsetLeft 归一。
-    const left = el.offsetLeft - strip.offsetLeft;
-    const right = left + el.offsetWidth;
-    if (left < strip.scrollLeft) strip.scrollLeft = Math.max(0, left - 8);
-    else if (right > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = right - strip.clientWidth + 8;
+    const reveal = () => {
+      const width = strip.clientWidth;
+      if (!width) return;
+      const tab = el.getBoundingClientRect();
+      const left = tab.left - strip.getBoundingClientRect().left - strip.clientLeft;
+      const right = left + tab.width;
+      // A tab wider than its split can only show one end at a time. Start with the filename's beginning.
+      if (tab.width > width) strip.scrollLeft += left;
+      else if (left < 0) strip.scrollLeft += left - 8;
+      else if (right > width) strip.scrollLeft += right - width + 8;
+    };
+    reveal();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(reveal);
+    observer.observe(strip);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [activePath, tabs.length]);
 
   const onTabKey = (e: ReactKeyboardEvent<HTMLDivElement>, i: number, path: string) => {
@@ -127,7 +138,7 @@ export function TabStrip({
     const target = tabs[next];
     onSelect(target.path);
     dock?.showCode();
-    tabRefs.current.get(target.path)?.focus();
+    tabRefs.current.get(target.path)?.focus({ preventScroll: true });
   };
 
   const closeMany = (want: (t: TabMeta, index: number) => boolean) => {

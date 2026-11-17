@@ -378,6 +378,9 @@ function AppContent() {
 
   return (
     <div className="app-shell flex h-screen flex-col overflow-hidden">
+      {/* WCAG 2.4.1：键盘用户不必逐个 Tab 过侧栏 8 个入口才够到内容。
+          放在 shell 最前，顺序即「第一个可聚焦元素」。 */}
+      <a href="#main" className="skip-link">跳到主要内容</a>
       <Header
         onOpenPalette={() => openPalette("file")}
         activeTool={activeTab}
@@ -392,7 +395,7 @@ function AppContent() {
           onToggleRail={toggleRail}
           navItems={navItems}
         />
-        <main className="app-main page-transition flex min-h-0 min-w-0 flex-col">
+        <main id="main" tabIndex={-1} className="app-main page-transition flex min-h-0 min-w-0 flex-col">
           {/* active 只经 context 下发：切页不重建 toolPanels（P2-20）。 */}
           <ActiveTabContext.Provider value={activeTab}>
             <WorkbenchShell activeTab={activeTab} tool={toolPanels} />
