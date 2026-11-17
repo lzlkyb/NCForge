@@ -160,6 +160,14 @@ export function StatusContributions({ activeTool }: { activeTool: string }) {
           {ready.changes.ignored > 0 ? ` · 忽略 ${ready.changes.ignored}` : ""}
         </span>
       )}
+      {/* 扫描失败必须有可见信号：胶囊静默消失，用户会把它读成「0 个改动」。
+          R6「不得暗示已完成」——这属于用缺席冒充结果。 */}
+      {svnOn && svn.isError && !ready && (
+        <span className="wb-status-chip" data-tone="bad" title={String(svn.error)}>
+          <span className="wb-status-dot" data-tone="bad" />
+          改动读取失败
+        </span>
+      )}
       {svnOn && !ready && svn.isFetching && (
         <span className="wb-status-chip" data-tone="busy">
           <span className="wb-status-dot" data-tone="busy" />

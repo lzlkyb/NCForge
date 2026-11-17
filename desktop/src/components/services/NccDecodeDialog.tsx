@@ -80,7 +80,7 @@ export function NccDecodeDialog({ open, onClose }: { open: boolean; onClose: () 
       open={open}
       onClose={onClose}
       ariaLabel="NCC/BIP 报文解密"
-      className="modal-surface w-[900px] max-w-[94vw] p-5"
+      className="modal-surface w-[var(--w-modal-xl)] p-5"
     >
       <div className="flex items-center gap-2">
         <Icon name="key" size={15} />

@@ -1,6 +1,6 @@
 /* Range and actions stay visible while settings and the real preview scroll independently. */
 .dbx-transfer-dialog {
-  width:min(1120px,calc(100vw - 32px));
+  width:var(--w-modal-2xl);
   height:min(820px,calc(100dvh - 32px));
 }
 .dbx-transfer-dialog:has(.dbx-transfer-job) { height:auto; }

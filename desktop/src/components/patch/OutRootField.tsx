@@ -76,7 +76,7 @@ export function OutRootField({
         onClose={() => {
           if (!saving) setOpen(false);
         }}
-        className="modal-surface w-[600px] max-w-[92vw] p-5"
+        className="modal-surface w-[var(--w-modal-md)] p-5"
         ariaLabel="指定编译产物根"
       >
         <div className="flex items-center gap-2">

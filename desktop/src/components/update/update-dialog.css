@@ -1,6 +1,6 @@
 /* The shared Modal owns entry/exit; state updates retain the same surface and focus. */
 .update-dialog {
-  position:relative;display:grid;grid-template-columns:168px minmax(0,1fr);width:860px;
+  position:relative;display:grid;grid-template-columns:168px minmax(0,1fr);width:var(--w-modal-lg);
   max-width:calc(100vw - 32px);height:700px;max-height:calc(100dvh - 48px);
   overflow:hidden;border-radius:var(--r-dialog,12px);background:hsl(var(--card));color:hsl(var(--foreground));
 }

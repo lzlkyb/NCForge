@@ -25,7 +25,7 @@
 .dbx-detail { width:340px;max-width:100%;min-width:0; }
 /* 放大态：把详情从 340px 侧栏搬进独立大窗——DBeaver 的 value panel、DataGrip 的
    value editor 都是大 pane，没有一家把小窗当唯一入口。 */
-.dbx-detail-modal { display:flex;width:min(1000px,94vw);height:min(760px,86vh);overflow:hidden; }
+.dbx-detail-modal { display:flex;width:var(--w-modal-xl);height:min(760px,86vh);overflow:hidden; }
 .dbx-detail-modal .dbx-detail { width:100%;max-width:none;border-left:0; }
 .dbx-detail .hd { align-items:flex-start; }
 .dbx-detail .hd b { overflow-wrap:anywhere; }

@@ -7,7 +7,7 @@
  */
 
 /** 受管令牌：能改变全站几何的自定义属性，必须集中在档位矩阵。 */
-const MANAGED = String.raw`(?:--(?:r|h|gap)-[\w-]+|--row-h)`;
+const MANAGED = String.raw`(?:--(?:r|h|gap)-[\w-]+|--row-h|--w-modal-[\w-]+)`;
 
 const DEF_SRC = String.raw`(${MANAGED})\s*:\s*([^;]+)`;
 
@@ -26,8 +26,18 @@ export const CORE_TOKENS = [
   "--r-dialog",
   "--h-control",
   "--h-icon",
+  "--h-topbar",
+  "--h-toolbar",
+  "--h-side-item",
+  "--h-side-item-col",
   "--gap-control",
   "--row-h",
+  "--w-modal-xs",
+  "--w-modal-sm",
+  "--w-modal-md",
+  "--w-modal-lg",
+  "--w-modal-xl",
+  "--w-modal-2xl",
 ];
 
 /** 与 check-design-tokens.mjs 同口径：注释里的色值/令牌名不算定义。 */
@@ -47,28 +57,35 @@ export function regionLines(rawText) {
   return { start, end };
 }
 
-/** 找出区间内第一个「顶层」:root 块（不在 @media 里）的行范围，作基础档。 */
-export function baseBlockLines(rawText, region) {
+/**
+ * 找出区间内所有「顶层」`:root` 块（不含 @media 里的）的行范围。
+ *
+ * 为什么是复数：index.css 天然有多个同级 `:root`（动效 / 色彩 / 几何档位各自成块），
+ * 只认第一个会让「档位五 · 弹层宽度」这类后置的 :root 被判定为缺默认值。
+ */
+export function baseBlockRanges(rawText, region) {
   const lines = stripCssComments(rawText).split("\n");
+  const out = [];
   let depth = 0;
   let start = -1;
   for (let i = 0; i < lines.length; i += 1) {
-    if (region.start >= 0 && (i <= region.start || i >= region.end)) {
-      // 区间外只维护深度，不认 :root
-      for (const ch of lines[i]) {
-        if (ch === "{") depth += 1;
-        else if (ch === "}") depth -= 1;
-      }
-      continue;
-    }
-    if (depth === 0 && /^\s*:root\s*\{/.test(lines[i])) start = i;
+    const inRegion = region.start >= 0 && i > region.start && i < region.end;
+    if (depth === 0 && inRegion && /^\s*:root\s*\{/.test(lines[i])) start = i;
     for (const ch of lines[i]) {
       if (ch === "{") depth += 1;
       else if (ch === "}") depth -= 1;
     }
-    if (start >= 0 && depth === 0 && i > start) return { start, end: i };
+    if (start >= 0 && depth === 0 && i > start) {
+      out.push({ start, end: i });
+      start = -1;
+    }
   }
-  return null;
+  return out;
+}
+
+/** 兼容旧调用：区间内第一个顶层 `:root` 块。 */
+export function baseBlockLines(rawText, region) {
+  return baseBlockRanges(rawText, region)[0] ?? null;
 }
 
 /** 抽出一个 CSS 文件里的几何令牌定义，并标注是否落在档位矩阵区间内。 */
@@ -122,10 +139,10 @@ export function checkSingleSource(files, indexFile = "src/index.css") {
   const missingCore = [];
   if (indexEntry) {
     const region = regionLines(indexEntry.text);
-    const base = baseBlockLines(indexEntry.text, region);
+    const bases = baseBlockRanges(indexEntry.text, region);
     const declared = new Set(
       definitions(indexEntry.text, indexEntry.path, indexFile)
-        .filter((d) => d.inRegion && base && d.index > base.start && d.index < base.end)
+        .filter((d) => d.inRegion && bases.some((b) => d.index > b.start && d.index < b.end))
         .map((d) => d.token),
     );
     for (const token of CORE_TOKENS) if (!declared.has(token)) missingCore.push(token);

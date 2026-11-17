@@ -10,6 +10,7 @@
 const NON_SEMANTIC = [
   "--r-",
   "--row-h",
+  "--w-modal-",
   "--h-",
   "--gap-",
   "--dur",

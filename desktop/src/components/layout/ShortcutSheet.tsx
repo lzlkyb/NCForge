@@ -124,8 +124,8 @@ export function ShortcutSheet() {
     window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "settings" }));
   };
   return (
-    <Modal open={open} onClose={() => setOpen(false)} ariaLabel="快捷键一览" className="modal-surface">
-      <div className="flex max-h-[70vh] w-[min(720px,92vw)] flex-col gap-4 overflow-y-auto p-5">
+    <Modal open={open} onClose={() => setOpen(false)} ariaLabel="快捷键一览" className="modal-surface w-[var(--w-modal-lg)]">
+      <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto p-5">
         <div className="flex items-start justify-between gap-2">
           <div className="flex flex-col gap-1">
             <h2 className="text-base font-medium">快捷键一览</h2>

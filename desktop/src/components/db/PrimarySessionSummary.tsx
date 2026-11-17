@@ -12,7 +12,7 @@ export function PrimarySessionSummary({ connId, onClose }: { connId: string; onC
   // 只看 `statements` 会在「数据库确认有事务、本地计数为 0」时谎报「没有未提交的写入」。
   const pending = txPending(tx).pending;
   return (
-    <Modal open onClose={onClose} ariaLabel="主会话事务" className="modal-surface w-[420px] max-w-[calc(100vw-32px)] p-5">
+    <Modal open onClose={onClose} ariaLabel="主会话事务" className="modal-surface w-[var(--w-modal-sm)] p-5">
       <h2 className="text-base font-semibold">主会话事务</h2>
       <p className="mt-2 text-sm text-muted-foreground">{conn?.name ?? "数据库"}{conn && ` · ${ENV_LABEL[conn.env]}`}</p>
       <p className="mt-3 text-sm">{pending

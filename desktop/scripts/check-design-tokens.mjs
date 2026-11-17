@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { checkSingleSource } from "./lib/token-geometry.mjs";
 import { checkThemePairs } from "./lib/token-layers.mjs";
 import { checkDeprecated } from "./lib/deprecated-ui.mjs";
+import { checkModalWidth } from "./lib/modal-width.mjs";
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const SRC = join(ROOT, "src");
@@ -102,6 +103,16 @@ function main() {
     if (geometry.missingCore.length) {
       console.error(`  - 基础档（区间内第一个 :root）缺默认值：${geometry.missingCore.join("、")}`);
     }
+    process.exit(1);
+  }
+
+  // 弹层宽度必须来自档位令牌（硬约束，不参与棘轮）
+  const modalWidth = checkModalWidth(
+    files.map((f) => ({ path: rel(f), text: readFileSync(f, "utf8") })),
+  );
+  if (modalWidth.length) {
+    console.error("❌ 弹层宽度没有走档位令牌（DESIGN.md R2）：");
+    for (const v of modalWidth) console.error(`  - ${v.path}:${v.line} [${v.selector}] ${v.value} —— ${v.reason}`);
     process.exit(1);
   }
 

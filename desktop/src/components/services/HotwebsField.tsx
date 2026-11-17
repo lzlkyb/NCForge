@@ -124,7 +124,7 @@ export function HotwebsField({
         onClose={() => {
           if (!savingRef.current) setOpen(false);
         }}
-        className="modal-surface w-[620px] max-w-[92vw] p-5"
+        className="modal-surface w-[var(--w-modal-md)] p-5"
         ariaLabel="选择 Web 应用"
       >
         <div className="flex items-center gap-2">

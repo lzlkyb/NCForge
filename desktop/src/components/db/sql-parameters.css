@@ -1,4 +1,4 @@
-.dbx-parameter-dialog { width:min(560px, calc(100vw - 32px)); }
+.dbx-parameter-dialog { width:var(--w-modal-md); }
 .dbx-parameter-dialog form { display:grid; gap:12px; }
 .dbx-parameter-dialog h2, .dbx-parameter-dialog p { margin:0; }
 .dbx-parameter-dialog label { display:grid; gap:5px; min-width:0; overflow-wrap:anywhere; }

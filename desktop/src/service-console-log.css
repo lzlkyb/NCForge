@@ -69,7 +69,7 @@
 .sc-log-freshness { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: hsl(var(--muted-foreground)); }
 .sc-log-menu-divider { height: 1px; background: hsl(var(--border)); margin: 4px 6px; }
 @container (max-width:600px) { .sc-log-toolbar .sc-log-filter-toggle, .sc-log-toolbar .sc-log-wrap-toggle { display:none; } }
-.sc-log-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 16px 20px; display: flex; flex-direction: column; min-height: 0; }
+.sc-log-dialog { width: var(--w-modal-lg); max-height: calc(100dvh - 48px); padding: 16px 20px; display: flex; flex-direction: column; min-height: 0; }
 .sc-log-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .sc-log-dialog-head strong { font-size: 16px; }
 .sc-log-dialog > p { margin: 10px 0; font-size: 12px; }

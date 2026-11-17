@@ -23,7 +23,7 @@ export function ResourceSetupDialog(props: ResourceSetupDialogProps) {
   const friendly = error ? resourceFriendlyError(error, errorCode) : null;
   const done = rows.filter(p => lastInstalled.some(installed => installed.id === p.id)).length;
   const missingIds = packs.filter(p => p.state === "missing").map(p => p.id);
-  return <Modal open={props.open} onClose={onDismiss} ariaLabel="运行组件下载" className="modal-surface w-[min(560px,92vw)]" closeOnOverlay>
+  return <Modal open={props.open} onClose={onDismiss} ariaLabel="运行组件下载" className="modal-surface w-[var(--w-modal-md)]" closeOnOverlay>
     <div className="flex flex-col gap-4 p-6">
       <header className="flex items-start gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><Icon name="package" size={20} aria-hidden="true" /></div>

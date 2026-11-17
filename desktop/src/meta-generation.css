@@ -109,8 +109,8 @@ body:has(.gen-workbench[data-active="true"]) .toast-stack { bottom: 148px; }
 .gen-warning, .gen-workbench small.gen-warning, .gen-config-modal small.gen-warning { color: hsl(var(--warning-ink)); }
 .gen-ok, .gen-workbench small.gen-ok, .gen-config-modal small.gen-ok { color: hsl(var(--success-ink)); }
 .gen-empty { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 12px; flex: 1; min-height: 0; padding: 24px; color: hsl(var(--muted-foreground)); text-align: center; line-height: 1.7; font-size: 12px; }
-.gen-modal, .gen-config-modal { display: flex; flex-direction: column; gap: 12px; padding: 20px; width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); border-radius: var(--r-dialog); color: hsl(var(--foreground)); font-size: 13px; }
-.gen-config-modal { width: min(360px, calc(100vw - 32px)); overflow: auto; }
+.gen-modal, .gen-config-modal { display: flex; flex-direction: column; gap: 12px; padding: 20px; width: var(--w-modal-lg); max-height: calc(100dvh - 40px); border-radius: var(--r-dialog); color: hsl(var(--foreground)); font-size: 13px; }
+.gen-config-modal { width: var(--w-modal-xs); overflow: auto; }
 .gen-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: none; }
 .gen-modal-head h3 { font-size: 15px; margin: 0; font-weight: 600; }
 .gen-modal p { margin: 0; line-height: 1.7; }

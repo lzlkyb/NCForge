@@ -142,6 +142,19 @@ describe("状态栏贡献", () => {
     expect(el.textContent).toContain("r4211");
   });
 
+  it("SVN 扫描失败时露出失败胶囊，不静默当作没有改动", async () => {
+    // 静默消失会被读成「0 个改动」——R6：缺席不能冒充结果。
+    mocks.svnStatus.mockRejectedValue(new Error("svn: E155007 not a working copy"));
+    mocks.svnInfo.mockRejectedValue(new Error("svn: E155007 not a working copy"));
+
+    const el = render("svn");
+    await flush();
+
+    expect(el.textContent).toContain("改动读取失败");
+    expect(el.querySelector('.wb-status-chip[data-tone="bad"]')).toBeTruthy();
+    expect(el.textContent).not.toContain("改动 0");
+  });
+
   it("代码页且选了工作区时露出「工程关联」入口，其余页不占状态栏", () => {
     const el = render("files");
     expect(button(el, "工程关联")).toBeUndefined();

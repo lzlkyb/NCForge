@@ -28,7 +28,7 @@
 .settings-about-copyright { margin-top:15px; font-size:12px; color:hsl(var(--muted-foreground)); line-height:1.7; }
 .settings-about-skeleton { display:inline-block; height:16px; width:70px; border-radius:4px; background:hsl(var(--secondary)); animation:settings-about-loading 1.3s ease-in-out infinite; }
 .settings-about :is([data-settings-item]):focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }
-.settings-about-dialog { display:flex; flex-direction:column; width:min(800px,calc(100vw - 32px)); max-height:min(720px,calc(100dvh - 48px)); padding:0; overflow:hidden; }
+.settings-about-dialog { display:flex; flex-direction:column; width:var(--w-modal-lg); max-height:min(720px,calc(100dvh - 48px)); padding:0; overflow:hidden; }
 /* Long release notes need stable ink: keep the reading surface opaque within the glass shell. */
 html[data-ui-style="glass"] .settings-about-dialog .settings-about-history-body,
 html[data-ui-style="glass"] .settings-about-dialog .settings-about-license-text { background:hsl(var(--popover)); }

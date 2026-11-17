@@ -1,13 +1,23 @@
 /**
- * @deprecated 新代码请用 `./dialog` 的 `Dialog` / `DialogHeader` / `DialogTitle`。
+ * 弹层底层原语 —— 全站唯一实现。**不是被替代的旧组件。**
  *
- * 现状（2026-11-16）：`Modal` 仍被 52 个文件导入，两代弹层并存是当前最大的
- * 一致性债（设计契约 DESIGN.md §5）。迁移时逐处核对三件事，不要全局替换：
- *   1) zIndex —— Dialog 的层级策略与 Modal 不同，嵌套弹层要一起改；
- *   2) 焦点陷阱 —— 两者都在 Dialog 打开时锁焦点，但同时开着别的浮层时会抢；
- *   3) ariaLabel —— Dialog 必须显式给，Modal 允许缺省。
- * 约束：`scripts/check-deprecated-ui.mjs` 对 Modal 的导入数做只降不升的棘轮，
- * 新增一处导入会让门禁变红。
+ * 2026-11-17 更正：此前这里标着 `@deprecated`，并把 `Modal` / `Dialog` 说成
+ * 「两代弹层并存」。真正读过 `./dialog` 才发现 `Dialog` 只是 `Modal` 加一套固定样式
+ * （`--w-modal-sm` + `p-5` + `--r-card`）—— 两者是「原语 / 预设」关系，
+ * 不存在谁替代谁。那条废弃标记和导入棘轮一直在逼新代码走等价路径，已撤。
+ *
+ * 真正的债是**宽度**：迁移前全站弹层实测 16 种宽度（360…1120），分散在
+ * Tailwind `max-w-*` / 类里写死 px / `min()` / tsx 内联 `w-[NNNpx]` 四套体系。
+ * 现已统一到 index.css「档位五 · 弹层宽度」的 `--w-modal-xs|sm|md|lg|xl|2xl`，
+ * 由 `npm run tokens:check` 强制（`scripts/lib/modal-width.mjs`）。
+ *
+ * 新代码怎么选：
+ *   · 小确认框 / 单字段表单 → 直接用 `./dialog` 的 `Dialog`（它就是 sm 档预设）
+ *   · 其余尺寸 → 用 `Modal`，className 里挑一个 `w-[var(--w-modal-*)]`
+ *
+ * 迁移时仍需留意的两件事：
+ *   1) 嵌套弹层的 zIndex —— Dialog 与 Modal 默认都是 1000，同层会抢焦点；
+ *   2) `ariaLabel` 必须显式给，否则读屏只念 role、说不出这是哪个对话框。
  */
 import { useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";

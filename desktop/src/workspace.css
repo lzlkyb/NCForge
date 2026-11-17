@@ -884,7 +884,7 @@ html[data-ui-style="glass"] :is(.wb-hist, .wb-outline, .wb-ctx) { background: va
 html[data-ui-style="glass"] :is(.wb-hist, .wb-outline) :is(input, select, textarea) { background-color: var(--glass-inset); }
 
 /* ---- 新建 Java 类型对话框 ---- */
-.nj-dialog { width: 456px; max-width: calc(100vw - 32px); border-radius: var(--r-card); overflow: hidden; }
+.nj-dialog { width: var(--w-modal-sm); border-radius: var(--r-card); overflow: hidden; }
 .nj-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid hsl(var(--border)); font-size: 14px; font-weight: 600; }
 .nj-x { margin-left: auto; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; color: hsl(var(--muted-foreground)); cursor: pointer; }
 .nj-x:hover { background: hsl(var(--secondary)); }

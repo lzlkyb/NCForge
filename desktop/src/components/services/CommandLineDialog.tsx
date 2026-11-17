@@ -25,7 +25,7 @@ export function CommandLineDialog({
       open={!!preview}
       onClose={onClose}
       ariaLabel={client ? "客户端启动命令行" : "启动命令行"}
-      className="modal-surface w-[860px] max-w-[92vw] p-5"
+      className="modal-surface w-[var(--w-modal-lg)] p-5"
     >
       <div className="flex items-center gap-2">
         <Icon name="terminal" size={15} />

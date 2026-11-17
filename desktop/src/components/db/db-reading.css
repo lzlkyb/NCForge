@@ -8,7 +8,7 @@
 .dbx-token-comment { color:hsl(var(--muted-foreground));font-style:italic; }
 .dbx-code-find { display:flex;gap:8px;align-items:center;padding:4px 8px;font-size:12px; }
 .dbx-code-find input { min-width:0;flex:1;background:hsl(var(--card));border:1px solid hsl(var(--border));padding:4px 6px;color:hsl(var(--foreground)); }
-.dbx-code-dialog { display:flex;flex-direction:column;width:900px;height:650px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 40px);padding:12px; }
+.dbx-code-dialog { display:flex;flex-direction:column;width:var(--w-modal-xl);height:650px;max-height:calc(100dvh - 40px);padding:12px; }
 .dbx-history-clear { padding:8px 12px;border-block:1px solid hsl(var(--border)); }
 .dbx-reading-tools { display:flex;align-items:center;gap:8px;padding:6px 10px;flex:none;flex-wrap:wrap; }
 .dbx-reading-tools input:not([type="checkbox"]) { min-width:100px;flex:1;border:1px solid hsl(var(--border));border-radius:var(--r-control);padding:4px 7px;background:hsl(var(--card));color:hsl(var(--foreground)); }

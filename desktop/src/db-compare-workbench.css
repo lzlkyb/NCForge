@@ -20,7 +20,7 @@
 .dbx-compare-source-meta [data-partial] { color:hsl(var(--warning-ink)); }
 .dbx-compare-source-sql { display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;color:hsl(var(--muted-foreground));font-family:var(--font-mono); }
 .dbx-compare-source pre { margin:7px 0 0;padding:8px;max-height:144px;overflow:auto;border:1px solid hsl(var(--border));background:hsl(var(--background));font-size:var(--dbx-fs-body);line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere; }
-.dbx-compare-source-dialog { display:flex;flex-direction:column;gap:16px;width:min(620px,calc(100vw - 32px));max-height:calc(100dvh - 40px);overflow:auto;padding:18px;font-size:var(--dbx-fs-body); }
+.dbx-compare-source-dialog { display:flex;flex-direction:column;gap:16px;width:var(--w-modal-md);max-height:calc(100dvh - 40px);overflow:auto;padding:18px;font-size:var(--dbx-fs-body); }
 .dbx-compare-source-heading { display:flex;align-items:center;justify-content:space-between;gap:10px; }
 .dbx-compare-source-heading h2 { margin:0;font-size:var(--dbx-fs-title);font-weight:600; }
 .dbx-compare-source-dialog p { margin:0;color:hsl(var(--muted-foreground)); }

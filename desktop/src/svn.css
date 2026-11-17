@@ -500,7 +500,7 @@
    遮罩交给统一的 ui/Modal（portal + 焦点陷阱 + Esc）；这里只留卡片本体。
    （原来的自建 `.vc-mask` 已随 P2-1 改造删除，全仓无引用。） */
 .vc-dialog {
-  width: min(380px, calc(100vw - 32px));
+  width: var(--w-modal-xs);
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: var(--r-dialog);
@@ -681,8 +681,7 @@
    两段：备份目录（可删）与审查标记（可清）。删除是唯一不可逆动作，
    所以单个删除与全部删除都走 ConfirmDialog（destructive + zIndex 1100）。 */
 .vc-dialog-hk {
-  width: 520px;
-  max-width: calc(100vw - 48px);
+  width: var(--w-modal-md);
 }
 .vc-dialog-hk h3 {
   display: flex;

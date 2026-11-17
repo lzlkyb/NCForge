@@ -127,7 +127,7 @@ export function PortDialog({
     <Modal
       open={open}
       onClose={() => { if (!writing.current) onClose(); }}
-      className="modal-surface w-[620px] max-w-[92vw] p-5"
+      className="modal-surface w-[var(--w-modal-md)] p-5"
       ariaLabel="改监听端口"
     >
       <div className="flex items-center gap-2">

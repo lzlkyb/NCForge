@@ -475,10 +475,10 @@
 .dbx-meta .pk { color: hsl(var(--warning-ink)); font-weight: 700; }
 
 /* ── 对话框 ── */
-.dbx-dlg { width: 660px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 40px); display: flex; flex-direction: column; border-radius: var(--r-dialog); font-size: var(--dbx-fs-body); overflow: hidden; }
-.dbx-dlg.sm { width: 460px; }
+.dbx-dlg { width: var(--w-modal-md); max-height: calc(100dvh - 40px); display: flex; flex-direction: column; border-radius: var(--r-dialog); font-size: var(--dbx-fs-body); overflow: hidden; }
+.dbx-dlg.sm { width: var(--w-modal-sm); }
 /* 导入向导要摊开「文件列 / 样例 / 目标列」三列，620px 挤不下 */
-.dbx-dlg.wide { width: 860px; }
+.dbx-dlg.wide { width: var(--w-modal-lg); }
 .dbx-maphd { margin: 14px 0 6px; font-weight: 600; }
 .dbx-mapgrid { display: grid; grid-template-columns: 180px 1fr 240px; gap: 6px 10px; align-items: center; max-height: 280px; overflow: auto; }
 .dbx-mapgrid .h { font-size: var(--dbx-fs-meta); letter-spacing: .04em; color: hsl(var(--muted-foreground)); position: sticky; top: 0; background: hsl(var(--background)); padding-bottom: 2px; }

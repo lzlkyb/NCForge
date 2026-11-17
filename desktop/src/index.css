@@ -227,6 +227,12 @@
   --h-icon: 28px;
   --gap-control: 8px;
   --row-h: 26px;
+  /* 外壳固定几何：密度档最直观的载体。2026-11-17 接入前实测三档
+     顶栏恒 40 / 工具栏恒 36 / 侧栏项恒 36，切密度只有字号在变 —— 名义三档。 */
+  --h-topbar: 40px;
+  --h-toolbar: 36px;
+  --h-side-item: 36px;
+  --h-side-item-col: 53px;
 }
 
 /* 档位二 · 外观：material / glass 共用一套几何（值与旧 workbench-material.css 一致，行为不变）
@@ -247,6 +253,10 @@ html[data-ui-style] {
 html[data-ui-density="comfortable"] {
   --h-icon: 32px;
   --row-h: 30px;
+  --h-topbar: 44px;
+  --h-toolbar: 40px;
+  --h-side-item: 40px;
+  --h-side-item-col: 60px;
 }
 
 html[data-ui-density="compact"] {
@@ -254,6 +264,10 @@ html[data-ui-density="compact"] {
   --h-icon: 24px;
   --gap-control: 6px;
   --row-h: 22px;
+  --h-topbar: 36px;
+  --h-toolbar: 32px;
+  --h-side-item: 32px;
+  --h-side-item-col: 46px;
 }
 
 /* 档位四 · 触屏：粗指针下交互目标必须 ≥ 40px（WCAG 2.5.5） */
@@ -261,10 +275,33 @@ html[data-ui-density="compact"] {
   :root {
     --h-control: 40px;
     --h-icon: 40px;
+    --h-topbar: 44px;
+    --h-toolbar: 44px;
+    --h-side-item: 44px;
+    --h-side-item-col: 60px;
   }
   html[data-ui-density="comfortable"] {
     --h-icon: 44px;
+    --h-topbar: 48px;
+    --h-toolbar: 48px;
+    --h-side-item: 48px;
+    --h-side-item-col: 66px;
   }
+}
+
+/* 档位五 · 弹层宽度：全站弹窗的宽度只从这里取，每档自带视口兜底。
+   2026-11-17 收敛原因：迁移前实测有 **16 种**宽度（360/380/420/456/460/512/560/620/660/
+   760/800/860/900/920/1000/1120），分属四套体系 —— `Dialog` 用 Tailwind `max-w-lg`、
+   `.dbx-dlg` 写死 px、`.vc-dialog` 用 `min()`、7 处内联 `w-[NNNpx]` 各自手写 `max-w-[92vw]`。
+   结果是「同样是小弹窗，SVN 页 380、数据库页 460、重构菜单 512、生成配置 360」。
+   现在统一取这六档之一（每处变化 ≤60px），禁止再写 `w-[NNNpx]`。 */
+:root {
+  --w-modal-xs: min(380px, calc(100vw - 32px));   /* 认证、轻提示、生成配置 */
+  --w-modal-sm: min(460px, calc(100vw - 32px));   /* 通用小弹窗（Dialog 默认）、重命名 */
+  --w-modal-md: min(620px, calc(100vw - 32px));   /* 表单主力：端口、对比源、SQL 参数 */
+  --w-modal-lg: min(820px, calc(100vw - 32px));   /* 宽表、日志详情、设置关于 */
+  --w-modal-xl: min(960px, calc(100vw - 32px));   /* 代码预览、关联工程、单元格详情 */
+  --w-modal-2xl: min(1120px, calc(100vw - 32px)); /* 传输工作台 */
 }
 
 /* @tokens-geometry:end */
@@ -1176,8 +1213,9 @@ pre, code, .font-mono { font-variant-ligatures: none; }
 .app-side[data-collapsed] .app-side-cluster-sep,
 .app-side[data-collapsed] .app-side-empty { display: none; }
 
-/* 顶栏：固定 52px，与侧栏品牌区等高，两者底边连线贯通成一条水平分割线 */
-.app-topbar { height: 52px; }
+/* 顶栏高度已由 workbench-layout.css 的 var(--h-topbar) 统一控制（密度档联动）。
+   这里原来的 `height: 52px` 从未生效——实测恒为 40px，因为 workbench-layout.css
+   的 `height:40px` 加载在后且带 min-height，本条一直被覆盖。留着只会误导下一个人。 */
 
 /* ===================================================================
    更新体验：下载期反馈 + 重启过渡 + 升级后首启欢迎

@@ -7,7 +7,7 @@
 
 /* 弹框外壳：单列向下滚，头与跳转条固定；三块内容共处一列，便于互相对照。 */
 .lnk-dialog {
-  width: min(920px, 92vw);
+  width: var(--w-modal-xl);
   height: min(760px, 88vh);
   display: flex;
   flex-direction: column;

@@ -7,9 +7,23 @@
  */
 
 const DATA_RE = /useQuery\s*\(|invoke\s*[<(]/;
-const EMPTY_RE = /EmptyState/;
-const LOADING_RE = /LoadingState|Skeleton|BusyIndicator|Spinner/;
-const ERROR_RE = /ErrorBoundary|errorState|error\s*&&|catch\s*\(/;
+
+/**
+ * 判据只认「三种合法模式之一」，不认某个具体组件名。
+ *
+ * 2026-11-16 更正：旧判据只匹配 `EmptyState` / `LoadingState` 这些具名组件，
+ * 但代码库里有 20 个组件用内联写法（`vc-empty` / `role="status"` / `data-tone="busy"`），
+ * 结果是 25 个候选**全部误报**，逐条读代码才发现三态都在，只是没引用组件。
+ * 门禁 100% 假阳等于没有门禁，所以判据改成识别实际写法。
+ */
+const EMPTY_RE =
+  /EmptyState|vc-empty|md-empty|sv-cfg-empty|wb-panel-note|暂无|没有可|没有.*记录|为空|未找到|无记录|请先|未声明|未配置|未扫描/;
+// 具名组件 / 内联语义 / 状态胶囊 tone 编码，三种都算
+const LOADING_RE =
+  /LoadingState|<Skeleton|<Spinner|BusyIndicator|role="status"|data-tone="busy"|data-tone=\{.*busy|正在读取|正在加载|正在扫描|正在检查|加载中|读取中|扫描中|检查中|isFetching|\bbusy\b|\bloading\b/;
+// 错态：显示在界面上（alert 类）或转成提示（toast 类）都算有人管
+const ERROR_RE =
+  /ErrorBoundary|role="alert"|data-tone="bad"|vc-alert|sv-alert|dbg-error|errorToast|invokeOrToast|toast\([^)]*"error"|isError|\.error\b|error\s*[?&]|catch\s*[({]/;
 
 /** 已判读为「不需要」的文件 → 理由。新增条目要写清为什么。 */
 export const ALLOW = {
@@ -34,6 +48,10 @@ export function audit(files) {
     if (!hasEmpty) missing.push("空");
     if (!hasLoading) missing.push("载");
     if (!hasError) missing.push("错");
+    // 只报真正危险的一种：会显示「正在加载/忙」却没有任何失败出口 —— 失败时界面
+    // 永远停在载态，这正是 R6「加载中不得掩盖失败」要禁的。其余组合（有错无载等）
+    // 都是合理取舍：错误信息本身就是终态，不需要额外的转圈。
+    if (hasError || !hasLoading) continue;
     rows.push({ path: file.path, missing });
   }
   return rows.sort((a, b) => b.missing.length - a.missing.length || a.path.localeCompare(b.path));

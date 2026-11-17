@@ -1,5 +1,5 @@
 /* Approved database transfer window: opaque surfaces keep dense previews readable in both materials. */
-.dbx-transfer-dialog { width: min(1000px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); display: flex; flex-direction: column; overflow: hidden; background: hsl(var(--card)); color: hsl(var(--foreground)); border: 1px solid hsl(var(--border)); border-radius: var(--r-dialog); font-size: 13px; }
+.dbx-transfer-dialog { width: var(--w-modal-2xl); max-height: calc(100dvh - 32px); display: flex; flex-direction: column; overflow: hidden; background: hsl(var(--card)); color: hsl(var(--foreground)); border: 1px solid hsl(var(--border)); border-radius: var(--r-dialog); font-size: 13px; }
 html[data-ui-style="glass"] :is(.dbx-transfer-dialog,.dbx-nc-transfer).modal-surface.ui-surface { background: hsl(var(--card)) !important; backdrop-filter: none !important; }
 html[data-ui-style="glass"] .dbx-transfer-dialog :is(input, select) { background-color: hsl(var(--background)) !important; }
 /* Inline feedback remains visible; background notifications cannot cover a modal of any height. */

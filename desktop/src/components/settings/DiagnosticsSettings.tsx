@@ -62,7 +62,8 @@ export function DiagnosticsSettings() {
         </Button>
       }
     />
-    <Modal open={text !== null} onClose={() => setText(null)} ariaLabel="错误记录">
+    <Modal open={text !== null} onClose={() => setText(null)} ariaLabel="错误记录"
+      className="modal-surface w-[var(--w-modal-md)] p-5">
       <h3 className="mb-2 text-sm font-medium text-foreground">错误记录</h3>
       {text
         ? <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-xs text-muted-foreground">{text}</pre>

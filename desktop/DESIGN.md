@@ -28,16 +28,26 @@
 
 档位三档（`html[data-ui-density]`）：
 
-| 档位 | 适用 | 控件高 `--h-control` | 图标位 `--h-icon` | 行高基线 |
-|---|---|---|---|---|
-| `compact` | 小屏、多编辑器组、网格/日志并排 | 26px | 24px | 22px |
-| `standard`（默认） | 常规 | 32px | 28px | 26px |
-| `comfortable` | 大屏、演示、触摸 | 32px | 32px | 30px |
+| 档位 | 适用 | `--h-control` | `--h-icon` | `--h-topbar` | `--h-toolbar` | `--h-side-item` 展开/折叠 | `--row-h` |
+|---|---|---|---|---|---|---|---|
+| `compact` | 小屏、多编辑器组、网格/日志并排 | 26px | 24px | 36px | 32px | 32 / 46 | 22px |
+| `standard`（默认） | 常规 | 32px | 28px | 40px | 36px | 36 / 53 | 26px |
+| `comfortable` | 大屏、演示、触摸 | 32px | 32px | 44px | 40px | 40 / 60 | 30px |
 
 触屏（`pointer: coarse`）强制 ≥ 40px，覆盖上表。
+
+**外壳几何必须跟密度走**（2026-11-17 接线）：顶栏、工具栏、侧栏项此前写死
+40 / 36 / 53px，实测三档切换只有字号在变，密度形同虚设。现在四类外壳高度
+全部取自 `--h-topbar` / `--h-toolbar` / `--h-side-item` / `--h-side-item-col`
+（折叠态是图标+文字竖排，单独一档），改动只允许在 `index.css` 的矩阵区。
+
 **新增尺寸一律写成 `var(--h-control)` 之类的令牌引用**，不写死像素。
 虚拟列表（结果网格、日志、文件树）必须在密度变化事件里重算行几何——
 `lib/uiDensity.ts` 提供 `subscribeUiDensity`，不订阅就会出现"行高变了但滚动位置错位"。
+
+验证方式不是看代码，是**切三档量实际高度**：改 `document.documentElement.dataset.uiDensity`
+后逐档读 `getBoundingClientRect()`。令牌字面值变了不等于渲染变了——2026-11-17 就是
+靠这一步才发现顶栏三档都恒为 40px。
 
 ### R4 层级靠字重与留白，不靠颜色
 
@@ -60,7 +70,18 @@ UI 不得暗示"已保存 / 已提交 / 已完成"，除非有证据。
 
 - 写操作成功 → 必须有可核对的结果（影响行数、返回码、落盘路径、后端回执）。
 - 乐观 UI 只允许用于**可回滚且失败可见**的操作；失败必须把界面恢复成库里的真实状态。
-- "加载中" 不得掩盖失败；空态、载态、错态必须是三个独立实现（见 `components/ui/{EmptyState,LoadingState,ErrorBoundary}`）。
+- "加载中" 不得掩盖失败。三种合法呈现，按面类型选一种并**在同一面内保持一致**——不强制用某个组件：
+
+  | 面类型 | 写法 | 现有例子 |
+  |---|---|---|
+  | 面板 / 页面主体 | 具名组件 `EmptyState` / `LoadingState` / `ErrorBoundary` | `DbTab`、`MetaTab`、`NoWorkspace` |
+  | 密集列表、分栏内的局部区 | 内联语义 `role="status"` + `role="alert"` + `vc-empty` / `vc-alert` | `HistoryView`、`ConflictPane`、`PackageDependencies` |
+  | 状态栏 / 工具条上的胶囊 | `data-tone` 编码：`busy` / `bad` / 缺省 | `PatchHealth`、`ServiceStatusButton`、`HotswapStatusChip` |
+
+  红线只有一条：**允许显示"正在加载"的面，必须有失败出口**（alert / toast / `data-tone="bad"`）。
+  失败后胶囊静默消失、或把读取失败显示成"未配置"，都算欺骗——用户会读成"没有数据"。
+  反过来「有错态没有载态」是合理取舍：错误信息本身就是终态，不需要额外转圈。
+  校验：`npm run states:audit`。
 - 未写回的编辑必须在关闭 / 切换 / 续取前显式确认，不允许静默丢弃
   （历史教训见 `docs/NCForge-数据库UI-UX审查-2026-11-10.md` S1 系列）。
 
@@ -70,7 +91,7 @@ UI 不得暗示"已保存 / 已提交 / 已完成"，除非有证据。
 
 | 层 | 前缀 | 谁可以定义 | 谁可以消费 | 例子 |
 |---|---|---|---|---|
-| primitive 原语 | `--r-*` `--h-*` `--gap-*` `--dur-*` `--ease-*` `--fs-*` `--lh-*` | 只有 `index.css` 的矩阵区/动效区 | semantic、component 层 | `--r-card` `--dur-fast` |
+| primitive 原语 | `--r-*` `--h-*` `--gap-*` `--w-modal-*` `--dur-*` `--ease-*` `--fs-*` `--lh-*` | 只有 `index.css` 的矩阵区/动效区 | semantic、component 层 | `--r-card` `--w-modal-md` `--dur-fast` |
 | semantic 语义 | `--background` `--foreground` `--primary` `--border` … 及派生 `--color-*` | `index.css`（`:root` 与 `.dark` 成对） | 任何地方 | `--color-primary` |
 | component 组件 | `--forge-*` `--material-*` `--dbx-*` `--sh-*` `--badge-*` `--chart-*` `--window-*` | 所属组件/材质文件 | 本组件域内 | `--forge-control` |
 
@@ -79,6 +100,29 @@ UI 不得暗示"已保存 / 已提交 / 已完成"，除非有证据。
 - 组件层令牌不得被页面 CSS 重新定义（页面只能换 `data-*` 档位）。
 - 新增 component 令牌优先写成对 primitive / semantic 的引用（`--forge-radius: var(--r-control)`），
   而不是再写一个字面值。
+
+### 2.1 弹层宽度六档
+
+弹窗宽度**只能**取下面之一，每档自带视口兜底（`min(NNNpx, calc(100vw - 32px))`），
+不要自己再写 `max-w-[92vw]`：
+
+| 档位 | 值 | 用在哪 |
+|---|---|---|
+| `--w-modal-xs` | 380 | 认证、轻提示、生成配置 |
+| `--w-modal-sm` | 460 | 通用小弹窗（`Dialog` 的默认）、重命名 |
+| `--w-modal-md` | 620 | 表单主力：端口、对比源、SQL 参数、单元格详情 |
+| `--w-modal-lg` | 820 | 宽表、日志详情、设置关于、导入向导 |
+| `--w-modal-xl` | 960 | 代码预览、关联工程、对象/列检视 |
+| `--w-modal-2xl` | 1120 | 传输工作台 |
+
+- 写 `width: var(--w-modal-md)` 或 `className="w-[var(--w-modal-md)]"`，两者都可以。
+- **不纳入档位**的：抽屉类（`.dbx-drawer` / `.sc-drawer` / `.vc-commit-drawer`）宽度
+  相对容器而非视口，用视口兜底是错的语义；`design-preview` 是独立入口。
+- 高度不管：普遍是 `min(NNNpx, calc(100dvh - …))` 的自适应写法，没有档位语义。
+- 校验分两层：`npm run tokens:check`（静态，`scripts/lib/modal-width.mjs`）证明代码写的是
+  令牌；`npm run modals:audit`（需 dev server + chromium）注入每个弹层类量实际像素，
+  证明变量真的解析成了该档位。**静态绿不等于渲染对**——CSS 模块没加载、令牌拼错、
+  被更高特异性规则覆盖，静态检查都看不见，2026-11-17 的 720px 漏网就是这样抓到的。
 
 ---
 
@@ -115,7 +159,9 @@ UI 不得暗示"已保存 / 已提交 / 已完成"，除非有证据。
 | `rounded` 用 `--radius`(6px)，`rounded-md` 用 `--r-control`(8px) | 两者不一致 | 统一到 `--r-control`，随档位变化 |
 | 裸色值 | **0 处**（2026-11-16 清零，基线置空） | 保持 0，新增即红 |
 | `--r-{shell,pane,work,inset}` | 仅 material 档有意义 | 保持，但文档化（已在矩阵区） |
-| 两代弹层组件 | `Modal` 仍被 54 个文件导入；`Menu` **没有**替代实现；`InfoPopover` 零引用 | `Modal` 逐批迁到 `dialog`（棘轮只降不升）；`InfoPopover` 删除；`Menu` 保持为唯一实现 |
+| 弹层宽度 | **已收敛**（2026-11-17）：迁移前 16 种宽度、四套体系，现统一取 `--w-modal-*` 六档 | 保持，`tokens:check` 强制；新增弹层只挑档位 |
+| `InfoPopover` | 零引用 | 删除 |
+| 弹层组件关系 | `Modal` 是唯一原语；`Dialog` 只是它的 sm 档预设（曾误标为「两代并存」） | 保持；`Menu` 无替代实现，同样保持 |
 
 ---
 
