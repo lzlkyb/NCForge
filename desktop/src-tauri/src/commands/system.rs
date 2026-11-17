@@ -14,9 +14,16 @@ use crate::state::AppState;
 ///
 /// 返回值是「进程启动 → 这一帧」的总毫秒数（`None` 表示进程起点没记上，只可能出现在
 /// 单元测试里）。不打点也不影响任何功能：前端那边 `.catch` 掉即可，别让它变成启动错误。
+///
+/// 顺手落一条历史（`boot-history.jsonl`）：release 构建没有控制台，不落盘的话
+/// 「启动变慢了」只能靠感觉。写盘失败被吞掉，不影响返回值。
 #[tauri::command]
-pub fn boot_report(ms: f64) -> Option<u64> {
-    crate::boot_timing::first_frame(ms)
+pub fn boot_report(state: tauri::State<'_, Arc<AppState>>, ms: f64) -> Option<u64> {
+    let total = crate::boot_timing::first_frame(ms);
+    if total.is_some() {
+        crate::boot_timing::append_history(&state.config_dir);
+    }
+    total
 }
 
 /// 启动分段打点：首屏可编辑 / 目录树 / 索引就绪 / 首批诊断，各报一次。
@@ -49,6 +56,7 @@ pub async fn get_config(state: tauri::State<'_, Arc<AppState>>) -> Result<AppCon
 ///
 /// 新增设置项时在这里加字段，并同步 `lib/appConfig.ts` 的 `ConfigPatch`；
 /// 需要校验或联动系统状态的设置（NC home、堆上限、工作区）继续用各自的专用命令。
+// @ts-mirror request —— 前端 `ConfigPatch` 与它断言相等；`Option<T>` 生成成 `field?: T`
 #[derive(Debug, serde::Deserialize)]
 pub struct ConfigPatch {
     #[serde(default)]

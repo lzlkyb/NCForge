@@ -31,6 +31,7 @@ mod debug_advanced_cmds;
 mod debug_cmds;
 mod decompile_cmds;
 mod deploy_cmds;
+mod diagnostics_cmds;
 mod frontend_log_cmds;
 mod hotswap_cmds;
 mod jar_symbol_cmds;
@@ -89,6 +90,7 @@ pub use debug_advanced_cmds::*;
 pub use debug_cmds::*;
 pub use decompile_cmds::*;
 pub use deploy_cmds::*;
+pub use diagnostics_cmds::*;
 pub use frontend_log_cmds::*;
 pub use hotswap_cmds::*;
 pub use jar_symbol_cmds::*;
@@ -287,6 +289,11 @@ macro_rules! nc_forge_commands {
         $crate::commands::frontend_log_append,
         $crate::commands::frontend_log_read,
         $crate::commands::frontend_log_reveal,
+        // 诊断包：预览 → 用户确认 → 打包（白名单 + 脱敏，绝不偷偷打包）
+        $crate::commands::diagnostics_preview,
+        $crate::commands::export_diagnostics,
+        $crate::commands::diagnostics_reveal,
+        $crate::commands::crash_summary,
         // NCC/BIP 报文解密：只读服务端开关，解密在前端 WebCrypto 里做
         $crate::commands::ncc_decode_config,
         $crate::commands::server_status,
@@ -327,6 +334,7 @@ macro_rules! nc_forge_commands {
         $crate::commands::nc_port_preview,
         $crate::commands::nc_port_apply,
         $crate::commands::svn_info,
+        $crate::commands::svn_file_commits,
         $crate::commands::svn_status,
         $crate::commands::svn_diff,
         $crate::commands::svn_history,

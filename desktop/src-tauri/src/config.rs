@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// 应用配置。字段即「跨重启需要记住的设置」；一次性状态不要放这里。
+// @ts-mirror response —— 生成到 `src/lib/bindings.generated.ts`，前端 `appConfig.ts` 断言相等
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     /// 开机自启（与 tauri-plugin-autostart 同步的镜像值，供前端读取）。
@@ -161,6 +162,7 @@ pub struct AppConfig {
 ///
 /// `action` 存字符串而不是枚举：与 `DbConnConfig::engine` 同一口径——老配置没有这个
 /// 字段时反序列化出空串，识别不了就跳过该条，不需要写迁移代码。
+// @ts-mirror response
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LinkedOverrideConfig {
@@ -184,6 +186,7 @@ fn default_parallel() -> u8 {
 }
 
 /// 一条数据库连接。
+// @ts-mirror response
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DbConnConfig {

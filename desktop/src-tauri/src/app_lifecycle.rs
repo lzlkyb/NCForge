@@ -4,6 +4,11 @@ use std::sync::Arc;
 use tauri::Manager;
 
 pub fn shutdown(app: &tauri::AppHandle) {
+    // 先清「异常退出」标记：这一步不能放在后面，否则任何一次子进程清理卡住或 panic，
+    // 都会让下次启动误报「上次崩溃」。正常退出路径必须覆盖更新重启（也走 Exit）。
+    if let Some(state) = app.try_state::<Arc<AppState>>() {
+        crate::crash::end_session(&state.config_dir);
+    }
     if let Some(jobs) = app.try_state::<JavaRuns>() {
         jobs.cancel_all();
     }

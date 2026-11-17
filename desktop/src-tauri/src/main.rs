@@ -106,6 +106,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 冷启动基线的起点：必须在这一行，晚一行就少算一段（见 `boot_timing` 头注释）。
     boot_timing::mark_process_start();
     env_logger::init();
+    // 后端崩溃现场：必须在启动早期装好，晚于 `setup` 就会漏掉初始化阶段的 panic。
+    // 它不做任何 IO，不影响启动耗时；也满足 boot-path 门禁「第一句是打点」的要求。
+    crash::install_hook();
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -139,6 +142,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map_err(|e| std::io::Error::other(format!("无法解析应用配置目录：{e}")))?;
             std::fs::create_dir_all(&config_dir)
                 .map_err(|e| std::io::Error::other(format!("无法创建应用配置目录：{e}")))?;
+
+            // 崩溃现场：先把目录交给 hook，再判上次是否崩过。
+            // 🔴 顺序不能反——`begin_session` 会覆盖标记文件，先写就永远检测不到异常退出。
+            crash::set_config_dir(&config_dir);
+            if let Some(prev) = crash::begin_session(&config_dir).filter(|p| p.had_panic) {
+                log::warn!(
+                    "上次运行存在后端崩溃记录（会话开始于 {} ms）",
+                    prev.started_at_ms
+                );
+            }
 
             let app_config = config::load_config(&config_dir);
             let startup_root = app_config.workspace_root.clone();

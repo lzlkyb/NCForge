@@ -6,10 +6,21 @@
 //!
 //! 只记日志、不加任何等待：这条打点在首帧之后执行，不在启动路径上。
 
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 static PROCESS_START: OnceLock<Instant> = OnceLock::new();
+
+/// 首帧总耗时。诊断包要带走这个数，不能只让它躺在日志里。
+///
+/// 🔴 **不能用 0 当「还没到首帧」的哨兵**：机器够快时首帧就是 0 ms，
+/// 那样合法的 0 会被读成「没记录」，诊断包里凭空少一项。用独立布尔位表达「有没有」。
+static FIRST_FRAME_MS: AtomicU64 = AtomicU64::new(0);
+static FIRST_FRAME_SET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// 各段耗时。只存白名单内的段名，重复调用同一段时**保留第一次**——
+/// 同一个段被触发两次说明调用方有问题，取首次才能反映真实启动路径。
+static STAGES_MS: Mutex<Vec<(&'static str, u64)>> = Mutex::new(Vec::new());
 
 /// `main()` 第一件事调这个。重复调用无副作用（只认第一次）。
 pub fn mark_process_start() {
@@ -20,6 +31,12 @@ pub fn mark_process_start() {
 pub fn first_frame(frontend_ms: f64) -> Option<u64> {
     let start = PROCESS_START.get()?;
     let total = start.elapsed().as_millis() as u64;
+    if FIRST_FRAME_SET
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        FIRST_FRAME_MS.store(total, Ordering::SeqCst);
+    }
     log::info!("冷启动：进程启动 → 前端首帧 {total} ms（其中前端自报 {frontend_ms:.0} ms）");
     Some(total)
 }
@@ -34,12 +51,90 @@ pub const STAGES: [&str; 3] = ["tree", "index", "diag"];
 /// 记一段。返回进程启动到该段的毫秒数；起点没记过或段名不在白名单时返回 `None`。
 pub fn stage(name: &str, frontend_ms: f64) -> Option<u64> {
     let start = PROCESS_START.get()?;
-    if !STAGES.contains(&name) {
-        return None;
-    }
+    // 从白名单里取出 `&'static str`：这样快照里存的是编译期字面量，不会有生命周期问题。
+    let known = STAGES.iter().find(|s| **s == name).copied()?;
     let total = start.elapsed().as_millis() as u64;
+    if let Ok(mut slots) = STAGES_MS.lock() {
+        record_stage(&mut slots, known, total);
+    }
     log::info!("启动分段：进程启动 → {name} {total} ms（其中前端自报 {frontend_ms:.0} ms）");
     Some(total)
+}
+
+/// 记一段耗时。同一段第二次出现时**保留第一次**（取首次才反映真实启动路径）。
+/// 返回是否真的写进去了，便于单测。
+pub fn record_stage(slots: &mut Vec<(&'static str, u64)>, name: &'static str, ms: u64) -> bool {
+    if slots.iter().any(|(n, _)| *n == name) {
+        return false;
+    }
+    slots.push((name, ms));
+    true
+}
+
+/// 启动耗时快照，供诊断包带走。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Snapshot {
+    /// 进程启动 → 前端首帧。没到首帧时为 `None`（不是 0：0 会被读成「秒开」）。
+    pub first_frame_ms: Option<u64>,
+    pub stages: Vec<(&'static str, u64)>,
+}
+
+pub fn snapshot() -> Snapshot {
+    Snapshot {
+        first_frame_ms: if FIRST_FRAME_SET.load(Ordering::SeqCst) {
+            Some(FIRST_FRAME_MS.load(Ordering::SeqCst))
+        } else {
+            None
+        },
+        stages: STAGES_MS.lock().map(|v| v.clone()).unwrap_or_default(),
+    }
+}
+
+/// 启动历史文件（每行一条记录）。
+pub fn history_path(config_dir: &std::path::Path) -> std::path::PathBuf {
+    config_dir.join("boot-history.jsonl")
+}
+
+/// 保留的天数上限：40 条足够做中位数，也不会让文件长成没人看的样子。
+const HISTORY_SLOTS: usize = 40;
+
+/// 把本次启动写进历史。**只在首帧之后调用一次**，不在启动路径上。
+///
+/// 🔴 为什么必须落盘：`log::info!` 在 release 构建里根本没有控制台（`windows_subsystem`），
+/// 启动耗时只存在于开发机的终端里。没有历史文件，「启动变慢了」就永远只能靠感觉。
+/// 写盘失败一律吞掉——启动打点不该让应用开不起来。
+pub fn append_history(config_dir: &std::path::Path) {
+    let snap = snapshot();
+    let Some(first) = snap.first_frame_ms else {
+        return;
+    };
+    let stages: serde_json::Map<String, serde_json::Value> = snap
+        .stages
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), serde_json::json!(v)))
+        .collect();
+    let line = serde_json::json!({
+        "ts": crate::crash::now_ms(),
+        "firstFrameMs": first,
+        "stages": stages,
+    })
+    .to_string();
+
+    let path = history_path(config_dir);
+    let mut lines: Vec<String> = std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.to_string())
+        .collect();
+    lines.push(line);
+    if lines.len() > HISTORY_SLOTS {
+        lines.drain(0..lines.len() - HISTORY_SLOTS);
+    }
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&path, format!("{}\n", lines.join("\n")));
 }
 
 #[cfg(test)]
@@ -74,5 +169,49 @@ mod tests {
         // 「首屏」由 first_frame 记，不在分段白名单里——重复记同一时刻会让日志对不上账
         assert_eq!(stage("editable", 1.0), None);
         assert!(stage("index", 1.0).is_some());
+    }
+
+    /// 同一段被触发两次时保留首次：第二次多半是重试/重复渲染，记它会让启动看着变慢。
+    #[test]
+    fn 分段重复出现只保留第一次() {
+        let mut slots: Vec<(&'static str, u64)> = Vec::new();
+        assert!(record_stage(&mut slots, "tree", 120));
+        assert!(!record_stage(&mut slots, "tree", 900), "第二次不该覆盖");
+        assert_eq!(slots, vec![("tree", 120)]);
+        assert!(record_stage(&mut slots, "index", 500));
+        assert_eq!(slots.len(), 2);
+    }
+
+    /// 快照给诊断包用：报过首帧后必须有值。
+    ///
+    /// 🔴 不能断言「一开始是 None」：`FIRST_FRAME_SET` 是进程级静态，
+    /// 同进程里别的用例可能已经报过首帧，那条断言会随执行顺序 flaky。
+    /// 也**不能断言值 > 0**：机器够快时首帧就是 0 ms，那是合法值（这正是把
+    /// 「有没有」与「是多少」拆成两个原子的原因）。
+    #[test]
+    fn 快照能取到首帧耗时() {
+        mark_process_start();
+        let _ = first_frame(1.0);
+        assert!(snapshot().first_frame_ms.is_some(), "报过首帧就应有值");
+    }
+
+    /// 启动历史只保留最近 N 条：文件是给「看趋势」用的，不是审计日志。
+    #[test]
+    fn 启动历史滚动保留有限条数() {
+        let dir = crate::test_support::tmp("boot-history");
+        mark_process_start();
+        let _ = first_frame(1.0);
+        for _ in 0..(HISTORY_SLOTS + 5) {
+            append_history(&dir);
+        }
+        let text = std::fs::read_to_string(history_path(&dir)).unwrap();
+        let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(lines.len(), HISTORY_SLOTS, "实测 {}", lines.len());
+        // 每行都必须是合法 JSON，否则脚本解析会在半路炸
+        for line in &lines {
+            let v: serde_json::Value = serde_json::from_str(line).expect("必须是合法 JSON");
+            assert!(v["firstFrameMs"].is_u64() || v["firstFrameMs"].is_i64());
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

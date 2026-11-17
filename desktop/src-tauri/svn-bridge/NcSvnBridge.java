@@ -140,6 +140,9 @@ public class NcSvnBridge {
 		if ("info".equals(cmd)) {
 			return info(new File(f[2]));
 		}
+		if ("file_commits".equals(cmd)) {
+			return fileCommits(new File(f[2]));
+		}
 		if ("status".equals(cmd)) {
 			return status(f[0], new File(f[2]), f.length > 3 ? f[3] : "");
 		}
@@ -201,6 +204,33 @@ public class NcSvnBridge {
 					org.tmatesoft.svn.core.SVNErrorCode.UNVERSIONED_RESOURCE, "不在版本控制下: " + path));
 		}
 		return out1.get(0);
+	}
+
+	private static String fileCommits(File dir) throws SVNException {
+		final List<String> files = new ArrayList<String>();
+		try {
+			// WORKING on both axes reads the WC database, including clean files, without opening a repository connection.
+			manager().getWCClient().doInfo(dir, SVNRevision.WORKING, SVNRevision.WORKING, SVNDepth.FILES, null,
+					new ISVNInfoHandler() {
+						public void handleInfo(SVNInfo info) {
+							if (info.getKind() != SVNNodeKind.FILE) return;
+							SVNRevision revision = info.getCommittedRevision();
+							boolean added = "add".equals(info.getSchedule()) || revision == null || revision.getNumber() < 1;
+							Date date = info.getCommittedDate();
+							files.add("{\"path\":" + jstr(info.getFile().getPath())
+									+ ",\"repositoryRoot\":" + jstr(info.getRepositoryRootURL() == null ? "" : info.getRepositoryRootURL().toString())
+									+ ",\"author\":" + (added || info.getAuthor() == null ? "null" : jstr(info.getAuthor()))
+									+ ",\"revision\":" + (added ? "null" : Long.toString(revision.getNumber()))
+									+ ",\"date\":" + (added || date == null ? "null" : Long.toString(date.getTime())) + "}");
+						}
+					});
+		} catch (SVNException e) {
+			org.tmatesoft.svn.core.SVNErrorCode code = e.getErrorMessage().getErrorCode();
+			if (code != org.tmatesoft.svn.core.SVNErrorCode.UNVERSIONED_RESOURCE
+					&& code != org.tmatesoft.svn.core.SVNErrorCode.WC_PATH_NOT_FOUND
+					&& code != org.tmatesoft.svn.core.SVNErrorCode.WC_NOT_WORKING_COPY) throw e;
+		}
+		return "[" + join(files) + "]";
 	}
 
 	/**

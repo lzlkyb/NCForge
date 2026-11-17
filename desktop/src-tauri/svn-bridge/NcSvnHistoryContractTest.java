@@ -104,7 +104,22 @@ public class NcSvnHistoryContractTest {
             long r1 = manager.getCommitClient().doCommit(new File[]{text}, false, "add file", null, null, false, false, SVNDepth.EMPTY).getNewRevision();
             manager.getUpdateClient().doCheckout(url, b, SVNRevision.HEAD, SVNRevision.HEAD, SVNDepth.INFINITY, false);
             write(text, "first\nserver\n");
-            long r2 = manager.getCommitClient().doCommit(new File[]{text}, false, "server change", null, null, false, false, SVNDepth.EMPTY).getNewRevision();
+            org.tmatesoft.svn.core.SVNCommitInfo second = manager.getCommitClient()
+                    .doCommit(new File[]{text}, false, "server change", null, null, false, false, SVNDepth.EMPTY);
+            long r2 = second.getNewRevision();
+            String cleanCommits = call("file_commits", a.getPath());
+            check(cleanCommits.contains("A.java") && cleanCommits.contains("\"revision\":" + r2)
+                    && cleanCommits.contains("\"author\":\"" + second.getAuthor() + "\""),
+                    "clean files expose their last revision and committer: " + cleanCommits);
+            File draft = new File(a, "Draft.java");
+            write(draft, "uncommitted\n");
+            check(!call("file_commits", a.getPath()).contains("Draft.java"), "unversioned file has no commit metadata");
+            manager.getWCClient().doAdd(draft, false, false, false, SVNDepth.EMPTY, false, false);
+            String pendingCommits = call("file_commits", a.getPath());
+            check(pendingCommits.contains("Draft.java") && pendingCommits.contains("\"revision\":null"),
+                    "scheduled addition is distinguished from unversioned files: " + pendingCommits);
+            manager.getWCClient().doRevert(new File[]{draft}, SVNDepth.EMPTY, null);
+            Files.delete(draft.toPath());
             String history = call("history", a.getPath(), "30", "0");
             check(history.contains("\"path\":\"/A.java\"") && history.contains("\"revision\":" + r2), "history exposes actual changed path: " + history);
             String earlier = call("history", a.getPath(), "30", Long.toString(r2));
@@ -118,7 +133,11 @@ public class NcSvnHistoryContractTest {
             check(blame.contains("\"sourceRevision\":" + r2) && blame.contains("first\\nserver") && !blame.contains("LOCAL UNSAVED"), "blame uses same fixed repository content");
             check(blame.contains("\"revision\":" + r1) && blame.contains("\"revision\":" + r2), "line revision attribution");
             File local = new File(b, "A.java"); write(local, "first\nmy work\n");
+            check(call("file_commits", b.getPath()).contains("\"revision\":" + r1),
+                    "modified file still uses local BASE, even if the repository has newer history");
             manager.getUpdateClient().doUpdate(b, SVNRevision.HEAD, SVNDepth.INFINITY, false, false);
+            check(call("file_commits", b.getPath()).contains("\"revision\":" + r2),
+                    "working-copy update refreshes the visible commit metadata");
             String conflict = call("conflict_snapshot", local.getPath());
             check(conflict.contains("\"textConflict\":true") && conflict.contains("\"revision\":" + r1) && conflict.contains("\"revision\":" + r2), "actual base/theirs conflict revisions");
             check(conflict.contains(Base64.getEncoder().encodeToString("first\nmy work\n".getBytes(StandardCharsets.UTF_8))), "actual mine snapshot");

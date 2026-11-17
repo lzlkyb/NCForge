@@ -20,6 +20,48 @@ fn check_root(cfg: &AppConfig, expected: &str) -> Result<PathBuf, String> {
     Ok(crate::nc_home::strip_verbatim(&actual))
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileCommit {
+    path: String,
+    repository_root: String,
+    author: Option<String>,
+    revision: Option<i64>,
+    date: Option<i64>,
+    #[serde(default)]
+    host: String,
+}
+
+#[tauri::command]
+pub async fn svn_file_commits(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    root: String,
+    dir: String,
+) -> Result<Vec<FileCommit>, String> {
+    let cfg = state.config.read().await.clone();
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        check_root(&cfg, &root)?;
+        let dir = svn::safe_path(&cfg, &dir)?;
+        if !dir.is_dir() {
+            return Err("SVN 提交信息需要文件所在目录".to_string());
+        }
+        let bridge = svn::bridge_for(&app, &st, &cfg)?;
+        let value = bridge
+            .call("file_commits", &[&display_path(&dir)], svn::T_NET)
+            .map_err(|e| svn::split_code_label(e.code, e.message))?;
+        let mut commits: Vec<FileCommit> =
+            serde_json::from_value(value).map_err(|e| format!("文件提交信息无效: {e}"))?;
+        for commit in &mut commits {
+            commit.host = crate::svn_cred::host_of(&commit.repository_root);
+        }
+        Ok(commits)
+    })
+    .await
+    .map_err(|e| format!("读取文件提交信息失败: {e}"))?
+}
+
 #[tauri::command]
 pub async fn svn_history(
     app: AppHandle,

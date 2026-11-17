@@ -10,6 +10,7 @@
 //! 命令层在 `src/commands/xxx_cmds.rs`，在 `commands/mod.rs` 声明 + `pub use`，
 //! 最后在 `main.rs` 的 `invoke_handler!` 注册。四处，缺一不可。
 
+pub mod app_error;
 pub mod app_lifecycle;
 pub mod atomic_file;
 pub mod bmf_excel;
@@ -49,6 +50,8 @@ pub mod config;
 pub mod config_io;
 // 搜索内容包：工作区文本的压缩快照（`search.rs` 的首选数据源）
 pub mod content_pack;
+/// Rust 侧崩溃现场：panic 落盘 + 异常退出标记（前端有 ErrorBoundary，后端此前什么都没有）。
+pub mod crash;
 pub mod db_bridge;
 pub mod db_conns;
 pub mod db_engine;
@@ -65,6 +68,8 @@ pub mod db_value_search;
 pub mod db_zh;
 pub mod debug;
 pub mod decompile;
+/// 一键诊断包：白名单收集 + 脱敏 + 打 zip（打包前必须由界面逐项确认）。
+pub mod diagnostics;
 pub mod ecj_worker;
 pub mod eclipse_cp;
 pub mod encoding_reg;
@@ -89,6 +94,8 @@ pub mod local_history;
 pub mod lsp;
 pub mod md_dict;
 pub mod md_dict_sql;
+/// 跳转结果的「工作区源码优先」改写（跨模块 jdt:// → 真实 .java）。
+pub mod nav_source;
 pub mod nc_home;
 pub mod nc_home_scan;
 pub mod nc_index;
