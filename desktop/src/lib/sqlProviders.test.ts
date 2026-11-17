@@ -214,9 +214,12 @@ it("字符串、注释、重复别名和未知别名不触发字段查询", asyn
   }
   expect(h.columns).not.toHaveBeenCalled();
 });
-it("语句还没开始就打了字：直接给表名，不需要先写 from", async () => {
+it("语句还没开始就打了字：表名之外，每张表都带一条整条查询", async () => {
   const result = await complete("bd_");
-  expect(result.suggestions.map(s => s.insertText)).toEqual(["bd_material", "bd_project"]);
+  expect(result.suggestions.map(s => s.insertText)).toEqual([
+    "bd_material", "bd_project",
+    "SELECT * FROM bd_material;$0", "SELECT * FROM bd_project;$0",
+  ]);
   // 这个位置不该再请求字段：没有来源表可言
   expect(h.columns).not.toHaveBeenCalled();
 });
@@ -245,9 +248,34 @@ it("不在其他语句中间扩写，也不改写已有的语句内容", async (
     expect((await complete(sql, sql.indexOf("bd_mat") + 6)).suggestions.some(s => s.preselect)).toBe(false);
   }
 });
-it("多条前缀命中时不猜模板——猜错要撤销一整条语句", async () => {
-  const inserts = (await complete("bd_")).suggestions.map(s => s.insertText);
-  expect(inserts.some(text => text.startsWith("SELECT "))).toBe(false);
+// 2026-11-17 推翻原设计（原断言是「多命中一条模板都不给」）。那条规则把能力锁死在
+// 「用户已经知道表名」上——打 `po_` 命中 po_order / po_praybill 时反而什么都没有，
+// 用户只会读成「这功能不存在」。现在的取舍是：每条命中都给整条查询，但只给第一条。
+it("多条前缀命中时每张表各给一条整条查询，只给第一条且都不预选", async () => {
+  const items = (await complete("bd_")).suggestions;
+  const queries = items.filter(s => s.insertText.startsWith("SELECT "));
+  expect(queries.map(s => s.insertText)).toEqual([
+    "SELECT * FROM bd_material;$0", "SELECT * FROM bd_project;$0",
+  ]);
+  // COUNT / FOR UPDATE 与字段模板要逐表读字段，只在唯一命中时给
+  expect(queries.some(s => s.insertText.startsWith("SELECT COUNT"))).toBe(false);
+  // 多命中时预选哪一条都是猜：Enter 会插一张用户没选的表
+  expect(items.every(s => !s.preselect)).toBe(true);
+});
+it("多条前缀命中时整条查询排在所有表名之后", async () => {
+  const items = (await complete("bd_")).suggestions;
+  const tables = items.filter(s => !s.insertText.startsWith("SELECT ")).map(s => s.sortText!);
+  const queries = items.filter(s => s.insertText.startsWith("SELECT ")).map(s => s.sortText!);
+  expect(tables.length && queries.length).toBeTruthy();
+  expect(tables.every(t => queries.every(q => t < q))).toBe(true);
+});
+it("新语句开头什么都没打：给一条 SELECT * FROM 骨架并预选", async () => {
+  const items = (await complete("")).suggestions;
+  const skeleton = items.find(s => s.insertText === "SELECT * FROM ");
+  expect(skeleton).toMatchObject({ preselect: true, insertTextRules: 4 });
+  expect(skeleton!.sortText).toBe("!");
+  // 骨架不顶掉表名：想知道表叫什么的人直接往下选
+  expect(items.map(s => s.insertText)).toContain("bd_material");
 });
 it("表名补全提供有来源的关联查询，保留默认单表查询", async () => {
   h.business.mockResolvedValue({ table: "bd_material", relations: [{ id: "NC类引用:ref1", kind: "NC类引用",

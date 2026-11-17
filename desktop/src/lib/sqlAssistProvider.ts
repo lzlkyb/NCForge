@@ -6,7 +6,7 @@ import { tabIdOfModel } from "./sqlModels";
 import { dialectOfSqlModel, sqlAnalysisOf } from "./monacoSql";
 import { resolveSqlQualifier, sqlCtesAt, sqlScopeAt, sqlSourcesAt, sqlWildcardAt, sqlWildcardInScope, type SqlSource } from "./sqlScope";
 import { getSqlFormatPrefs } from "./sqlFormatPrefs";
-import { getSqlTemplatesEnabled, snippetEscape, tableTemplates } from "./sqlTemplates";
+import { getSqlTemplatesEnabled, querySkeleton, snippetEscape, tableTemplates } from "./sqlTemplates";
 import { billQueryRelations, billQueryTemplates, conditionQueryTemplates, completeQueryTemplates } from "./sqlBillTemplates";
 import { sqlTableDescription } from "./sqlBillHint";
 import { billJoinSpecs, billTableOf } from "./sqlBillJoin";
@@ -135,29 +135,55 @@ export async function provideSqlAssist(model: monaco.editor.ITextModel, position
   };
   // 只在新语句的第一个词上预选查询，避免在其他语法位置扩写。
   const templates = async (): Promise<Item[]> => {
-    if (!connId || !prefix || !getSqlTemplatesEnabled()) return [];
+    if (!connId || !tableList.length || !getSqlTemplatesEnabled()) return [];
     const previous = analysis.tokens.filter(t => t.end <= start && !["space", "comment", "hint"].includes(t.kind)).pop();
     if (previous && previous.text !== ";") return [];
     const next = analysis.tokens.find(t => t.start >= (identifier?.end ?? offset) && !["space", "comment", "hint"].includes(t.kind));
     if (next && next.text !== ";") return [];
+    const upper = getSqlFormatPrefs().keywordCase !== "lower";
+    /** 后面已经跟了分号时不再补一个，否则 `t;` 会变成 `t;;`。 */
+    const keepSemicolon = (sql: string) => next ? sql.replace(/;\$0$/, "$0") : sql;
+    // 光标是空的：还不知道要查哪张表。给骨架，插完直接接表名（command 唤起补全）。
+    if (!prefix) {
+      const skel = querySkeleton(upper);
+      return [{
+        label: { label: skel.label, description: skel.hint }, kind: K.Snippet, insertText: skel.insertText,
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range,
+        sortText: "!", preselect: true,
+        command: { id: "editor.action.triggerSuggest", title: "选择表" },
+        documentation: { value: `\`\`\`sql\n${skel.label.trim()}\n\`\`\`` },
+      }];
+    }
     const typed = prefix.toLowerCase();
     const named = tableList.map(t => ({ raw: t.name, name: normalized(t.name) }));
     const exact = named.filter(t => t.name.toLowerCase() === typed);
     const chineseExact = named.filter(t => rt?.ncNames?.[t.name.toLowerCase()]?.toLowerCase() === typed);
     const candidates = exact.length ? exact : chineseExact.length ? chineseExact : named.filter(t => t.name.toLowerCase().startsWith(typed) || match(t.name, rt?.ncNames?.[t.name.toLowerCase()]) === 2);
-    // 多条命中就不猜：猜错一次就要用户撤销一整条语句
-    if (candidates.length !== 1) return [];
-    const { raw, name } = candidates[0];
-    const insertText = sqlIdentifier(sqlWordKind(name, dialect) === "identifier" ? name : raw, dialect);
-    const head = sqlAssistSort(match(name, rt?.ncNames?.[name.toLowerCase()]), 4, name);
-    const upper = getSqlFormatPrefs().keywordCase !== "lower";
-    const items: Item[] = tableTemplates(insertText, upper, dialect).map((tpl, i) => ({
-      label: { label: tpl.label, description: tpl.hint }, kind: K.Snippet, insertText: next ? tpl.insertText.replace(/;\$0$/, "$0") : tpl.insertText,
-      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-      filterText: filter(name), range, sortText: i === 0 ? `!${head}` : `${head}~${i}`,
-      preselect: i === 0,
-      documentation: { value: `\`\`\`sql\n${tpl.label};\n\`\`\`` },
-    }));
+    if (!candidates.length) return [];
+    // 多张表命中**不再一条都不给**：每张表各挂一条整条查询，排在所有表名之后。
+    // 原设计是「只给唯一命中的那张表」，理由是猜错要撤销一整条语句；代价是能力被锁死在
+    // 「用户已经知道表名」这一种情况——而这条路径的全部价值恰恰是「打完前缀顺手拿到查询」，
+    // 打 `po_` 命中 po_order / po_praybill 时反而什么都不给，用户只会读成「没有这功能」。
+    // 多命中只挂 `SELECT * FROM`：COUNT / FOR UPDATE 与字段模板（联查、条件查询）仍只在
+    // 唯一命中时给——那些要逐张读字段，几十张表各读一次会把一次补全拖成几秒。
+    // 不做条数截断：截断会出现「第 31 张表没有模板」，同一批候选里有规律性的缺失比多几行更难解释。
+    const single = candidates.length === 1;
+    const idOf = (t: { raw: string; name: string }) => sqlIdentifier(sqlWordKind(t.name, dialect) === "identifier" ? t.name : t.raw, dialect);
+    const items: Item[] = candidates.flatMap((t) => {
+      const id = idOf(t), quality = match(t.name, rt?.ncNames?.[t.name.toLowerCase()]), head = sqlAssistSort(quality, 4, t.name);
+      const list = tableTemplates(id, upper, dialect).slice(0, single ? 3 : 1);
+      return list.map((tpl, i): Item => ({
+        label: { label: tpl.label, description: tpl.hint }, kind: K.Snippet, insertText: keepSemicolon(tpl.insertText),
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        filterText: filter(t.name), range,
+        // 多命中时整组排在表名（group 4）之后：先让人把表挑完，再往下拿整条查询。
+        sortText: single ? (i === 0 ? `!${head}` : `${head}~${i}`) : sqlAssistSort(quality, 9, t.name),
+        preselect: single && i === 0,
+        documentation: { value: `\`\`\`sql\n${tpl.label};\n\`\`\`` },
+      }));
+    });
+    if (!single) return items;
+    const { raw, name } = candidates[0], insertText = idOf(candidates[0]), head = sqlAssistSort(match(name, rt?.ncNames?.[name.toLowerCase()]), 4, name);
     if (!scope || rt?.status !== "connected" || !/^[a-z_][\w$#]*$/i.test(raw) || mixed(raw) || insertText !== name || dialect !== "plsql") return items;
     const deadline = Date.now() + waitBudget;
     const [metadata, rootColumns] = await Promise.all([

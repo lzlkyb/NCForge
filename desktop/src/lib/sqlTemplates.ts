@@ -20,6 +20,29 @@ export interface SqlTemplate {
 /** Monaco snippet 的元字符转义，与 `sqlEditorAssist` 里插 INSERT 模板同一口径。 */
 export const snippetEscape = (text: string): string => text.replace(/[\\$}]/g, "\\$&");
 
+/** 关键字大小写跟格式化的 `keywordCase`；`preserve` 也按大写，与右键「生成 INSERT 模板」同口径。 */
+const kwOf = (upper: boolean) => (text: string) => (upper ? text : text.toLowerCase());
+
+/**
+ * 新语句开头**还没打表名**时给的骨架。
+ *
+ * 「先打表名、再补成整条查询」要求用户已经知道表名。还有一路是反过来的：
+ * 只知道要查表，不知道叫什么。这一步至少该把 `SELECT * FROM` 敲出来，
+ * 光标停在表名位置，接着打前缀就能拿到表名补全。
+ *
+ * 不用 snippet 占位符（`${1:table}`）：占位符会把光标框在一个固定区间里，
+ * 而表名要靠「打前缀触发补全」拿到，框住反而碍事。插入后由 provider 带
+ * `editor.action.triggerSuggest` 把表名列表唤起来。
+ */
+export function querySkeleton(upper: boolean): SqlTemplate {
+  const kw = kwOf(upper);
+  return {
+    label: `${kw("SELECT")} * ${kw("FROM")} …`,
+    insertText: `${kw("SELECT")} * ${kw("FROM")} `,
+    hint: "插入查询开头，接着打表名",
+  };
+}
+
 /**
  * 给一张表生成模板列表。
  *
@@ -31,7 +54,7 @@ export const snippetEscape = (text: string): string => text.replace(/[\\$}]/g, "
  */
 export function tableTemplates(insertText: string, upper: boolean, dialect: SqlLanguage = "sql"): SqlTemplate[] {
   const id = snippetEscape(insertText);
-  const kw = (text: string) => (upper ? text : text.toLowerCase());
+  const kw = kwOf(upper);
   const listed: SqlTemplate[] = [
     {
       label: `${kw("SELECT")} * ${kw("FROM")} ${insertText}`,

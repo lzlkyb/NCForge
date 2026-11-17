@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getSqlTemplatesEnabled,
+  querySkeleton,
   setSqlTemplatesEnabled,
   snippetEscape,
   subscribeSqlTemplates,
@@ -36,6 +37,14 @@ describe("表名 → 整条查询模板", () => {
     // `$` 与 `}` 是 Monaco snippet 的元字符，必须转义成字面量
     expect(quoted.insertText).toBe('SELECT * FROM "Item\\$X\\}";$0');
     expect(snippetEscape("a\\b")).toBe("a\\\\b");
+  });
+
+  it("空光标骨架只到表名位置，不带占位符也不带分号", () => {
+    const skel = querySkeleton(true);
+    // 末尾的空格就是「光标停在表名该出现的地方」，占位符框住反而妨碍打前缀触发补全
+    expect(skel.insertText).toBe("SELECT * FROM ");
+    expect(skel.insertText).not.toContain("$");
+    expect(querySkeleton(false).insertText).toBe("select * from ");
   });
 });
 
