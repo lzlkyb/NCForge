@@ -10,11 +10,12 @@
 //! 结果是「用户说刚才报错了」而我们拿不到任何堆栈。
 //!
 //! 设计约束：
-//! - **绝不阻断 UI**：写日志失败只回错误字符串，调用方 fire-and-forget。
+//! - **绝不阻断 UI**：写日志失败只回错误，调用方 fire-and-forget。
 //! - **有界**：单文件超过 `MAX_BYTES` 就轮转成 `.1`（与 `service_log` 同命名），
 //!   只留一份历史，磁盘占用上限 = 2 × MAX_BYTES。
 //! - **单条有界**：一条超长堆栈（递归爆栈能到几 MB）先截断再写，避免一条撑爆配额。
 
+use crate::app_error::AppError;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -58,10 +59,12 @@ pub fn should_rotate(current_len: u64, incoming_len: u64) -> bool {
 }
 
 /// 追加一条前端错误。`line` 由调用方组装成单行或多行文本，这里只负责编码与配额。
-pub fn append(config_dir: &Path, line: &str) -> Result<(), String> {
+pub fn append(config_dir: &Path, line: &str) -> Result<(), AppError> {
     let path = log_path(config_dir);
-    let dir = path.parent().ok_or("日志目录无效")?;
-    fs::create_dir_all(dir).map_err(|e| format!("建日志目录失败: {e}"))?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| AppError::internal("log.badPath", "日志目录无效"))?;
+    fs::create_dir_all(dir).map_err(|e| AppError::io("建日志目录失败", e))?;
 
     let body = clamp_entry(line);
     let current = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
@@ -75,20 +78,20 @@ pub fn append(config_dir: &Path, line: &str) -> Result<(), String> {
         .create(true)
         .append(true)
         .open(&path)
-        .map_err(|e| format!("写前端日志失败: {e}"))?;
+        .map_err(|e| AppError::io("写前端日志失败", e))?;
     file.write_all(body.as_bytes())
-        .map_err(|e| format!("写前端日志失败: {e}"))?;
+        .map_err(|e| AppError::io("写前端日志失败", e))?;
     Ok(())
 }
 
 /// 读最近的前端错误日志（给设置页「查看」用）。只读尾部，避免整份读进内存。
-pub fn read_tail(config_dir: &Path, max_bytes: u64) -> Result<String, String> {
+pub fn read_tail(config_dir: &Path, max_bytes: u64) -> Result<String, AppError> {
     let path = log_path(config_dir);
     let bytes = match fs::read(&path) {
         Ok(b) => b,
         // 还没崩过不是错误，界面显示「暂无记录」即可
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
-        Err(e) => return Err(format!("读前端日志失败: {e}")),
+        Err(e) => return Err(AppError::io("读前端日志失败", e)),
     };
     // 从字符边界开始，否则首行会是半个字符。
     // 🔴 判据必须落在**字节数组**上：UTF-8 续字节是 0b10xxxxxx，
@@ -101,10 +104,13 @@ pub fn read_tail(config_dir: &Path, max_bytes: u64) -> Result<String, String> {
 }
 
 /// 确保日志目录存在（供「打开日志目录」在还没崩过时也能打开）。
-pub fn ensure_dir(config_dir: &Path) -> Result<PathBuf, String> {
+pub fn ensure_dir(config_dir: &Path) -> Result<PathBuf, AppError> {
     let path = log_path(config_dir);
-    let dir = path.parent().ok_or("日志目录无效")?.to_path_buf();
-    fs::create_dir_all(&dir).map_err(|e| format!("建日志目录失败: {e}"))?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| AppError::internal("log.badPath", "日志目录无效"))?
+        .to_path_buf();
+    fs::create_dir_all(&dir).map_err(|e| AppError::io("建日志目录失败", e))?;
     Ok(dir)
 }
 

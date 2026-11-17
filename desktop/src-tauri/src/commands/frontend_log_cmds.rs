@@ -3,7 +3,11 @@
 //! 🔴 `frontend_log_append` **不返回 Result 给业务用**：前端是 fire-and-forget，
 //! 写日志失败绝不能反过来影响正在崩溃的页面。这里仍返回 `Result` 是为了
 //! 让失败可见（控制台能看到），但调用方一律 `.catch(() => undefined)`。
+//!
+//! 错误类型是 `AppError` 而不是 `String`：这个模块是错误契约的样板（见
+//! `app_error.rs` 的约定），新命令照这个写。
 
+use crate::app_error::AppError;
 use crate::frontend_log;
 use crate::state::AppState;
 use std::sync::Arc;
@@ -16,7 +20,7 @@ pub fn frontend_log_append(
     message: String,
     stack: Option<String>,
     page: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let line = frontend_log::format_entry(&kind, &message, stack.as_deref(), page.as_deref());
     frontend_log::append(&state.config_dir, &line)
 }
@@ -26,7 +30,7 @@ pub fn frontend_log_append(
 pub fn frontend_log_read(
     state: tauri::State<'_, Arc<AppState>>,
     max_bytes: Option<u64>,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     frontend_log::read_tail(&state.config_dir, max_bytes.unwrap_or(64 * 1024))
 }
 
@@ -38,17 +42,17 @@ pub fn frontend_log_read(
 pub fn frontend_log_reveal(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     use tauri_plugin_opener::OpenerExt;
     let path = frontend_log::log_path(&state.config_dir);
     if path.exists() {
         return app
             .opener()
             .reveal_item_in_dir(&path)
-            .map_err(|e| format!("打开日志位置失败: {e}"));
+            .map_err(|e| AppError::env("log.revealFailed", format!("打开日志位置失败: {e}")));
     }
     let dir = frontend_log::ensure_dir(&state.config_dir)?;
     app.opener()
         .open_path(dir.to_string_lossy(), None::<&str>)
-        .map_err(|e| format!("打开日志目录失败: {e}"))
+        .map_err(|e| AppError::env("log.openDirFailed", format!("打开日志目录失败: {e}")))
 }

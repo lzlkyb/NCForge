@@ -11,6 +11,7 @@
  */
 import { friendlyDbError } from "./db";
 import { friendlySvnError } from "./svn";
+import { appErrorOf } from "./ipcError";
 
 /** 从任意抛出物里挖出可读文本。 */
 export function errorTextOf(e: unknown): string {
@@ -99,17 +100,55 @@ const RULES: Rule[] = [
 
 export type ErrorDomain = "db" | "svn" | "general";
 
+/**
+ * 后端 `AppError.code` → 人话。
+ *
+ * **这是新命令的主路径**：结构化错误带着稳定的 code 过来，不必靠正则猜。
+ * 下面的 `RULES` 只服务存量命令（返 `String` 的那 400 多条），两边并存。
+ *
+ * 加条目的规矩：code 由后端定义（见 `src-tauri/src/app_error.rs`），这里只写文案；
+ * code 字面值不要在前端改写或拼装，否则等于偷偷改了契约。
+ */
+const CODE_TEXT: Record<string, string> = {
+  // —— 通用 io（`AppError::from(io::Error)` 自动分流）——
+  "io.notFound": "找不到文件：可能已被移动或删除，刷新一下再试",
+  "io.permissionDenied": "没有权限：文件被系统或其他程序占着，关掉占用它的程序再试",
+  "io.alreadyExists": "目标已存在：先删掉旧的或换个名字",
+  "io.timeout": "操作超时：目标没响应，检查网络或相关文件是否被占用",
+  "io.invalidInput": "参数不合法：检查路径和输入内容",
+  "io": "读写失败：检查磁盘空间与文件占用情况",
+  // —— 诊断包 ——
+  "diagnostics.empty": "没有勾选任何内容，未生成诊断包",
+  "diagnostics.zipFailed": "打包失败：检查导出目录是否可写、磁盘是否还有空间",
+  "diagnostics.missing": "诊断包已被移动或删除",
+  "diagnostics.revealFailed": "打不开所在位置：文件可能已被删掉",
+  // —— 日志 ——
+  "log.revealFailed": "打不开日志所在位置",
+  "log.openDirFailed": "打不开日志目录",
+  "log.badPath": "日志目录无效：配置目录可能被删掉了",
+};
+
 const hasCjk = (s: string) => /[\u4e00-\u9fa5]/.test(s);
 
 /**
  * 通用翻译。`domain` 只用来优先走已有的专用翻译器（它们的判定比这里细）；
  * 专用翻译器没命中（返回的仍是英文原文）时继续走下面的规则表。
+ *
+ * 顺序是**结构优先、正则兜底**：有 code 就以 code 为准，不认识的 code 再退回
+ * 按 detail 匹配正则——这样后端新增 code 而前端还没加文案时，行为与改造前一致。
  */
 export function friendlyError(e: unknown, domain: ErrorDomain = "general"): string {
   if (domain === "db") return friendlyDbError(e);
   if (domain === "svn") {
     const s = friendlySvnError(e);
     if (hasCjk(s)) return s;
+  }
+  const structured = appErrorOf(e);
+  if (structured) {
+    const known = CODE_TEXT[structured.code];
+    if (known) return structured.hint ? `${known}（${structured.hint}）` : known;
+    // code 不认识但后端给了建议：它比前端猜得准
+    if (structured.hint) return structured.hint;
   }
   const raw = stripPrefix(errorTextOf(e));
   if (!raw) return "未知错误";
