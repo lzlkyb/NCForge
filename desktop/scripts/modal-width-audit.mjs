@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* global document */
 /**
  * 弹层宽度实测（人工跑的审计，不进 CI）。
  *

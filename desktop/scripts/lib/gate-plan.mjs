@@ -70,7 +70,23 @@ export const STEPS = [
     cwd: "desktop",
     argv: ["npm", "run", "contract:check"],
     scopes: ["frontend"],
-    why: "真源是 main.rs 的 generate_handler!；生成物过期、登记了没定义、前端拼错命令名都在这里拦。",
+    why: "真源是 commands/mod.rs 的 nc_forge_commands! 宏表；生成物过期、登记了没定义、前端拼错命令名都在这里拦。",
+  },
+  {
+    id: "bindings",
+    name: "跨 IPC 类型生成物（Rust struct → TS）",
+    cwd: "desktop",
+    argv: ["npm", "run", "bindings:check"],
+    scopes: ["frontend"],
+    why: "带 // @ts-mirror 的 struct 改了却没重新生成，生成物就会与手写类型脱节；这里比对生成物文本 + 已镜像结构体只增不减的棘轮。",
+  },
+  {
+    id: "error-contract",
+    name: "错误契约（新命令禁返 Result<_, String>）",
+    cwd: "desktop",
+    argv: ["npm", "run", "error:check"],
+    scopes: ["frontend"],
+    why: "返 String 的命令把错误压平成英文，前端只能靠正则猜语义（friendlyError 里那十几条）。存量记进基线只许减，新增即红。",
   },
   {
     id: "tokens",
@@ -198,7 +214,7 @@ export const STEPS = [
 export const SCOPES = [...new Set(Object.values(CI_JOBS))];
 
 /**
- * pre-commit 的八项：提交前只跑「纯扫描 + 秒级」的检查，重的留给 pre-push / CI。
+ * pre-commit 的十项：提交前只跑「纯扫描 + 秒级」的检查，重的留给 pre-push / CI。
  *
  * 为什么门槛是「纯扫描」而不是「重要不重要」：commit 比 push 频繁一个量级，
  * 钩子一旦超过 30 秒就会被 `--no-verify` 绕过，等于没有。所以这里只收**不需要
@@ -206,6 +222,10 @@ export const SCOPES = [...new Set(Object.values(CI_JOBS))];
  * 实测（2026-11-12，本机）：source-size 0.1s / component-size 0.5s / rust-tempdir
  * 1.1s / tokens 1.4s / fmt 2s / ui-contract 2.2s / tsc 6s（冷 23s）；全部命中约 10s。
  * boot-path（2026-11-15 加）实测 ~0.15s：只读 `main.rs` 一个文件，所以排在最前。
+ * bindings（2026-11-17 加）实测 ~0.9s：读全部 `.rs` 找 `@ts-mirror` 再比文本。
+ * 它必须在这一层——改了 Rust 字段却不重新生成的窗口，正是一次提交的距离。
+ * error-contract（2026-11-17 加）实测 ~0.1s：只扫 `commands/` 下的命令签名。
+ * 放在这一层是因为「新命令返 String」是**写的时候**就定下的事，事后改要连带改调用点。
  *
  * 🔴 为什么 component-size 必须在这一层（2026-11-12 补）：300 行红线以前只在 CI
  * 和「发版跑的完整门禁」里检查，结果是 v0.5.0 把一个 309 行的 `ResultTable` 写完、
@@ -225,6 +245,8 @@ export const SCOPES = [...new Set(Object.values(CI_JOBS))];
 export const PRECOMMIT = [
   // 按耗时从短到长排：先红的那项越便宜，越不容易被 --no-verify 绕过。
   { id: "boot-path", match: /\.rs$/ },
+  { id: "bindings", match: /\.rs$/ },
+  { id: "error-contract", match: /\.rs$/ },
   { id: "source-size", match: /\.rs$/ },
   { id: "component-size", match: /\.(ts|tsx)$/ },
   { id: "rust-tempdir", match: /\.rs$/ },

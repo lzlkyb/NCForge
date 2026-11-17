@@ -103,6 +103,14 @@ jobs:
       - name: Tauri 命令契约（Rust ↔ TS）
         run: node scripts/gate.mjs --only contract
         working-directory: desktop
+      # 带 // @ts-mirror 的 struct 改了没重新生成 → 生成物与手写类型脱节，这里拦。
+      - name: 跨 IPC 类型生成物
+        run: node scripts/gate.mjs --only bindings
+        working-directory: desktop
+      # 新命令返 Result<_, String> → 错误压平成英文，前端只能靠正则猜语义，这里拦。
+      - name: 错误契约（新命令禁返 String）
+        run: node scripts/gate.mjs --only error-contract
+        working-directory: desktop
       # 裸 hex 色值只许减不许增；新增颜色必须落到 :root token。
       - name: 设计 token 棘轮
         run: node scripts/gate.mjs --only tokens

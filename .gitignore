@@ -67,3 +67,7 @@ desktop/src-tauri/.jdtls-ext-build/
 # Gitee 私人令牌（发版镜像用，仅本机）
 .gitee-token
 desktop/.gitee-token
+
+# 启动耗时基线：**机器相关**，入库没意义（换台机器就是另一套数字）。
+# 由 `npm run boot:update` 在需要校验的机器上生成；缺失时校验脚本自动跳过。
+desktop/scripts/boot-budget.json

@@ -12,7 +12,7 @@
  *   node scripts/gate.mjs                    # 全量（pre-push 就是这一条）
  *   node scripts/gate.mjs --scope frontend   # 只跑某个 scope（可多次）
  *   node scripts/gate.mjs --only clippy      # 只跑某项（CI 每步用这个，可逗号分隔）
- *   node scripts/gate.mjs --precommit        # 提交前的八项纯扫描（pre-commit 钩子用）
+ *   node scripts/gate.mjs --precommit        # 提交前的九项纯扫描（pre-commit 钩子用）
  *   node scripts/gate.mjs --list             # 打印清单，不执行
  *   node scripts/gate.mjs --verify-ci        # 断言 CI 与发版脚本都没绕开门禁
  *

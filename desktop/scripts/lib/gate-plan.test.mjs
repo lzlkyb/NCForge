@@ -122,13 +122,17 @@ test("CI_JOBS 的键就是 workflow 里真实存在的 job", () => {
   }
 });
 
-test("pre-commit 的八项都来自清单、且不含重活", () => {
+test("pre-commit 的十项都来自清单、且不含重活", () => {
   const ids = PRECOMMIT.map((p) => p.id);
   // 顺序即契约：按耗时从短到长，便宜的先红。
   // boot-path 排第一（2026-11-15 实测 ~150 ms，只读 main.rs 一个文件，比 source-size 还便宜）。
+  // bindings 紧随其后（2026-11-17 实测 ~900 ms）：它挡的是「改了 Rust 字段没重新生成」，
+  // 而这个窗口正好是一次提交的距离，放 pre-push 就晚了。
+  // error-contract 排在 bindings 之后（2026-11-17 实测 ~100 ms，只扫 commands/ 签名）：
+  // 它挡的是「新命令返 Result<_, String>」，同样是写的时候就该知道的事。
   assert.deepEqual(
     ids,
-    ["boot-path", "source-size", "component-size", "rust-tempdir", "tokens", "fmt", "ui-contract", "tsc"],
+    ["boot-path", "bindings", "error-contract", "source-size", "component-size", "rust-tempdir", "tokens", "fmt", "ui-contract", "tsc"],
     "顺序按「快 → 慢」，别随手调",
   );
   for (const id of ids) assert.ok(stepById(id), `${id} 不在 STEPS 里，pre-commit 会跑空`);
@@ -140,12 +144,12 @@ test("pre-commit 的八项都来自清单、且不含重活", () => {
 
 test("pre-commit 的后缀匹配：改文档不跑，改代码按类型跑", () => {
   const hit = (file) => PRECOMMIT.filter((p) => p.match.test(file)).map((p) => p.id);
-  assert.deepEqual(hit("docs/x.md"), [], "只改文档时八项都不跑");
+  assert.deepEqual(hit("docs/x.md"), [], "只改文档时十项都不跑");
   assert.deepEqual(hit("CHANGELOG.md"), []);
   // 写组件是最容易踩 300 行红线的地方，必须每次都扫。
   assert.deepEqual(hit("desktop/src/components/db/X.tsx"), ["component-size", "tokens", "ui-contract", "tsc"]);
   assert.deepEqual(hit("desktop/src/lib/db.ts"), ["component-size", "tsc"]);
-  assert.deepEqual(hit("desktop/src-tauri/src/lib.rs"), ["boot-path", "source-size", "rust-tempdir", "fmt"]);
+  assert.deepEqual(hit("desktop/src-tauri/src/lib.rs"), ["boot-path", "bindings", "error-contract", "source-size", "rust-tempdir", "fmt"]);
   assert.deepEqual(hit("desktop/src/db-console.css"), ["tokens", "ui-contract"]);
 });
 
@@ -240,7 +244,7 @@ test("重活不许进 PRECOMMIT（钩子超过 30s 就等于没有）", () => {
 
 test("PRECOMMIT 按耗时从短到长排（便宜的先红，才不容易被 --no-verify）", () => {
   const order = PRECOMMIT.map((p) => p.id);
-  const cost = { "boot-path": 0, "source-size": 1, "component-size": 2, "rust-tempdir": 3, tokens: 4, fmt: 5, "ui-contract": 6, tsc: 7 };
+  const cost = { "boot-path": 0, bindings: 1, "error-contract": 2, "source-size": 3, "component-size": 4, "rust-tempdir": 5, tokens: 6, fmt: 7, "ui-contract": 8, tsc: 9 };
   for (let i = 1; i < order.length; i += 1) {
     assert.ok(cost[order[i - 1]] < cost[order[i]], `顺序反了：${order[i - 1]} 应排在 ${order[i]} 之前`);
   }
