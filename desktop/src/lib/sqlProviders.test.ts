@@ -101,6 +101,37 @@ it("表位置的动作以补全项出现，选中后唤起同一个 CodeAction �
   // 不插任何字符：空 range + 空 insertText，只负责唤起菜单。
   expect(actions.every(s => s.insertText === "")).toBe(true);
 });
+// 光标压在 `*` 上：这条动作必须排在所有候选之前。31 个字段的名字会让它永远看不见。
+it("光标压在 * 上时「展开 *」置顶，并且直接执行 editor action", async () => {
+  const items = (await complete("select * from bd_material", 7)).suggestions;
+  const action = items.find(s => (s.command as { id?: string } | undefined)?.id === "ncforge.sql.runAction");
+  expect(action).toBeTruthy();
+  expect(action!.label).toMatchObject({ label: "展开 * 为字段列表" });
+  expect(action!.command).toMatchObject({ arguments: ["ncforge.sql.expandStar"] });
+  // `\u0000` 前缀比表名的 `!` 与关键字的数字都小，所以它一定是第一行。
+  expect(String(action!.sortText).startsWith("\u0000")).toBe(true);
+  expect(items.every(s => String(s.sortText) >= String(action!.sortText))).toBe(true);
+});
+// B 的入口：不在 `*` 上，靠打出来的词把动作搜出来。
+it("打 exp 能搜到「展开 *」，并按关键词删掉已输入的词", async () => {
+  const items = (await complete("select * from bd_material where exp")).suggestions;
+  const action = items.find(s => (s.command as { id?: string } | undefined)?.id === "ncforge.sql.runAction");
+  expect(action).toBeTruthy();
+  // label 必须以关键词打头：Monaco 拿 filterText 去套 label 算高亮，两者不等长会涂错字。
+  expect(action!.label).toMatchObject({ label: "exp" });
+  expect((action!.label as { detail?: string }).detail).toContain("展开 * 为字段列表");
+  expect(action!.filterText).toBe("exp");
+  expect(action!.range).toMatchObject({ startColumn: 33, endColumn: 36 });
+});
+// 裸表名起手：整条联查（要挑子表，走菜单）与 INSERT 模板（单值，直接执行）同时出现。
+it("裸表名起手时同时给出整条联查与 INSERT 模板", async () => {
+  h.business.mockResolvedValue(billMeta);
+  h.peek.mockReturnValue(billMeta);
+  const ids = (await complete("bd_material")).suggestions
+    .map(s => (s.command as { id?: string } | undefined)?.id).filter(Boolean);
+  expect(ids).toContain("ncforge.sql.quickFix");
+  expect(ids).toContain("ncforge.sql.runAction");
+});
 it("半截前缀不预读关系，也不会把 JOIN 塞进词中间", async () => {
   const r = await complete("select * from bd_material", 20);
   expect(h.business).not.toHaveBeenCalled();

@@ -21,6 +21,7 @@ vi.mock("./sqlFormatPrefs", () => ({ getSqlFormatPrefs: () => ({ keywordCase: "u
 vi.mock("../components/ui/toast", () => ({ toast: h.toast }));
 vi.mock("./sqlJoinMeaningAssist", () => ({ wireSqlJoinMeaningAssist: () => ({ dispose() {} }) }));
 vi.mock("./sqlBillAssist", () => ({ wireSqlBillAssist: () => ({ dispose() {} }) }));
+vi.mock("./sqlSelectionAssist", () => ({ wireSqlSelectionAssist: () => ({ dispose() {} }) }));
 vi.mock("./sqlAssistGhost", () => ({ wireSqlAssistGhost: () => ({ dispose() {} }) }));
 const cleanups: (() => void)[] = [];
 
@@ -273,10 +274,12 @@ describe("SQL 编辑器习惯与辅助操作", () => {
     const a = await wire(first), b = await wire(second); first.focus(false);
     expect(h.commands.has("ncforge.sql.accept")).toBe(true);
     expect(h.commands.has("ncforge.sql.quickFix")).toBe(true);
+    // 补全列表里的单值动作（展开 * / INSERT 模板）走这条，落到同一个 editor action。
+    expect(h.commands.has("ncforge.sql.runAction")).toBe(true);
     expect([...h.commands.keys()].filter(id => id.startsWith("ncforge.sql.chooseSummary."))).toHaveLength(2);
     const { u, scope, key } = await accept();
-    // 共用命令（accept / quickFix）留到最后一个编辑器注销；每个编辑器自己的选择命令先走。
-    expect(u.usageSnapshot(scope)[key].accept).toBe(1); a.dispose(); expect(h.commands.size).toBe(3);
+    // 共用命令（accept / quickFix / runAction）留到最后一个编辑器注销；每个编辑器自己的选择命令先走。
+    expect(u.usageSnapshot(scope)[key].accept).toBe(1); a.dispose(); expect(h.commands.size).toBe(4);
     b.dispose(); expect(h.commands.size).toBe(0);
   });
 });

@@ -4,13 +4,14 @@ import { sqlAssistColumns as readAssistColumns } from "./sqlAssistColumns";
 import { connectionKey } from "./dbResultContext";
 import { tabIdOfModel } from "./sqlModels";
 import { dialectOfSqlModel, sqlAnalysisOf } from "./monacoSql";
-import { resolveSqlQualifier, sqlCtesAt, sqlScopeAt, sqlSourcesAt, type SqlSource } from "./sqlScope";
+import { resolveSqlQualifier, sqlCtesAt, sqlScopeAt, sqlSourcesAt, sqlWildcardAt, sqlWildcardInScope, type SqlSource } from "./sqlScope";
 import { getSqlFormatPrefs } from "./sqlFormatPrefs";
 import { getSqlTemplatesEnabled, snippetEscape, tableTemplates } from "./sqlTemplates";
 import { billQueryRelations, billQueryTemplates, conditionQueryTemplates, completeQueryTemplates } from "./sqlBillTemplates";
 import { sqlTableDescription } from "./sqlBillHint";
 import { billJoinSpecs, billTableOf } from "./sqlBillJoin";
-import { sqlActionsAt } from "./sqlAssistActions";
+import { sqlActionsAt, keywordFor, ACTION_COMMANDS } from "./sqlAssistActions";
+import { isPlsql, splitStatements } from "./sqlSplit";
 import { sqlPredicateContext } from "./sqlPredicateContext";
 import { sqlPredicates } from "./sqlPredicates";
 import { sqlTimePresets } from "./sqlTimePresets";
@@ -238,28 +239,72 @@ export async function provideSqlAssist(model: monaco.editor.ITextModel, position
     return meta ? billJoinSpecs(name, tableNames, meta).length : 0;
   };
   /**
-   * 位置允许的动作，作为列表末尾的可选条目。
+   * 光标所在语句能不能放 INSERT 模板：得是普通 SQL，不能是 PL/SQL 块。
+   *
+   * 判据与 `ncforge.sql.insertTemplate` 的实现（`sqlEditorAssist` 的 `fields(true)`）
+   * 同源。不同源的后果是：补全里给了这条动作，点下去只弹一句「请在普通 SQL 语句中
+   * 生成 INSERT 模板」——比不给更糟。
+   */
+  const insertableAt = (name: string): boolean => {
+    if (!name) return false;
+    const statement = splitStatements(model.getValue()).find(s => s.start <= offset && s.end >= offset);
+    return !!statement && !isPlsql(statement.text);
+  };
+  /**
+   * 位置允许的动作，混进补全列表。
    *
    * 这些能力原先只有「Ctrl+. 或灯泡」一条路（而灯泡因为 `glyphMargin` 是关着的
    * 根本没画出来），用户不知道有。放进补全列表，按 Ctrl+空格 就能看见
-   * 「这儿还能做什么」。选中不插入任何字符（空 range + 空 insertText），
-   * 只唤起同一个 CodeAction 菜单——不复制实现，避免两处判定走偏。
+   * 「这儿还能做什么」。选中不插入任何字符，只唤起真正的实现——不复制判定，
+   * 避免两处走偏。
+   *
+   * 🔴 四条硬约束（每一条都是踩过的坑）：
+   * 1. `preselect` 恒 false：`suggestSelection: "first"` 下把动作放首位，
+   *    等于把 Enter 绑给了「展开 31 个字段」；
+   * 2. 关键词命中时 **label 必须以关键词打头**：Monaco 拿 `filterText` 去套 `label`
+   *    算高亮区间，两者不等长会把中文标题开头几个字涂成高亮色，看着像乱码；
+   * 3. 关键词命中时 `range` 必须吃掉已输入的关键词：动作 `insertText` 是空串，
+   *    不吃掉就会在原地留下一个 `exp`；
+   * 4. 只有「光标真压在 `*` 上」才允许置顶。这是唯一一个「按 Ctrl+空格的第一眼
+   *    就该是它」的位置；其余位置置顶只会打乱正常的字段补全。
    */
-  const actionItems = (name: string): Item[] => name ? sqlActionsAt({
-    plsql: dialect === "plsql", templatesEnabled: getSqlTemplatesEnabled(), bare,
-    table: name, relations: relationCount(name),
-  }).map((action, i): Item => ({
-    label: { label: action.title, description: `动作 · ${action.detail}` }, kind: K.Snippet,
-    insertText: "", filterText: prefix || action.title, range: monaco.Range.fromPositions(position, position),
-    sortText: `\ufffe${String(i).padStart(2, "0")}`, command: { id: "ncforge.sql.quickFix", title: action.title },
-    documentation: { value: action.detail },
-  })) : [];
+  const actionItems = (): Item[] => {
+    const name = tableAtCaret();
+    // 展开字段要读库校验来源表，没连库时给出来只会弹一句「请先连接数据库」。
+    const expandable = !!connId && rt?.status === "connected";
+    const onStar = expandable && !!sqlWildcardAt(analysis, offset);
+    const directory = sqlActionsAt({
+      plsql: dialect === "plsql", templatesEnabled: getSqlTemplatesEnabled(), bare,
+      table: name, relations: name ? relationCount(name) : 0,
+      wildcard: expandable && (onStar || !!sqlWildcardInScope(analysis, offset)),
+      // INSERT 模板只在裸表名位置进列表（语句内那里会变成噪音），所以也只在裸位置算分句。
+      insertable: bare && insertableAt(name),
+    });
+    // 语句里另有 `*` 不等于「现在就想展开它」：只有光标真压在 `*` 上，或者用户
+    // 主动打了 `exp` 才把这条推出来。否则每一条表名补全都会多出一行无关动作。
+    const actions = directory.filter(action => action.id !== "star.expand" || onStar || !!keywordFor(action, prefix));
+    return actions.map((action, i): Item => {
+      const keyword = keywordFor(action, prefix), direct = ACTION_COMMANDS[action.id];
+      return {
+        label: keyword ? { label: keyword, detail: ` ${action.title}`, description: action.detail }
+          : { label: action.title, description: `动作 · ${action.detail}` },
+        kind: K.Event, insertText: "",
+        filterText: keyword || prefix || action.title,
+        range: keyword ? monaco.Range.fromPositions(model.getPositionAt(start), model.getPositionAt(offset)) : monaco.Range.fromPositions(position, position),
+        // `\u0000` 排在所有正常 sortText 之前（表名用 `!`、关键字用数字），`\ufffe` 排在最后。
+        sortText: `${keyword || onStar ? "\u0000" : "\ufffe"}${String(i).padStart(2, "0")}`,
+        preselect: false,
+        command: direct ? { id: "ncforge.sql.runAction", title: action.title, arguments: [direct] } : { id: "ncforge.sql.quickFix", title: action.title },
+        documentation: { value: action.detail },
+      };
+    });
+  };
   if (ctx.kind === "none" || stale()) return { suggestions: [] };
   if (ctx.kind === "table") {
     await warmBillHints();
     // 多了这一次 await，模型可能在等待期间被改过；此时 range/prefix 都已过期。
     if (stale()) return { suggestions: [] };
-    const items = [...cteItems, ...tables(), ...joinSnippets(), ...actionItems(billHit())];
+    const items = [...cteItems, ...tables(), ...joinSnippets(), ...actionItems()];
     return { suggestions: items.length ? items : connectionNotice(), incomplete: true };
   }
   if (ctx.kind === "schema") {
@@ -388,6 +433,6 @@ export async function provideSqlAssist(model: monaco.editor.ITextModel, position
   // 先算模板：`templates()` 读到的业务关系会落进 `peekSqlBusinessMetadata` 的同步副本，
   // 紧接着的 `tables()` 才能给表名标上「支持主子表联查」。
   const templateItems = bare ? await templates() : [], tableItems = bare ? tables() : [];
-  const suggestions = [...business, ...projections, ...cols, ...archiveItems, ...aliases, ...tableItems, ...templateItems, ...functions, ...snippets, ...keywords, ...(ctx.clause === "other" ? cteItems : []), ...actionItems(tableAtCaret()), ...(fieldsReady ? [] : [loadingItem])];
+  const suggestions = [...business, ...projections, ...cols, ...archiveItems, ...aliases, ...tableItems, ...templateItems, ...functions, ...snippets, ...keywords, ...(ctx.clause === "other" ? cteItems : []), ...actionItems(), ...(fieldsReady ? [] : [loadingItem])];
   return { suggestions: stale() ? [] : suggestions.length ? suggestions : connectionNotice(), incomplete: true };
 }

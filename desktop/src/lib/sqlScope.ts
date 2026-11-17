@@ -234,16 +234,22 @@ export interface SqlWildcard {
 }
 
 /**
- * 光标是否压在一个**可展开**的 `*` 上：`SELECT *` / `SELECT m.*`，且独占一个投影项。
+ * 某个 `*` token 是不是一个**可展开**的通配投影。
  *
- * 一个位置判定两处共用（右键动作 `ncforge.sql.expandStar` 与表名旁的 chip），
- * 否则「chip 显示但点了提示请把光标放在 * 上」这种自相矛盾的事一定会发生。
+ * 抽出来的原因：同一个判据现在有三处消费方——右键动作 `ncforge.sql.expandStar`、
+ * 表名旁的 chip（都走 `sqlWildcardAt`），以及补全列表的关键词直搜
+ * （`sqlWildcardInScope`）。三处标准一旦分叉，就会出现「列表给了动作、
+ * 点了却提示请把光标放在 * 上」这种自相矛盾。
  *
  * `m.* / 2` 这种乘法、`SELECT a, * FROM` 之外的半截投影都不算：展开会改坏语句。
  */
-export function sqlWildcardAt(analysis: SqlAnalysis, offset: number): SqlWildcard | undefined {
-  const token = analysis.tokens.findIndex(t => t.text === "*" && t.start <= offset && t.end >= offset);
-  if (token < 0) return undefined;
+function wildcardOf(analysis: SqlAnalysis, token: number): SqlWildcard | undefined {
+  const hit = analysis.tokens[token];
+  if (!hit || hit.text !== "*") return undefined;
+  // 取 token 自身的起点当锚点：判据只看 token 落在哪个 scope、前后邻居是谁，
+  // 与光标相距多远无关。用 token.start 而不是外部传入的 offset，是为了让
+  // 「光标压在 * 上」和「* 在光标所在语句里」两条路径走完全相同的判定。
+  const offset = hit.start;
   const scope = sqlScopeAt(analysis, offset);
   if (!scope || !scope.indices.includes(token)) return undefined;
   if (upper(analysis.tokens[scope.select]) !== "SELECT") return undefined;
@@ -259,4 +265,33 @@ export function sqlWildcardAt(analysis: SqlAnalysis, offset: number): SqlWildcar
   const source = qualified ? resolveSqlQualifier(analysis, offset, sqlName(alias), alias.text)
     : scope.sources.length === 1 ? scope.sources[0] : undefined;
   return { token, qualifier: qualified ? alias.text : undefined, source };
+}
+
+/**
+ * 光标是否压在一个**可展开**的 `*` 上：`SELECT *` / `SELECT m.*`，且独占一个投影项。
+ */
+export function sqlWildcardAt(analysis: SqlAnalysis, offset: number): SqlWildcard | undefined {
+  const token = analysis.tokens.findIndex(t => t.text === "*" && t.start <= offset && t.end >= offset);
+  return token < 0 ? undefined : wildcardOf(analysis, token);
+}
+
+/**
+ * 光标所在语句里那个**唯一**的可展开 `*`。
+ *
+ * 补全列表的关键词直搜（打 `exp`）走这里：用户站在 WHERE 里想「把上面那个 `*`
+ * 展开」，光标不可能同时压在 `*` 上。**多个 `*` 就不猜**——猜错一次要撤销一整段投影，
+ * 而多表语句里 `*` 各展开成哪张表的字段，位置信息根本判不出来。
+ */
+export function sqlWildcardInScope(analysis: SqlAnalysis, offset: number): SqlWildcard | undefined {
+  const scope = sqlScopeAt(analysis, offset);
+  if (!scope) return undefined;
+  let found: SqlWildcard | undefined;
+  for (const index of scope.indices) {
+    if (analysis.tokens[index].text !== "*") continue;
+    const wildcard = wildcardOf(analysis, index);
+    if (!wildcard) continue;
+    if (found) return undefined;
+    found = wildcard;
+  }
+  return found;
 }

@@ -2,7 +2,7 @@ import { monaco } from "./monacoSetup";
 import { connOf, rtOf, sqlColumnEpoch, sqlTabOf } from "./dbStore";
 import { sqlAssistColumns } from "./sqlAssistColumns";
 import { tabIdOfModel } from "./sqlModels";
-import { analyzeSql, sqlCompletionAt, sqlScopeAt, sqlWildcardAt, type SqlSource, type SqlWildcard } from "./sqlScope";
+import { analyzeSql, sqlCompletionAt, sqlScopeAt, sqlWildcardAt, sqlWildcardInScope, type SqlSource, type SqlWildcard } from "./sqlScope";
 import { sqlWordKind } from "./sqlLex";
 import { dialectOfSqlModel, sqlAnalysisOf } from "./monacoSql";
 import { getSqlFormatPrefs } from "./sqlFormatPrefs";
@@ -16,6 +16,7 @@ import { wireSqlBatchAssist } from "./sqlBatchAssist";
 import { wireSqlQueryCheckAssist } from "./sqlQueryCheckAssist";
 import { wireSqlJoinMeaningAssist } from "./sqlJoinMeaningAssist";
 import { wireSqlBillAssist } from "./sqlBillAssist";
+import { wireSqlSelectionAssist } from "./sqlSelectionAssist";
 import { wireSqlAssistGhost } from "./sqlAssistGhost";
 import { toast } from "../components/ui/toast";
 
@@ -26,6 +27,9 @@ let acceptCommand: monaco.IDisposable | undefined;
 /** 补全列表里的动作条目只能带命令 id：命令执行时按焦点找到编辑器，交给它的 CodeAction 菜单。 */
 const quickFixers = new Map<Editor, () => void>();
 let quickFixCommand: monaco.IDisposable | undefined;
+/** 同上，但用来直接跑一条 editor action（展开 `*`、INSERT 模板这类单值动作）。 */
+const actionRunners = new Map<Editor, (actionId: string) => void>();
+let runActionCommand: monaco.IDisposable | undefined;
 
 function current(editor: Editor) {
   const model = editor.getModel(), position = editor.getPosition();
@@ -67,7 +71,9 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
   // 裸表名上的「一键生成主子表联查」：模板只在新语句开头打表名时才进补全，
   // 用户按 `SELECT * FROM` 的常规写法撞不到，这里补一个光标旁的入口。
   disposables.push(wireSqlBillAssist(editor));
-  // 行内提示：表名后的「⌥ 主子表联查」chip 与 JOIN 条件的行尾说明。
+  // 选区类动作（转 IN / 查重 / 汇总）原先只有右键菜单一条路，接到 Ctrl+. 下。
+  disposables.push(wireSqlSelectionAssist(editor));
+  // 行内提示：表名后的「主子表联查」chip 与 JOIN 条件的行尾说明。
   disposables.push(wireSqlAssistGhost(editor));
   const reset = () => { dirty = undefined; accepted.length = 0; typed = undefined; acceptedKeys.clear(); };
 
@@ -115,6 +121,13 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
   quickFixers.set(editor, () => editor.trigger("sql-assist", "editor.action.quickFix", {}));
   if (!quickFixCommand) quickFixCommand = monaco.editor.registerCommand("ncforge.sql.quickFix", () => {
     for (const [candidate, run] of quickFixers) if (candidate.hasTextFocus()) { run(); break; }
+  });
+  // 「展开 * 为字段列表」「生成 INSERT 模板」是单值动作，没有「多个子表挑一个」的问题，
+  // 走菜单反而多一次点击。补全项直接带这个命令，落到同一个已注册的 editor action。
+  actionRunners.set(editor, id => { void editor.getAction(id)?.run(); });
+  if (!runActionCommand) runActionCommand = monaco.editor.registerCommand("ncforge.sql.runAction", (_accessor, actionId: string) => {
+    if (typeof actionId !== "string") return;
+    for (const [candidate, run] of actionRunners) if (candidate.hasTextFocus()) { run(actionId); break; }
   });
   disposables.push(editor.onDidChangeModel(reset));
   /**
@@ -205,7 +218,9 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
     let source = sourceAt(state), wildcard: SqlWildcard | undefined, qualifier: string | undefined;
     if (!insert) {
       // 判定与表名旁的 chip 共用同一份：否则会出现「chip 显示、点了却提示请把光标放在 * 上」。
-      wildcard = sqlWildcardAt(state.analysis, state.offset);
+      // 先认光标压着的 `*`，再认语句里唯一的那个：补全列表的「展开 *」可以从任意位置
+      // 触发（打 `exp` 搜出来时词条已被吃掉、光标并不在 `*` 上），两处必须同判据。
+      wildcard = sqlWildcardAt(state.analysis, state.offset) ?? sqlWildcardInScope(state.analysis, state.offset);
       if (!wildcard) { toast("请将光标放在独立的 * 或别名.* 上", "info"); return; }
       if (!wildcard.qualifier && (scope?.sources.length ?? 0) > 1) { toast("多表查询请先使用别名.*，例如 m.*，再展开字段", "info"); return; }
       source = wildcard.source; qualifier = wildcard.qualifier;
@@ -269,8 +284,9 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
     disposed = true;
     if (quick) editor.updateOptions({ quickSuggestions: quick });
     disposables.forEach(d => d.dispose()); accepts.delete(editor); reset();
-    quickFixers.delete(editor);
+    quickFixers.delete(editor); actionRunners.delete(editor);
     if (!accepts.size) { acceptCommand?.dispose(); acceptCommand = undefined; }
     if (!quickFixers.size) { quickFixCommand?.dispose(); quickFixCommand = undefined; }
+    if (!actionRunners.size) { runActionCommand?.dispose(); runActionCommand = undefined; }
   } };
 }

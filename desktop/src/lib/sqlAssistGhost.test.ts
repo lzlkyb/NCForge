@@ -113,7 +113,7 @@ describe("SQL 行内提示", () => {
     fake.actions.set("ncforge.sql.expandStar", run);
     fake.move(7);
     expect(fake.chip()!.hidden).toBe(false);
-    expect(fake.chip()!.textContent).toBe("⌥ 展开为字段");
+    expect(fake.chip()!.textContent).toBe("展开字段");
     fake.chip()!.click();
     expect(run).toHaveBeenCalledTimes(1);
   });

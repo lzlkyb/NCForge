@@ -3,7 +3,7 @@
  *
  * 两件事：
  *
- * 1. `FROM po_order` 的表名后面挂一枚可点的小 chip（「⌥ 主子表联查」）。
+ * 1. `FROM po_order` 的表名后面挂一枚可点的小 chip（「主子表联查」）。
  *    点它等于把光标放回表名末尾再开 CodeAction 菜单——判定与实现都在原来的
  *    provider 里，这里只负责「让人看见入口」。点 chip 不抢焦点（`mousedown`
  *    被拦下），否则 CodeAction 找不到当前编辑器。
@@ -83,8 +83,10 @@ export function wireSqlAssistGhost(editor: Editor): monaco.IDisposable {
     //    而它原先只在右键菜单里，用户根本撞不到。
     const wildcard = sqlWildcardAt(analysis, offset);
     if (wildcard) {
-      return showChip(model, analysis.tokens[wildcard.token].end, "⌥ 展开为字段",
-        "把 * 展开成字段列表（带中文名）· 点击执行", () => { void editor.getAction("ncforge.sql.expandStar")?.run(); });
+      // 🔴 文案里**不要键盘符号**：`⌥` 是 Mac 的 Option 键，这里的用户全在 Windows 上，
+      // 看到它既不知道按什么，也不知道能不能点。点击即执行，标题里再点出快捷键。
+      return showChip(model, analysis.tokens[wildcard.token].end, "展开字段",
+        "把 * 展开成字段列表（带中文名）· 点击或 Ctrl+.", () => { void editor.getAction("ncforge.sql.expandStar")?.run(); });
     }
     // 下面两条都依赖业务关系快照，归模板开关管：关掉模板就别再读库。
     if (!getSqlTemplatesEnabled()) return hideChip();
@@ -110,7 +112,7 @@ export function wireSqlAssistGhost(editor: Editor): monaco.IDisposable {
       return hideChip();
     }
     // 语句内点它实际是「在表名后追加 LEFT JOIN」，裸表名才是整条替换；文案统一叫联查。
-    showChip(model, analysis.tokens[index].end, "⌥ 主子表联查", `${hint} · 点击或 Ctrl+. 打开`,
+    showChip(model, analysis.tokens[index].end, "主子表联查", `${hint} · 点击或 Ctrl+. 打开`,
       () => editor.trigger("sql-ghost", "editor.action.quickFix", {}));
   };
 

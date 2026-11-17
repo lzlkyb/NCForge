@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeSql, resolveSqlQualifier, sqlCompletionAt, sqlSourcesAt, sqlWildcardAt } from "./sqlScope";
+import { analyzeSql, resolveSqlQualifier, sqlCompletionAt, sqlSourcesAt, sqlWildcardAt, sqlWildcardInScope } from "./sqlScope";
 const resolve = (sql: string, at: string, name: string) => {
   const analysis = analyzeSql(sql, "plsql"), offset = sql.indexOf(at);
   return resolveSqlQualifier(analysis, offset, name, analysis.tokens.find(t => t.start === offset)?.text);
@@ -82,5 +82,17 @@ describe("SQL查询作用域", () => {
     expect(at("select a.qty * 2 from lines a", "*")).toBeUndefined();
     expect(at("select id, * from t", "*")?.qualifier).toBeUndefined();
     expect(at("select a.id from a where b.id = *", "*")).toBeUndefined();
+  });
+  // 补全列表打 exp 时，光标在 WHERE 里也要能找到上面那个 `*`；多个 `*` 不猜。
+  it("语句内唯一的通配投影可被语句级找到，多个则不猜", () => {
+    const scope = (sql: string, at: string) => sqlWildcardInScope(analyzeSql(sql, "plsql"), sql.indexOf(at));
+    expect(scope("select * from t where id = 1", "where")?.qualifier).toBeUndefined();
+    expect(scope("select m.* from material m where m.code = 'x'", "where")?.source?.table).toBe("material");
+    // 两条语句各一个 `*`：光标在前一条的范围里只能找到前一条
+    const two = "select * from t1 where id = 1;\nselect * from t2 where id = 2";
+    expect(scope(two, "t1 where")?.source?.table).toBe("t1");
+    expect(scope(two, "t2 where")?.source?.table).toBe("t2");
+    // 同一条语句里两个可展开的 `*`：位置信息判不出该展开哪张表，一律不给
+    expect(scope("select *, b.* from a, b b where a.id = b.id", "where")).toBeUndefined();
   });
 });
