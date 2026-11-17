@@ -43,6 +43,7 @@ pub struct SvnInfo {
     pub root: String,
     /// 工作副本对应的仓库 URL。
     pub url: String,
+    pub repository_root: String,
     /// 工作副本根的版本号。
     pub revision: i64,
     pub host: String,
@@ -237,6 +238,7 @@ pub(super) fn wc_info(bridge: &Bridge, root: &Path) -> Result<SvnInfo, String> {
     Ok(SvnInfo {
         root: root_s,
         host: svn_cred::host_of(&url),
+        repository_root: v["root"].as_str().unwrap_or("").to_string(),
         url,
         revision: v["revision"].as_i64().unwrap_or(-1),
         user: None,

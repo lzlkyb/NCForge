@@ -1,6 +1,7 @@
 import { invoke } from "./tauri";
 import { trackOperation } from "./operations";
 import type { LinkedOverride } from "./linkedProjects";
+import type { DbConnConfig } from "./bindings.generated";
 
 /**
  * 应用配置（与 Rust `config::AppConfig` 一一对应）。
@@ -52,6 +53,39 @@ export interface AppConfig {
   persistent_worker: boolean;
   /** 独立模块并行构建的上限（1 = 串行，默认 2，后端夹在 1~4）。 */
   build_parallel: number;
+  /**
+   * 客户端（`JStarter`）堆上限（MB）；null = 默认 768。
+   * 与中间件的 `server_heap_mb` 分开存：客户端只画 Swing 界面，跟着 4G 走纯属浪费。
+   */
+  client_heap_mb: number | null;
+  /**
+   * SVN 用户名与口令。
+   *
+   * `svn_password_dpapi` 在出口被 `AppConfig::redacted()` 抹成占位字符串
+   * （`«dpapi-密文不过桥»`），可以安全地声明在类型里——它代表「存过没有」，
+   * 不是口令本身。
+   */
+  svn_user: string | null;
+  svn_password_dpapi: string | null;
+  /** 补丁输出目录 / 编译产物根。null = 由 `patch_defaults` 自动推导。 */
+  patch_out_dir: string | null;
+  patch_out_root: string | null;
+  /** 数据库连接的旧版单值覆盖与 `prop.xml` 自动导入的结果（见 `db_conns`）。 */
+  db_url: string | null;
+  db_user: string | null;
+  db_password_dpapi: string | null;
+  /**
+   * 数据库页的连接列表。
+   *
+   * `passwordDpapi` 同样是脱敏后的占位值（`redacted()` 连 `db_conns` 一起抹）。
+   * 字段名是 camelCase：`DbConnConfig` 带 `#[serde(rename_all = "camelCase")]`，
+   * 与 `AppConfig` 自己的 snake_case 不是同一套——这是**故意的**，别统一。
+   */
+  db_conns: DbConnConfig[];
+  /** 最近一次在数据库页用过的连接 id（表结构缓存、悬停卡片都按它取）。 */
+  db_active: string | null;
+  /** 连接列表是否已初始化过（迁移旧配置 + 自动导入 `prop.xml` 只做一次）。 */
+  db_conns_init: boolean;
 }
 
 /** 代码智能设置的局部更新。`lang_xmx_mb: 0` = 恢复默认；越界（512~4096 之外）后端会明确报错。 */
