@@ -125,6 +125,55 @@ impl WorkspaceTypes {
         scored.into_iter().map(|(_, e)| e.hit.clone()).collect()
     }
 
+    /// 按**全限定名精确**取声明位置。跳转改写用（见 [`crate::nav_source`]）。
+    ///
+    /// 🔴 不能拿 [`Self::search`] 顶替：那是模糊打分 + 截断，`DeliveryVO` 会先命中
+    /// `DeliveryVOConverter` 这类更短的名字，跳转就落到别的类上去了。这里只认
+    /// 全等，且**不截断**——同名类分布在多个模块时要全部给出，由调用方定优先级。
+    ///
+    /// 嵌套类：索引按「**包 + 简单名**」记录（`typed_declarations` 的正则只取声明
+    /// 处的标识符，不带外层），所以 `p.Outer$Inner` 在索引里是 `p.Inner`。
+    /// 先按原样全等找；找不到且带 `$` 时，把最后一段 `$` 之后的简单名接回包名再找
+    /// 一次——仍只认全等，不做包含匹配。
+    ///
+    /// ⚠️ 这条回落**可能选错同名的另一个嵌套类**（同一包里两个外层各有 `Inner`）。
+    /// 取「文件路径 + 行号」最小的那条，结果稳定；真跳错了用户一眼能看出来，
+    /// 而完全不改写就必然停在反编译桩上。宁可给出稳定的近似，也不静默不修。
+    pub fn exact(&self, fqcn: &str) -> Vec<TypeHit> {
+        if fqcn.is_empty() || fqcn.len() > 300 {
+            return Vec::new();
+        }
+        let mut out = self.by_name(fqcn);
+        if out.is_empty() {
+            // 按第一个 `$` 切出「外层全名 + 嵌套段」，包名取外层最后一个点号之前。
+            // （用 rsplit_once 从最后一个 `$` 切也等价——`$` 段里不含点号，包名推导
+            //  结果相同；这里取第一个只是读起来更直白。2026-11-17 逐一枚举核对过。）
+            if let Some((outer, nested)) = fqcn.split_once('$') {
+                let package = outer.rsplit_once('.').map_or("", |(p, _)| p);
+                let simple = nested.rsplit('$').next().unwrap_or(nested);
+                if !simple.is_empty() {
+                    let dotted = if package.is_empty() {
+                        simple.to_string()
+                    } else {
+                        format!("{package}.{simple}")
+                    };
+                    out = self.by_name(&dotted);
+                }
+            }
+        }
+        // 稳定次序：同一份索引多次查询结果一致，跳转目标才不会随内存布局漂。
+        out.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
+        out
+    }
+
+    fn by_name(&self, name: &str) -> Vec<TypeHit> {
+        self.entries
+            .iter()
+            .filter(|e| e.hit.name == name)
+            .map(|e| e.hit.clone())
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -943,6 +992,96 @@ mod tests {
             idx.search("FromLegacy", 5).first().unwrap().module,
             "legacy"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 跳转改写用的精确查名（`nav_source`）：只认全等，不能被更短的同前缀名挤掉。
+    #[test]
+    fn exact_matches_full_name_only_and_keeps_all_modules() {
+        let root = tmp("exact");
+        write(
+            &root,
+            "so/src/public/nc/vo/so/DeliveryVO.java",
+            "package nc.vo.so;\npublic class DeliveryVO {}\n",
+        );
+        // 更短的名字：模糊搜索会把它排前面，精确查名不能命中它
+        write(
+            &root,
+            "so/src/public/nc/vo/so/DeliveryVOConverter.java",
+            "package nc.vo.so;\npublic class DeliveryVOConverter {}\n",
+        );
+        // 同名类在另一个模块：两条都要给出，由调用方定优先级
+        write(
+            &root,
+            "ic/src/public/nc/vo/so/DeliveryVO.java",
+            "package nc.vo.so;\npublic class DeliveryVO {}\n",
+        );
+        let idx = build(&root, &root.join("cache"));
+
+        let hits = idx.exact("nc.vo.so.DeliveryVO");
+        assert_eq!(hits.len(), 2, "两个模块的同名类都要给出：{hits:?}");
+        assert!(hits.iter().all(|h| h.name == "nc.vo.so.DeliveryVO"));
+        let mut modules: Vec<&str> = hits.iter().map(|h| h.module.as_str()).collect();
+        modules.sort_unstable();
+        assert_eq!(modules, vec!["ic", "so"]);
+        // 声明在第 2 行第 14 列（1 基）
+        assert!(hits.iter().all(|h| h.line == 2 && h.column == 14));
+
+        // 前缀 / 简单名 / 不存在的包都不算命中
+        assert!(idx.exact("nc.vo.so.Delivery").is_empty());
+        assert!(idx.exact("DeliveryVO").is_empty());
+        assert!(idx.exact("nc.vo.other.DeliveryVO").is_empty());
+        assert!(idx.exact("").is_empty());
+        // 更长的那个类只能用它自己的全名查到
+        assert_eq!(idx.exact("nc.vo.so.DeliveryVOConverter").len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 嵌套类：索引按「包 + **简单名**」存（`p.Inner`，不带外层），
+    /// jdt.ls 给 `p.Outer$Inner`，要能回落到 `p.Inner`。
+    #[test]
+    fn exact_resolves_nested_class_by_simple_name() {
+        let root = tmp("exact-nested");
+        write(
+            &root,
+            "so/src/public/p/Outer.java",
+            "package p;\npublic class Outer {\n  public static class Inner {}\n}\n",
+        );
+        let idx = build(&root, &root.join("cache"));
+        let hits = idx.exact("p.Outer$Inner");
+        assert_eq!(hits.len(), 1, "嵌套类要能查到：{hits:?}");
+        // 索引里存的就是不带外层的名字
+        assert_eq!(hits[0].name, "p.Inner");
+        assert_eq!(hits[0].line, 3);
+        // 外层本身也查得到，且两者互不干扰
+        assert_eq!(idx.exact("p.Outer").len(), 1);
+        // 回落之后仍不存在的不许命中
+        assert!(idx.exact("p.Outer$Missing").is_empty());
+        // 多层嵌套：取最后一段简单名
+        assert_eq!(idx.exact("p.Outer$Mid$Inner").len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 🔴 顶层类不能被 `$` 回落误伤：`p.Missing$Inner` 不许因为包里有别的 Inner 就命中。
+    #[test]
+    fn exact_nested_fallback_stays_in_same_package() {
+        let root = tmp("exact-nested-pkg");
+        write(
+            &root,
+            "so/src/public/p/A.java",
+            "package p;\npublic class A {\n  public static class Inner {}\n}\n",
+        );
+        write(
+            &root,
+            "so/src/public/q/B.java",
+            "package q;\npublic class B {\n  public static class Inner {}\n}\n",
+        );
+        let idx = build(&root, &root.join("cache"));
+        let hits = idx.exact("p.A$Inner");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].name, "p.Inner", "不能跨包命中 q.Inner");
+        // 别的包里的同名嵌套类不会被 p 的查询带出来
+        assert!(idx.exact("z.Z$Inner").is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

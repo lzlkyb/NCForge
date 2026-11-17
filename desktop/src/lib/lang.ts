@@ -338,6 +338,16 @@ interface LspDiagnostic {
   severity?: number;
   message: string;
   source?: string;
+  /**
+   * 🔴 jdt.ls 的 problem id（字符串或数字），**快速修复的唯一匹配依据**，不能丢。
+   *
+   * 2026-11-17 反编译随包 jdt.ls 0.57 核实（`CodeActionHandler.getProblemId`）：
+   * 它把 `diagnostic.code` 用 `Integer.parseInt` / `Number.intValue` 解析成 problemId，
+   * 解析不出就是 0；而 `QuickFixProcessor.process` 见 `id == 0` 直接 return。
+   * 也就是说 **code 丢了等于这条诊断没有任何快速修复**，与不传这条诊断等价。
+   * 此前本接口没声明 code，从接收起就丢，导致 121 个 quickfix 分支全部失效。
+   */
+  code?: string | number;
 }
 
 /** 最近一次收到的诊断（键 = 小写路径）。未稳定时只放这里不显示。 */
@@ -383,9 +393,28 @@ function applyMarkers(lowerPath: string): void {
         message: d.message,
         severity: monaco.MarkerSeverity[severityName(d.severity)],
         source: d.source ?? MARKER_OWNER,
+        // code 一并带上：Monaco 的「快速修复」灯泡按 marker 过滤，
+        // 且用户/扩展读 marker 时也要能拿到 problem id。
+        code: d.code === undefined ? undefined : String(d.code),
       })),
     );
   });
+}
+
+/**
+ * 取某个文件**最近一批原始 LSP 诊断**，给 `textDocument/codeAction` 当上下文用。
+ *
+ * 🔴 为什么不能读 `monaco.editor.getModelMarkers` 顶替（2026-11-17）：
+ * marker 是 LSP 诊断映射后的产物，`severity` 已被翻译成 Monaco 枚举、`code` 被
+ * 字符串化，且 ecj 编译诊断（owner `ecj`）与 jdt.ls 诊断混在同一个 model 上。
+ * 服务端要的是**它自己发出来的那份** problem id，混入别家诊断会污染匹配。
+ * 这里直接给 `latestDiags` 里的原件，owner 天然只有 jdt.ls 一家。
+ *
+ * 返回空数组表示「这个文件当前没有 jdt.ls 诊断」——调用方据此传空上下文，
+ * 此时服务端只返回 source/refactor 类动作，是正确行为而不是 bug。
+ */
+export function jdtDiagnosticsFor(path: string): LspDiagnostic[] {
+  return latestDiags.get(path.toLowerCase()) ?? [];
 }
 
 function clearMarkers(): void {

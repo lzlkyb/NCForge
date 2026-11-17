@@ -11,7 +11,8 @@ import { monaco } from "./monacoSetup";
 import { ask, context } from "./langProviders";
 import { toLspPosition, toMonacoRange, type LspRange } from "./langConvert";
 import { toast } from "../components/ui/toast";
-import { loadJdtSource, langCapabilityEpoch } from "./lang";
+import { loadJdtSource, langCapabilityEpoch, jdtDiagnosticsFor } from "./lang";
+import { pickCodeActionDiagnostics } from "./codeActionDiagnostics";
 import { workspaceEpoch } from "./workspaceEpoch";
 import { navigationTargets } from "./navigationTargets";
 
@@ -129,20 +130,27 @@ export function registerExtraLangProviders(): void {
   });
 
   monaco.languages.registerCodeActionProvider("java", {
-    provideCodeActions: async (model, range) => {
+    provideCodeActions: async (model, range, _ctx, token) => {
+      const version = model.getVersionId(), epoch = workspaceEpoch(), capability = langCapabilityEpoch();
+      const current = () => !token.isCancellationRequested && !model.isDisposed() && model.getVersionId() === version && epoch === workspaceEpoch() && capability === langCapabilityEpoch();
       const pos = { lineNumber: range.startLineNumber, column: range.startColumn };
       const ctx = await context(model, pos);
-      if (!ctx) return null;
+      if (!ctx || !current()) return null;
+      const lspRange = {
+        start: toLspPosition(range.startLineNumber, range.startColumn),
+        end: toLspPosition(range.endLineNumber, range.endColumn),
+      };
+      // 🔴 必须传诊断，且必须是 jdt.ls 自己那份原件（2026-11-17）。
+      // 原先这里写 `diagnostics: []`，注释说「jdt.ls 主要按 range 反查它自己那份诊断」——
+      // 反编译随包 0.57 证明**没有这种反查**：`CodeActionHandler` 的 problem 位置只来自
+      // 本参数，而 `QuickFixProcessor` 见空数组直接返回空 ⇒ 121 个 quickfix 分支全失效。
+      // 过期风险由 `current()` 抢号 + 只取相交诊断共同兜住，详见 codeActionDiagnostics.ts。
+      const diagnostics = pickCodeActionDiagnostics(jdtDiagnosticsFor(ctx.path), lspRange);
       const res = await ask<LspCodeAction[]>("textDocument/codeAction", ctx, {
-        range: {
-          start: toLspPosition(range.startLineNumber, range.startColumn),
-          end: toLspPosition(range.endLineNumber, range.endColumn),
-        },
-        // 不传诊断：jdt.ls 的 quick fix 主要按 range 反查它自己那份诊断，
-        // 传一份可能过期的诊断列表反而会把修复过滤掉。
-        context: { diagnostics: [] },
+        range: lspRange,
+        context: { diagnostics },
       });
-      if (!res?.length) return null;
+      if (!res?.length || !current()) return null;
       const out: monaco.languages.CodeAction[] = [];
       for (const a of res) {
         if (!a.title) continue;

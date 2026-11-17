@@ -906,6 +906,14 @@ pub async fn lang_request(
     // 夹住：0 会让请求发出去就判定超时（前端拿到的错误是"超时"而不是真实原因），
     // 过大的值则让一个卡死的 jdt.ls 调用长期占着工作线程。
     let timeout = Duration::from_millis(timeout_ms.unwrap_or(30_000).clamp(1_000, 120_000));
+    // 跳转改写要用的工作区根：必须在 async 体里取（配置是 tokio  RwLock），
+    // 取不到就传 None —— 改写整段跳过，跳转退回 jdt.ls 原结果，不会更差。
+    let nav_root = if crate::nav_source::is_nav_method(&method) {
+        let root = state.config.read().await.workspace_root.clone();
+        root.map(|r| (PathBuf::from(r), state.config_dir.join("type-index")))
+    } else {
+        None
+    };
     tauri::async_runtime::spawn_blocking(move || {
         if method == "ncforge/typeCompletion" {
             return Ok(crate::java_type_completion::candidates(&session, &p));
@@ -917,10 +925,42 @@ pub async fn lang_request(
             return crate::java_type_completion::resolve_item(&session, &p, timeout);
         }
         let out = session.client.request(&method, p, timeout)?;
-        Ok(session.from_server(&out))
+        let out = session.from_server(&out);
+        Ok(prefer_workspace_source(out, &method, &session, nav_root))
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// 跳转结果里指向 jar/class 的目标，若工作区有同名源码就换成源码位置。
+///
+/// 🔴 为什么必须在后端做（2026-11-17）：影子工程只 junction 当前模块
+/// （`shadow::generate`），跨模块的类在 jdt.ls 眼里只有字节码，`definition` 只返回
+/// **一条** `jdt://` —— 前端排序排不出第二条。而工作区类型索引覆盖全部模块，
+/// 这里查一次表就能把它换成真实 `.java`。索引没建好 / 没命中一律原样返回。
+fn prefer_workspace_source(
+    out: Value,
+    method: &str,
+    session: &LangSession,
+    nav_root: Option<(PathBuf, PathBuf)>,
+) -> Value {
+    if !crate::nav_source::is_nav_method(method) {
+        return out;
+    }
+    let Some((root, cache_dir)) = nav_root else {
+        return out;
+    };
+    // 不阻塞：一份索引都没有时 shared_opt 起后台构建并返回 None，本次跳转照旧走 jar。
+    let Some(index) = crate::workspace_types::shared_opt(&root, &cache_dir) else {
+        return out;
+    };
+    let module = session.module().to_string();
+    let (rewritten, n) = crate::nav_source::rewrite(&out, &module, &|fqcn| index.exact(fqcn));
+    if n > 0 {
+        // debug 而不是 info：Ctrl+点击是高频操作，info 会把状态日志刷满。
+        log::debug!("[nav] {method}: {n} 个 jar 目标改写为工作区源码（当前模块 {module}）");
+    }
+    rewritten
 }
 
 /// `java.project.provideSemanticTokens` 的参数：0.57 只认影子工程 URI 这一个字符串参数。
