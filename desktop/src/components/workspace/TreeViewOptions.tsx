@@ -6,6 +6,8 @@ import {
   toggleNcStructure,
   useCompactPackages,
   useNcStructure,
+  toggleSvnAuthor,
+  useSvnAuthor,
 } from "../../lib/treeViewPrefs";
 import { toggleDirectSwitch, useDirectSwitch } from "../../lib/projectSwitchPref";
 import { useNcComponents } from "../../hooks/useNcComponents";
@@ -26,11 +28,14 @@ export function TreeViewOptions({ root, onClose }: { root?: string; onClose: () 
   const direct = useDirectSwitch();
   const packageView = usePackageView();
   const nc = useNcStructure();
+  const svnAuthor = useSvnAuthor();
   // 只看当前工作区这一份：别的工程有没有登记，不影响这里能不能用
   const { bcNames } = useNcComponents(root ? [root] : [], false);
   const ncReady = bcNames.size > 0;
   return (
     <>
+      {packageView && <MenuItem label="显示 SVN 提交信息" checked={svnAuthor} trailing={svnAuthor ? <Icon name="check" size={16} /> : undefined}
+        onClick={() => { toggleSvnAuthor(); onClose(); }} />}
       <MenuItem label="压缩中间包" checked={compact} trailing={compact ? <Icon name="check" size={16} /> : undefined}
         onClick={() => { toggleCompactPackages(); onClose(); }} />
       <MenuItem label="NC 结构视图" checked={nc} trailing={nc ? <Icon name="check" size={16} /> : undefined}

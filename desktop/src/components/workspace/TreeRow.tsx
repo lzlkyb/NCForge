@@ -2,6 +2,7 @@ import { memo, useContext, type CSSProperties, type MouseEvent as ReactMouseEven
 import { CodeSvnBadge } from "./CodeSvnBadge";
 import { svnStatusLabel } from "../../lib/svn";
 import { TreeSvnContext } from "./TreeSvnContext";
+import { useTreeCommitAuthor } from "./TreeCommitAuthors";
 import { treeFileKind, type JavaTreeKind } from "../../lib/treeFileKind";
 import { pathKey } from "../../lib/treeSvn";
 import { WorkspaceGlyph } from "./WorkspaceGlyph";
@@ -176,6 +177,7 @@ export const TreeFileRow = memo(function TreeFileRow({
   selected,
   mark,
   javaKind,
+  compactType,
   problem,
   memberExpanded,
   onToggleMembers,
@@ -193,6 +195,7 @@ export const TreeFileRow = memo(function TreeFileRow({
   selected: boolean;
   mark: EncodingMark | undefined;
   javaKind?: JavaTreeKind;
+  compactType?: boolean;
   /** 这个文件自己的编译问题。 */
   problem?: ProblemMark;
   memberExpanded?: boolean;
@@ -206,7 +209,14 @@ export const TreeFileRow = memo(function TreeFileRow({
   onContextMenu: (e: ReactMouseEvent, path: string, isDir: boolean) => void;
 }) {
   const svn = useContext(TreeSvnContext).files.get(pathKey(path));
+  const commit = useTreeCommitAuthor(path, svn);
   const kind = treeFileKind(name, javaKind);
+  const localStatus = svn === "M" && compactType ? "有未提交的本地修改" : svn && svnStatusLabel[svn];
+  const problems = problemDescription(problem);
+  const status = (problem || (!compactType && svn)) && <span className="wb-tree-file-status">
+    {!compactType && svn && <CodeSvnBadge status={svn} />}
+    <ProblemBadge mark={problem} path={path} name={name} tabStop={selected} compact={compactType} />
+  </span>;
   return (
     <div
       className="wb-row"
@@ -220,36 +230,32 @@ export const TreeFileRow = memo(function TreeFileRow({
       aria-current={active || undefined}
       aria-expanded={memberExpanded}
       aria-label={name}
-      aria-description={[kind.label, svn && svnStatusLabel[svn], problemDescription(problem)].filter(Boolean).join(" · ")}
+      aria-description={[kind.label, commit?.detail, localStatus, problems].filter(Boolean).join(" · ")}
       style={{ "--wb-tree-pad": `${padLeft}px` } as CSSProperties}
       data-active={active || undefined}
       data-selected={selected || undefined}
       onClick={() => onOpen(path)}
       onDoubleClick={() => onPin?.(path)}
       onContextMenu={(e) => onContextMenu(e, path, false)}
-      title={`${name} · ${kind.label}${mark ? `\n${encodingHint(mark)}` : ""}`}
+      title={[name + " · " + kind.label, commit?.detail, localStatus && "SVN · " + localStatus, problems, mark && encodingHint(mark)].filter(Boolean).join("\n")}
     >
       {onToggleMembers && <span className="wb-file-disclosure" title={memberExpanded ? "收起 Java 成员" : "展开 Java 成员"}
         onClick={e => { e.stopPropagation(); onToggleMembers(path); }} onDoubleClick={e => e.stopPropagation()}>
         <WorkspaceGlyph name={memberExpanded ? "down" : "right"} size={12} />
       </span>}
-      <TreeTypeMarker kind={kind} />
-      <WorkspaceFileName name={name} className="wb-row-name" />
-      {svn && <CodeSvnBadge status={svn} />}
-      {bookmarks > 0 && (
-        <span
-          className="wb-bookmark-mark"
-          title={`${bookmarks} 条书签（F11 在光标处加/去）`}
-        />
-      )}
-      {mark && (
-        // 「UTF-8!」四个字要占 40 多像素，在六层目录下会把文件名挤成「Vouc…」。
-        // 缩成 U8，完整说明放在行的 title 里。
-        <span className="wb-enc-badge" title={encodingHint(mark)}>
-          U8
-        </span>
-      )}
-      <ProblemBadge mark={problem} path={path} name={name} tabStop={selected} />
+      <span className="wb-tree-file-label">
+        <TreeTypeMarker kind={kind} compact={compactType}
+          overlay={compactType && svn ? <CodeSvnBadge status={svn} overlay /> : undefined} />
+        {compactType && status}
+        <WorkspaceFileName name={name} className="wb-row-name" />
+        {bookmarks > 0 && <span className="wb-bookmark-mark" title={`${bookmarks} 条书签（F11 在光标处加/去）`} />}
+        {mark && <span className="wb-enc-badge" title={encodingHint(mark)}>U8</span>}
+      </span>
+      {commit && <span className="wb-tree-commit" title={commit.detail} aria-hidden="true">
+        <span className="wb-tree-author" data-tone={commit.tone}>{commit.author}</span>
+        {commit.time && <span className="wb-tree-commit-time">{commit.time}</span>}
+      </span>}
+      {!compactType && status}
     </div>
   );
 });

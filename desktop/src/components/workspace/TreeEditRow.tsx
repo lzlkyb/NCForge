@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Icon } from "../ui/icon";
 import { splitFileName } from "../../lib/workspace";
 
@@ -16,6 +16,7 @@ export function TreeEditRow({
   selectStem,
   isDir,
   padLeft,
+  packageView,
   error,
   busy,
   onSubmit,
@@ -26,6 +27,7 @@ export function TreeEditRow({
   selectStem: boolean;
   isDir: boolean;
   padLeft: number;
+  packageView?: boolean;
   error: string | null;
   busy: boolean;
   onSubmit: (value: string) => void;
@@ -67,7 +69,9 @@ export function TreeEditRow({
       <div
         ref={boxRef}
         className="wb-tree-edit"
-        style={{ paddingLeft: padLeft }}
+        style={packageView ? { "--wb-tree-pad": `${padLeft}px` } as CSSProperties : { paddingLeft: padLeft }}
+        data-package-editor={packageView || undefined}
+        data-dir={isDir || undefined}
         data-bad={error ? true : undefined}
       >
         {/* ✓ / ✕ 放在输入框内部：树只有 240px，放到外面会把深层目录的输入框挤没 */}

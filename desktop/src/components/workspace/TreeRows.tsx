@@ -12,9 +12,11 @@ import { javaKindOfSymbol } from "../../lib/treeFileKind";
 import { hasJavaMembers, type TreeMembers, type JavaTreeMember } from "../../lib/javaTreeMembers";
 import { JavaMemberRows } from "./JavaMemberRows";
 import { TreeEditRow } from "./TreeEditRow";
+import { treeRowInset } from "./treeRowInset";
 import { TreeDirRow, TreeFileRow, TreeRowNote } from "./TreeRow";
 import { treeRowChunks } from "./TreeRowChunks";
-import { joinPath, type EncodingMark } from "../../lib/workspace";
+import { TreeCommitAuthors } from "./TreeCommitAuthors";
+import { filePathKey, joinPath, type EncodingMark } from "../../lib/workspace";
 import { chainOpen, dirChain } from "../../lib/treeCompact";
 import { bcBadge, type ComponentIndex } from "../../lib/ncManifest";
 import { packageChildren, packageCompact, sourceForPath, type PackageRoots, type PackageIndexes } from "../../lib/packageTree";
@@ -35,6 +37,8 @@ export interface TreeRowsCtx {
   filter: (name: string, path: string, isDir: boolean, kind?: string) => boolean;
   problemPaths: ReadonlyMap<string, ProblemMark>;
   problemPackages: ReadonlyMap<string, ProblemMark>;
+  packageView: boolean;
+  showCommitAuthors: boolean;
   /** 压缩中间包：单链目录合成一行；关掉时每层各占一行。 */
   compact: boolean;
   packageRoots?: PackageRoots;
@@ -71,7 +75,7 @@ export interface TreeRowsCtx {
   onCancelEdit: () => void;
 }
 
-function EditRow({ ctx }: { ctx: TreeRowsCtx }) {
+function EditRow({ ctx, depth }: { ctx: TreeRowsCtx; depth: number }) {
   const st = ctx.editing;
   if (!st) return null;
   return (
@@ -80,7 +84,8 @@ function EditRow({ ctx }: { ctx: TreeRowsCtx }) {
       placeholder={st.placeholder}
       selectStem={st.mode === "rename"}
       isDir={st.isDir}
-      padLeft={st.padLeft}
+      padLeft={ctx.packageView ? treeRowInset(depth, true, !st.isDir) : st.padLeft}
+      packageView={ctx.packageView}
       error={ctx.editError}
       busy={ctx.busy}
       onSubmit={ctx.onCommitEdit}
@@ -94,11 +99,11 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
   const state = ctx.dirs[dir];
   const javaKinds = useJavaTreeKinds(dir, state);
   const rows: JSX.Element[] = [];
-  const notePad = 6 + depth * 14 + 20;
+  const notePad = treeRowInset(depth, ctx.packageView, true);
   const creating = ctx.editing && ctx.editing.mode !== "rename" && ctx.editing.parent === dir;
 
   // 新建的输入行出现在该目录内容的最前面
-  if (creating) rows.push(<EditRow key={`edit-${dir}`} ctx={ctx} />);
+  if (creating) rows.push(<EditRow key={`edit-${dir}`} ctx={ctx} depth={depth} />);
   if (!state || state.status === "loading") {
     rows.push(
       <TreeRowNote key={`${dir}#l`} padLeft={notePad}>
@@ -131,15 +136,18 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
     );
   }
 
+  const activeKey = ctx.activePath ? filePathKey(ctx.activePath) : null;
+  const renameTarget = ctx.editing?.mode === "rename" ? ctx.editing.target : undefined;
   for (const { dir: from, item, label, kind } of kids) {
     const full = joinPath(from, item.name);
-    if (ctx.editing && ctx.editing.mode === "rename" && ctx.editing.target?.toLowerCase() === full.toLowerCase()) {
-      rows.push(<EditRow key={`rename-${full}`} ctx={ctx} />);
+    // A compacted package is edited at its visible row, even when the target is the chain tail.
+    const chain = item.isDir ? dirChain(ctx.compact && packageCompact(ctx.packageRoots, full, ctx.packageIndexes), full, label ?? item.name, ctx.dirs) : null;
+    const visiblePath = ctx.packageView && chain ? chain.tail : full;
+    if (renameTarget && filePathKey(renameTarget) === filePathKey(visiblePath)) {
+      rows.push(<EditRow key={`rename-${visiblePath}`} ctx={ctx} depth={depth} />);
       continue;
     }
-    if (item.isDir) {
-      // 压缩中间包：`com → aier → erp` 只有一个子目录时合成一行 `com.aier.erp`
-      const chain = dirChain(ctx.compact && packageCompact(ctx.packageRoots, full, ctx.packageIndexes), full, label ?? item.name, ctx.dirs);
+    if (chain) {
       const open = chainOpen(chain, ctx.expanded);
       // 只有工程根下这一层才是 NC 的模块目录；再深就是包/目录，名字对上了也不是组件
       const bc = ctx.isBcModule(full) ? bcBadge(item.name, ctx.bcNames) : undefined;
@@ -152,7 +160,7 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
           level={depth + 1}
           open={open}
           selected={ctx.selectedPath === chain.tail}
-          padLeft={6 + depth * 14}
+          padLeft={treeRowInset(depth, ctx.packageView, false)}
           parent={from}
           bc={bc}
           sourceRoot={kind === "source"}
@@ -175,15 +183,16 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
           path={full}
           id={rowId(full)}
           level={depth + 1}
-          active={ctx.activePath === full}
+          active={activeKey !== null && activeKey === filePathKey(full)}
           selected={ctx.selectedPath === full}
           mark={ctx.marks[full]}
           javaKind={javaKind}
           problem={ctx.problemPaths.get(diagnosticPathKey(full))}
+          compactType={ctx.packageView}
           memberExpanded={canExpand ? !!members : undefined}
           onToggleMembers={canExpand ? ctx.onToggleMembers : undefined}
           bookmarks={ctx.bookmarkCounts.get(pathKey(full)) ?? 0}
-          padLeft={6 + depth * 14 + 20}
+          padLeft={notePad}
           onOpen={ctx.onActivate}
           onPin={ctx.onPin}
           onContextMenu={ctx.onContextMenu}
@@ -193,5 +202,6 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
         selected={ctx.selectedPath} onJump={member => ctx.onOpenMember(full, member)} />);
     }
   }
-  return <>{treeRowChunks(rows)}</>;
+  const fileDirs = ctx.showCommitAuthors ? new Set(kids.filter(({ item }) => !item.isDir).map(({ dir: from }) => from)) : undefined;
+  return <TreeCommitAuthors dirs={fileDirs}>{treeRowChunks(rows)}</TreeCommitAuthors>;
 }

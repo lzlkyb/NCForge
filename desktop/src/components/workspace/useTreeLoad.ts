@@ -4,16 +4,13 @@ import { baseName, encodingMarks, joinPath, listDir, type DirItem } from "../../
 import { chainFor, chainOpen, collapseChain } from "../../lib/treeCompact";
 import { SRC_DIR, ncDepthOffset } from "../../lib/ncStructure";
 import { useTreeWatch } from "./useTreeWatch";
+import { useTreeReveal } from "./useTreeReveal";
 import { pathKey } from "../../lib/treeSvn";
 import { isUnderPath } from "../../lib/treeProjects";
 import { getSession, setSession, setTree, useWorkspaceSelector } from "../../lib/workspaceSession";
 import { usePackageIndexes } from "../../hooks/usePackageIndexes";
 import { usePackageRoots } from "../../hooks/usePackageRoots";
-import { packageLocation, sourceForPath } from "../../lib/packageTree";
 import { workspaceEpoch } from "../../lib/workspaceEpoch";
-
-/** 定位到某个文件时最多展开多少层：防止异常路径（工作区外的长路径）把界面锁死。 */
-const REVEAL_MAX_DEPTH = 40;
 
 /**
  * 文件树的数据层：按需加载某一层、维护展开态与编码标记。
@@ -251,50 +248,18 @@ export function useTreeLoad(
     if (!isOpen && dirs[path]?.status !== "ok") void load(path);
   };
 
-  /**
-   * 定位到某个文件：逐层展开祖先并加载，返回是否成功。
-   *
-   * 祖先链直接从路径字符串算出来，不向后端问——`com/aier/erp/x.java` 的父目录就是
-   * 路径前缀。可定位的路径 = 任一关联工程内的路径：自动定位可能停在别的工程的文件上
-   * （比如刚跨工程打开），这时要先把那个工程的根展开。
-   */
-  const reveal = useCallback(
-    async (path: string, explicit = false): Promise<boolean> => {
-      if (!path || workspaceEpoch() !== epoch) return false;
-      const roots = projectRoots && projectRoots.length > 0 ? projectRoots : [root];
-      // 根互相嵌套时取最长的那个：路径归属只有一位真答案
-      const owner = roots
-        .filter((r) => isUnderPath(path, r))
-        .sort((a, b) => b.length - a.length)[0];
-      if (!owner) return false;
-      const parts = path.slice(owner.length).replace(/^[\\/]/, "").split(/[\\/]/).filter(Boolean);
-      if (parts.length > REVEAL_MAX_DEPTH) return false;
-      // 多工程树里工程根本身是一行，必须先展开它；单工程时 expanded 里本来就有它
-      const mode = explicit ? null : filterMode.current;
-      if (explicit && filterMode.current) setFilteredTree(null);
-      setExpandedPaths([owner], true, mode);
-      const source = sourceForPath(packageRoots, path);
-      const index = source ? await ensure(source) : null;
-      if (workspaceEpoch() !== epoch) return false;
-      const projection = source && index ? [source, packageLocation(source, index, path)] : null;
-      const revealDirs = projection ? projection.filter((dir): dir is string => !!dir) : [];
-      let cur = revealDirs[revealDirs.length - 1] ?? owner;
-      const from = cur === owner ? 0 : cur.slice(owner.length).split(/[\\/]/).filter(Boolean).length;
-      for (let i = from; i < parts.length - 1; i += 1) {
-        cur = joinPath(cur, parts[i]);
-        revealDirs.push(cur);
-      }
-      // 注意祖先循环从第一段开始：文件所在目录也要展开，不能只展开父目录本身
-      if (getSession().tree.dirs[owner]?.status !== "ok") await load(owner);
-      for (const cur of revealDirs) {
-        if (workspaceEpoch() !== epoch) return false;
-        setExpandedPaths([cur], true, mode);
-        if (getSession().tree.dirs[cur]?.status !== "ok") await load(cur);
-      }
-      return workspaceEpoch() === epoch;
-    },
-    [load, projectRoots, root, epoch, packageRoots, ensure, setExpandedPaths],
-  );
+  /** 从目录列表取实际名称，展开状态和滚动才能命中树渲染使用的路径。 */
+  const reveal = useTreeReveal({
+    root,
+    epoch,
+    projectRoots,
+    packageRoots,
+    ensure,
+    load,
+    setExpandedPaths,
+    filterMode,
+    setFilteredTree,
+  });
 
   return { dirs, expanded, marks, mode: filtered?.mode ?? null, setMode, load, expand, toggle, toggleRow, depthOf, reveal, packageRoots, packageIndexes, invalidatePackages: invalidate };
 }

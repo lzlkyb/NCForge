@@ -2,6 +2,7 @@
 import { act, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
 import { TreeSvnContext } from "./TreeSvnContext";
 import { pathKey } from "../../lib/treeSvn";
 import { FileTree, type FileTreeHandle } from "./FileTree";
@@ -62,7 +63,7 @@ const onDeleted = vi.fn();
 const onCompileModule = vi.fn();
 const treeRef = createRef<FileTreeHandle>();
 
-const render = async (activePath: string | null = null, projects?: LinkedProject[], svn = { files: new Map(), directories: new Map(), summary: null }) => {
+const render = async (activePath: string | null = null, projects?: LinkedProject[], svn: React.ContextType<typeof TreeSvnContext> = { files: new Map(), directories: new Map(), summary: null }) => {
   await act(async () =>
     root.render(
       <ViewActivityContext.Provider value={true}>
@@ -84,6 +85,9 @@ const render = async (activePath: string | null = null, projects?: LinkedProject
     ),
   );
 };
+
+/** 定位有 120ms 防抖，等它落地。 */
+const waitReveal = () => act(async () => { await new Promise((r) => setTimeout(r, 160)); });
 
 const rowByName = (name: string) =>
   [...container.querySelectorAll(".wb-row")].find((el) => el.textContent?.includes(name)) ?? null;
@@ -578,6 +582,15 @@ describe("多工程树", () => {
     expect(menuItem("编译模块")).toBeUndefined();
   });
 
+  it("跳到关联工程时展开工程并高亮文件", async () => {
+    await render(null, PROJECTS);
+    expect(projectRow("lib")?.getAttribute("aria-expanded")).toBe("false");
+    await render(`${OTHER.toUpperCase()}\\UTIL.JAVA`, PROJECTS);
+    await waitReveal();
+    expect(projectRow("lib")?.getAttribute("aria-expanded")).toBe("true");
+    expect(rowByExact("Util.java")?.getAttribute("aria-current")).toBe("true");
+  });
+
   /**
    * 多工程树里徽章与 NC 结构视图按**各自工程**的 manifest 生效。
    *
@@ -658,12 +671,6 @@ describe("自动定位", () => {
     if (cmd === "fs_encoding_marks") return [];
     return [];
   };
-  /** 定位有 120ms 防抖，等它落地。 */
-  const waitReveal = () =>
-    act(async () => {
-      await new Promise((r) => setTimeout(r, 160));
-    });
-
   it("默认开：切到某个文件就展开父目录并显示那一行", async () => {
     mocks.invoke.mockImplementation(replyA);
     await render(FILE);
@@ -672,6 +679,98 @@ describe("自动定位", () => {
     await waitReveal();
     expect(rowByExact("A.java")).toBeTruthy();
     expect(mocks.invoke).toHaveBeenCalledWith("fs_list_dir", { path: MODULES });
+  });
+
+  it.each([
+    "c:\\W\\NEWAR\\MODULES\\B.JAVA",
+    "c:/W/NEWAR/MODULES/B.JAVA",
+  ])("从 A 跳到 %s 时展开真实目录、滚动并高亮 B，后退时定位回 A", async (target) => {
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+    try {
+      setSession({ tree: { ...getSession().tree, dirs: {
+        [ROOT]: { status: "ok", items: [
+          { name: "modules", isDir: true, size: 0 },
+          { name: "A.java", isDir: false, size: 10 },
+        ] },
+      } } });
+      mocks.invoke.mockImplementation(async (cmd, args) => {
+        if (cmd === "fs_list_dir" && args.path === MODULES) return [{ name: "B.java", isDir: false, size: 10 }];
+        return [];
+      });
+      const from = `${ROOT}\\A.java`;
+      await render(from);
+      await waitReveal();
+      expect(rowByExact("B.java")).toBeNull();
+
+      await render(target);
+      await waitReveal();
+      const b = rowByExact("B.java");
+      expect(b?.hasAttribute("data-active")).toBe(true);
+      expect(rowByExact("A.java")?.hasAttribute("data-active")).toBe(false);
+      expect(scroll.mock.contexts.slice(-1)[0]).toBe(b);
+
+      await render(from);
+      await waitReveal();
+      expect(rowByExact("A.java")?.hasAttribute("data-active")).toBe(true);
+      expect(scroll.mock.contexts.slice(-1)[0]).toBe(rowByExact("A.java"));
+    } finally {
+      scroll.mockRestore();
+    }
+  });
+
+  it("旧目录读取晚到时保留较新跳转的高亮和滚动位置", async () => {
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+    const files = [{ name: "B.java", isDir: false, size: 10 }];
+    let finishRead!: (entries: typeof files) => void;
+    const oldDirectory = new Promise<typeof files>(resolve => { finishRead = resolve; });
+    try {
+      mocks.invoke.mockImplementation(async (cmd, args) =>
+        cmd === "fs_list_dir" && args.path === MODULES ? oldDirectory : [],
+      );
+      await render(`${MODULES}\\B.java`);
+      await waitReveal();
+      expect(mocks.invoke).toHaveBeenCalledWith("fs_list_dir", { path: MODULES });
+      await render(`${ROOT}\\readme.txt`);
+      await waitReveal();
+      expect(scroll.mock.contexts.slice(-1)[0]).toBe(rowByExact("readme.txt"));
+
+      await act(async () => finishRead(files));
+      expect(rowByExact("B.java")?.hasAttribute("data-active")).toBe(false);
+      expect(scroll).toHaveBeenCalledTimes(1);
+    } finally {
+      scroll.mockRestore();
+    }
+  });
+
+  it("自动定位保留变更筛选，手动定位退出筛选后滚到文件", async () => {
+    const svn: React.ContextType<typeof TreeSvnContext> = {
+      files: new Map([[pathKey(`${MODULES}\\Other.java`), "M"]]),
+      directories: new Map([[pathKey(ROOT), 1]]),
+      summary: null,
+    };
+    const target = `${ROOT}\\readme.txt`;
+    await render(null, undefined, svn);
+    const list = container.querySelector<HTMLElement>('[role="tree"]')!;
+    const toggle = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("只看改动"));
+    list.scrollTop = 90;
+    await click(toggle);
+    list.scrollTop = 0;
+
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {
+      expect(list.scrollTop).toBe(90);
+    });
+    try {
+      await render(target, undefined, svn);
+      await waitReveal();
+      expect(rowByExact("readme.txt")).toBeNull();
+      expect(scroll).not.toHaveBeenCalled();
+
+      await act(async () => window.dispatchEvent(new CustomEvent("ncforge-reveal-in-tree", { detail: target })));
+      expect(rowByExact("readme.txt")?.getAttribute("aria-current")).toBe("true");
+      expect(scroll.mock.contexts).toEqual([rowByExact("readme.txt")]);
+    } finally {
+      scroll.mockRestore();
+    }
   });
 
   it("关掉后打开文件不再动树；显式「在文件树中显示」仍然有效", async () => {
@@ -1034,6 +1133,60 @@ describe("NC 结构视图", () => {
 
 
 describe("包资源管理器", () => {
+  it("完整文件名后显示 SVN 提交人和时间，改动置于图标旁", async () => {
+    const changedName = "AierReturnPushBillForJCBO.java";
+    const names = ["Clean.java", changedName, "New.java", "Conflict.java", "Untracked.java", "Unknown.java"];
+    setSession({ root: ROOT, tree: { root: ROOT, expanded: new Set([ROOT]), marks: {}, dirs: {
+      [ROOT]: { status: "ok", items: names.map(name => ({ name, isDir: false, size: 10 })) },
+    } } });
+    const original = mocks.invoke.getMockImplementation()!;
+    const repositoryRoot = "https://svn.local/project";
+    const changedPath = `${ROOT}\\${changedName}`;
+    setCodeDiags([{ path: changedPath, line: 1, column: 1, severity: "warning", message: "未使用" }]);
+    const commits = [
+      { path: `${ROOT}\\Clean.java`, repositoryRoot, host: "svn.local", author: "alex", revision: 12, date: null },
+      { path: changedPath, repositoryRoot, host: "svn.local", author: "meilin", revision: 8, date: new Date(2025, 10, 18, 17, 12).getTime() },
+      { path: `${ROOT}\\New.java`, repositoryRoot, host: "svn.local", author: null, revision: null, date: null },
+      { path: `${ROOT}\\Unknown.java`, repositoryRoot, host: "svn.local", author: null, revision: 3, date: null },
+    ];
+    mocks.invoke.mockImplementation(async (cmd, args) => cmd === "svn_file_commits" ? commits : original(cmd, args));
+    const client = new QueryClient();
+    setPackageView(true);
+    const svn: React.ContextType<typeof TreeSvnContext> = {
+      files: new Map([[pathKey(changedPath), "M"], [pathKey(`${ROOT}\\New.java`), "A"], [pathKey(`${ROOT}\\Conflict.java`), "C"]]),
+      directories: new Map(), summary: null, commitScope: { root: ROOT, repositoryRoot, host: "svn.local", user: "alex", client },
+    };
+    await render(null, undefined, svn);
+    const author = (name: string) => rowByExact(name)?.querySelector(".wb-tree-author");
+    await act(async () => { await vi.waitFor(() => expect(client.getQueryData(["svn-file-commits", ROOT, pathKey(ROOT)])).toEqual(commits)); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(mocks.invoke.mock.calls.filter(([cmd]) => cmd === "svn_file_commits")).toEqual([["svn_file_commits", { root: ROOT, dir: ROOT }]]);
+    expect(author("Clean.java")?.textContent).toBe("alex");
+    expect(author("Clean.java")?.getAttribute("data-tone")).toBe("self");
+    const changed = rowByExact(changedName)!;
+    expect(author(changedName)?.getAttribute("data-tone")).toBe("other");
+    expect(changed.querySelector(".wb-file-name")?.textContent).toBe(changedName);
+    const overlay = changed.querySelector(".wb-tree-type .wb-svn-overlay");
+    expect(overlay?.getAttribute("data-st")).toBe("mod");
+    expect(overlay?.getAttribute("title")).toBe("有未提交的本地修改");
+    expect(overlay?.textContent).toBe("");
+    expect(changed.querySelector(".vc-badge")).toBeNull();
+    const warning = changed.querySelector(".wb-tree-file-label .wb-problem-badge");
+    expect(warning?.textContent).toBe("");
+    expect(warning?.getAttribute("title")).toContain("1 个警告");
+    expect(changed.querySelector(".wb-tree-commit-time")?.textContent).toBe("2025-11-18 17:12");
+    expect(changed.getAttribute("aria-description")).toContain("meilin · r8 · 提交时间 2025-11-18 17:12 · 有未提交的本地修改");
+    expect(author("New.java")?.textContent).toBe("未提交");
+    expect(rowByExact("New.java")?.querySelector(".wb-tree-commit-time")).toBeNull();
+    expect(rowByExact("New.java")?.querySelector(".wb-svn-overlay[data-st='add'] svg")).toBeTruthy();
+    expect(rowByExact("Conflict.java")?.querySelector(".wb-svn-overlay[data-st='conflict'] svg")).toBeTruthy();
+    expect(author("Untracked.java")?.textContent).toBe("未纳管");
+    expect(author("Unknown.java")?.textContent).toBe("未知");
+    expect(author("Unknown.java")?.hasAttribute("data-tone")).toBe(false);
+    await rightClick(rowByExact("Clean.java")!);
+    expect(document.body.textContent).toContain("查看 SVN 提交历史");
+  });
+
   it("展开依赖库才读取工程依赖，并按已解析的附件定位源码", async () => {
     const original = mocks.invoke.getMockImplementation()!;
     const sourcePath = `${ROOT}\\sources.zip`;
@@ -1079,6 +1232,8 @@ describe("包资源管理器", () => {
     const key = (name: string) => act(async () => tree.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true })));
     await key("ArrowRight");
     expect(rowByExact("Demo")?.querySelector(".wb-tree-type-badge")?.textContent).toBe("类");
+    expect((rowByExact("Demo.java") as HTMLElement).style.getPropertyValue("--wb-tree-pad")).toBe("32px");
+    expect((rowByExact("Demo") as HTMLElement).style.getPropertyValue("--wb-tree-pad")).toBe("42px");
     expect(rowByExact("count")?.getAttribute("aria-description")).toContain("字段");
     await key("ArrowRight");
     await key("ArrowRight");
@@ -1130,8 +1285,9 @@ describe("包资源管理器", () => {
     await click(parentRow);
     expect(rowByExact("Parent.properties")).toBeTruthy();
     expect(rowByExact("factory")).toBeNull();
-    await act(async () => window.dispatchEvent(new CustomEvent("ncforge-reveal-in-tree", { detail: `${child}\\Factory.java` })));
-    expect(rowByExact("Factory.java")).toBeTruthy();
+    await render(`${child}\\Factory.java`.toUpperCase());
+    await waitReveal();
+    expect(rowByExact("Factory.java")?.getAttribute("aria-current")).toBe("true");
     expect(mocks.invoke).not.toHaveBeenCalledWith("fs_list_dir", { path: `${source}\\nccloud` });
     await click(rowByExact("Factory.java"));
     expect(onOpen).toHaveBeenCalledWith(`${child}\\Factory.java`);
@@ -1144,6 +1300,18 @@ describe("包资源管理器", () => {
       await new Promise(resolve => setTimeout(resolve, 220));
     });
     expect(rowByExact("nccloud.itf.eye.portal.page")).toBeTruthy();
+    const fileRow = rowByExact("Factory.java") as HTMLElement;
+    expect(fileRow.style.getPropertyValue("--wb-tree-pad")).toBe("52px");
+
+    await rightClick(fileRow);
+    await click(menuItem("重命名"));
+    const editor = () => container.querySelector<HTMLElement>(".wb-tree-edit");
+    expect(editor()?.style.getPropertyValue("--wb-tree-pad")).toBe("52px");
+    await act(async () => editor()?.querySelector("input")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+
+    await act(async () => treeRef.current?.startCreate("file"));
+    expect(editor()?.style.getPropertyValue("--wb-tree-pad")).toBe("52px");
+    expect(editor()?.querySelector("input")?.getAttribute("placeholder")).toBe("文件名");
   });
 
   it("平铺已验证的源码根，按需打开真实路径，切换后可从原目录访问", async () => {

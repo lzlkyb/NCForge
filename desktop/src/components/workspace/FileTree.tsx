@@ -1,13 +1,17 @@
 import {
   useCallback,
+  useContext,
   useImperativeHandle,
   useMemo,
   useState,
   forwardRef,
+  lazy,
+  Suspense,
 } from "react";
 import { ContextMenu } from "./ContextMenu";
 import { TreeDeleteConfirm, TreeViewFilters } from "./TreeChrome";
 import { TreeRows, type TreeRowsCtx } from "./TreeRows";
+import { TreeSvnContext } from "./TreeSvnContext";
 import { PackageDependencies } from "./PackageDependencies";
 import { TreeProjectRows } from "./TreeProjectRows";
 import { useTreeViewFilter } from "./useTreeViewFilter";
@@ -28,9 +32,11 @@ import type { NewEntryKind } from "../../lib/workspace";
 import { useTreeNewJava } from "../../hooks/useTreeNewJava";
 import { flattenTree, treeRowId as rowId } from "../../lib/treeNav";
 import { countBookmarks, useBookmarks } from "../../lib/bookmarks";
-import { useCompactPackages, useNcStructure, usePackageView, useRevealOnOpen } from "../../lib/treeViewPrefs";
+import { useCompactPackages, useNcStructure, usePackageView, useRevealOnOpen, useSvnAuthor } from "../../lib/treeViewPrefs";
 import { isUnderPath } from "../../lib/treeProjects";
 import type { LinkedProject } from "../../lib/linkedProjects";
+
+const TreeSvnHistory = lazy(() => import("./TreeSvnHistory"));
 
 interface Props {
   root: string;
@@ -77,6 +83,9 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   const compact = useCompactPackages();
   const ncStructure = useNcStructure();
   const packageView = usePackageView();
+  const { commitScope } = useContext(TreeSvnContext);
+  const svnAuthor = useSvnAuthor();
+  const showCommitAuthors = packageView && svnAuthor && !!commitScope;
   const revealOnOpen = useRevealOnOpen();
   const multi = (projects?.length ?? 0) > 1;
   // 稳定引用：它进了 useTreeLoad.reveal 的依赖，每帧换新会让自动定位反复触发
@@ -140,7 +149,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     root, load, expand, setSelected, onCreated,
     onEntryCreated: path => { if (packageView) invalidatePackages([path]); },
   });
-  const { menu, menuItems, openMenu, closeMenu } = useTreeMenu({
+  const { menu, menuItems, openMenu, closeMenu, history, closeHistory } = useTreeMenu({
     root,
     marks: problemMarks.paths,
     isEditable,
@@ -202,6 +211,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     bookmarkCounts,
     filter: filterFn,
     problemPaths: problemMarks.paths, problemPackages: problemMarks.packages,
+    packageView, showCommitAuthors,
     compact, packageRoots, packageIndexes,
     hoist,
     members: packageView ? members : undefined,
@@ -225,6 +235,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
       <div
         ref={treeList}
         className="wb-tree-list"
+        data-package-view={packageView || undefined}
         role="tree"
         aria-label={packageView ? "包资源管理器" : "文件树"}
         tabIndex={0}
@@ -251,6 +262,9 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu)} onClose={closeMenu} />
       )}
+      {history && <Suspense fallback={null}>
+        <TreeSvnHistory path={history.path} revision={history.revision} onClose={closeHistory} />
+      </Suspense>}
 
       <TreeDeleteConfirm pending={pendingDelete} onCancel={cancelDelete} onConfirm={() => void confirmDelete()} />
       {newJavaDialog}

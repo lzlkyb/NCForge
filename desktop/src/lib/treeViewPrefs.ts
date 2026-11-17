@@ -74,3 +74,9 @@ export const togglePackageView = () => packagePref.set(!packagePref.get());
 export function usePackageView(): boolean {
   return useSyncExternalStore(packagePref.subscribe, packagePref.get);
 }
+
+const svnAuthorPref = createPref("ncforge.tree.svnAuthor");
+export const toggleSvnAuthor = () => svnAuthorPref.set(!svnAuthorPref.get());
+export function useSvnAuthor(): boolean {
+  return useSyncExternalStore(svnAuthorPref.subscribe, svnAuthorPref.get);
+}

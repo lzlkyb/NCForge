@@ -10,6 +10,8 @@ import { dirName, type NewEntryKind } from "../lib/workspace";
 import type { ProblemMark } from "../lib/problemMarks";
 import { diagnosticPathKey } from "../lib/diagnosticScope";
 import { showProblems } from "../lib/showProblems";
+import { fileCommitKey } from "../components/workspace/TreeCommitAuthors";
+import type { SvnFileCommit } from "../lib/svn";
 
 export interface TreeMenuTarget {
   path: string;
@@ -52,7 +54,8 @@ export function useTreeMenu({
   load: (path: string) => Promise<void>;
   setSelected: (target: TreeMenuTarget) => void;
 }) {
-  const svnFiles = useContext(TreeSvnContext).files;
+  const { files: svnFiles, commitScope } = useContext(TreeSvnContext);
+  const [history, setHistory] = useState<{ path: string; root: string; revision: number } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(
     null,
   );
@@ -89,7 +92,16 @@ export function useTreeMenu({
         return mark ? mark.errors + mark.warnings : 0;
       })(),
       onShowProblems: showProblems,
-    }), ...svnCodeMenuItems(m.path, m.isDir ? undefined : svnFiles.get(pathKey(m.path)))];
+    }), ...svnCodeMenuItems(m.path, m.isDir ? undefined : svnFiles.get(pathKey(m.path))), ...historyItems(m)];
+
+  function historyItems({ path, isDir }: TreeMenuTarget): ContextMenuItem[] {
+    if (isDir || !commitScope) return [];
+    const files = commitScope.client.getQueryData<SvnFileCommit[]>(fileCommitKey(root, dirName(path)));
+    const commit = files?.find(file => pathKey(file.path) === pathKey(path));
+    const revision = commit?.revision;
+    if (revision == null || !commitScope.repositoryRoot || commit?.repositoryRoot !== commitScope.repositoryRoot) return [];
+    return [{ label: "查看 SVN 提交历史", icon: "history", onSelect: () => setHistory({ path, root, revision }) }];
+  }
 
   const openMenu = (e: MouseEvent, path: string, isDir: boolean) => {
     e.preventDefault();
@@ -98,5 +110,6 @@ export function useTreeMenu({
     setMenu({ x: e.clientX, y: e.clientY, path, isDir });
   };
 
-  return { menu, menuItems, openMenu, closeMenu: () => setMenu(null) };
+  return { menu, menuItems, openMenu, closeMenu: () => setMenu(null),
+    history: history?.root === root ? history : null, closeHistory: () => setHistory(null) };
 }

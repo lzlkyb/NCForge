@@ -115,9 +115,11 @@
   container-type: inline-size;
 }
 .wb-tree-list:focus-visible { outline: 2px solid hsl(var(--ring) / 0.5); outline-offset: -2px; }
-.wb-row {
+.wb-row,.wb-tree-edit[data-package-editor] {
   /* Cap deep indentation so the type, suffix and row statuses still fit at 180px. */
   --wb-row-indent: min(var(--wb-tree-pad, 6px), 43cqi, max(6px, 100cqi - 136px));
+}
+.wb-row {
   --wb-branch: color-mix(in srgb, hsl(var(--muted-foreground)) 30%, transparent);
   position: relative;
   display: flex;
@@ -174,6 +176,9 @@
   width:18px; display:grid; place-items:center; border-radius:var(--r-control); color:hsl(var(--muted-foreground));
 }
 .wb-file-disclosure:hover { background:hsl(var(--accent)); color:hsl(var(--foreground)); }
+.wb-tree-list[data-package-view] .wb-file-disclosure {
+  inset-inline-start:max(2px, calc(var(--wb-row-indent) - 18px));
+}
 .wb-symbol-icon { display:inline-flex; align-items:center; justify-content:center; flex:none; color:hsl(var(--muted-foreground)); }
 .wb-member-row { color:hsl(var(--muted-foreground)); }
 .wb-member-row:hover, .wb-member-row[data-selected] { color:hsl(var(--foreground)); }
@@ -286,6 +291,13 @@ html[data-ui-density="comfortable"] .wb-tree-list .wb-row { height:30px; }
   background: hsl(var(--card));
   box-shadow: 0 0 0 3px hsl(var(--ring) / 0.16);
 }
+.wb-tree-edit[data-package-editor] {
+  /* Subtract the field border and padding so the inline icon stays on the row's icon rail. */
+  padding-inline-start:max(0px, calc(var(--wb-row-indent) + var(--wb-edit-icon-offset, 0px) - 7px));
+}
+.wb-tree-edit[data-package-editor][data-dir] { --wb-edit-icon-offset:19px; }
+.wb-tree-edit[data-package-editor] .wb-tree-edit-field { gap:5px; }
+.wb-tree-edit[data-package-editor] .wb-tree-edit-field > .wb-row-icon { width:16px; }
 .wb-tree-edit[data-bad] .wb-tree-edit-field {
   border-color: hsl(var(--destructive));
   box-shadow: 0 0 0 3px hsl(var(--destructive) / 0.14);
@@ -380,7 +392,52 @@ html[data-ui-density="comfortable"] .wb-tree-list .wb-row { height:30px; }
 .wb-file-stem, .wb-file-ext { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .wb-file-ext { flex:none; max-width:100%; }
 .wb-row > .wb-file-name { flex:1 1 auto; }
+.wb-tree-file-label,.wb-tree-file-status { display:flex; align-items:center; gap:5px; }
+.wb-tree-file-label { flex:1 1 auto; min-width:0; }
+.wb-tree-file-label > .wb-file-name { flex:0 1 auto; }
+.wb-tree-file-status { flex:none; justify-content:flex-end; }
+.wb-tree-file-status:empty { display:none; }
+.wb-tree-list[data-package-view] .wb-row[data-kind^="java"] .wb-tree-type { flex-basis:16px; }
+.wb-tree-list[data-package-view] .wb-row[data-kind^="java"] .wb-tree-type-badge {
+  width:15px;
+  height:15px;
+  border-radius:50%;
+  font-size:10px;
+}
+.wb-tree-list[data-package-view] .wb-row { --wb-branch:color-mix(in srgb, hsl(var(--muted-foreground)) 12%, transparent); }
+.wb-tree-list[data-package-view] .wb-row:is([aria-expanded="true"],[data-selected],[data-active]) {
+  --wb-branch:color-mix(in srgb, hsl(var(--primary)) 48%, transparent);
+}
+.wb-tree-list[data-package-view] .wb-row[aria-level]:not([data-file])::before {
+  inset-inline-start:max(3px, calc(var(--wb-row-indent) - 3px));
+}
+.wb-tree-list[data-package-view] .wb-row[data-file]::before {
+  inset-inline-start:max(3px, calc(var(--wb-row-indent) - 21px));
+}
+/* Scroll the real row width. Chunks also need that width because they contain paint. */
+.wb-tree-list[data-package-view] :is(.wb-row[data-file], .wb-tree-row-chunk) {
+  width:max-content;
+  min-width:100%;
+}
+.wb-tree-list[data-package-view] .wb-tree-row-chunk { contain-intrinsic-inline-size:auto 0px; }
+.wb-tree-list[data-package-view] .wb-tree-file-label,
+.wb-tree-list[data-package-view] .wb-tree-file-label > .wb-file-name { flex:none; }
+.wb-tree-list[data-package-view] .wb-tree-file-status { gap:2px; }
+.wb-tree-commit {
+  display:flex;
+  flex:none;
+  align-items:baseline;
+  gap:8px;
+  margin-inline-start:5px;
+  font-size:11px;
+  font-weight:500;
+  color:hsl(var(--muted-foreground));
+}
+.wb-tree-author[data-tone="self"] { color:hsl(var(--primary)); }
+.wb-tree-author[data-tone="other"] { color:color-mix(in srgb, var(--wb-icon-blue) 60%, hsl(213 80% 52%)); }
+.wb-tree-commit-time { font-variant-numeric:tabular-nums; }
 .wb-tree-type {
+  position:relative;
   display:grid;
   place-items:center;
   flex:0 0 45px;

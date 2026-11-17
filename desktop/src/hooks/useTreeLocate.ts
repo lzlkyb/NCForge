@@ -1,5 +1,6 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { treeRowId } from "../lib/treeNav";
+import { REVEAL_IN_TREE_EVENT } from "../lib/revealInTree";
 
 /** 自动定位的防抖：连着点标签时不要每个都展开一遍。 */
 const REVEAL_DELAY_MS = 120;
@@ -11,38 +12,53 @@ const REVEAL_DELAY_MS = 120;
  * （不受开关影响——用户主动要求定位时说「你关了自动所以不给你定位」是耍赖）。
  */
 export function useTreeLocate(
-  reveal: (path: string, explicit?: boolean) => Promise<boolean>,
+  reveal: (path: string, explicit: boolean, signal: AbortSignal) => Promise<string | null>,
   activePath: string | null,
   enabled: boolean,
   clearFilter: () => void,
 ) {
-  /**
-   * 行是异步渲染出来的：两帧之后再滚，避免「滚到了还没出现的行」。
-   * 被筛掉的行定位过去等于「看不见的成功」，所以先清筛选。
-   */
+  const pending = useRef<AbortController>();
+  const [scrollRequest, setScrollRequest] = useState<{ path: string; signal: AbortSignal }>();
+
   const locate = useCallback(
-    async (path: string | null, explicit = false) => {
-      if (!path) return;
-      clearFilter();
-      if (!(await reveal(path, explicit))) return;
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() =>
-          document.getElementById(treeRowId(path))?.scrollIntoView({ block: "nearest" }),
-        ),
-      );
+    (path: string, explicit: boolean) => {
+      pending.current?.abort();
+      const request = new AbortController();
+      pending.current = request;
+      const { signal } = request;
+      const run = async () => {
+        if (!path || signal.aborted || path.includes("://")) return;
+        clearFilter();
+        const rowPath = await reveal(path, explicit, signal);
+        if (rowPath && !signal.aborted) setScrollRequest({ path: rowPath, signal });
+      };
+      const timer = explicit ? undefined : window.setTimeout(() => void run(), REVEAL_DELAY_MS);
+      if (explicit) void run();
+      return () => {
+        window.clearTimeout(timer);
+        request.abort();
+      };
     },
     [reveal, clearFilter],
   );
 
   useEffect(() => {
     if (!activePath || !enabled) return;
-    const t = window.setTimeout(() => void locate(activePath), REVEAL_DELAY_MS);
-    return () => window.clearTimeout(t);
+    return locate(activePath, false);
   }, [activePath, enabled, locate]);
 
   useEffect(() => {
     const h = (e: Event) => void locate((e as CustomEvent<string>).detail, true);
-    window.addEventListener("ncforge-reveal-in-tree", h);
-    return () => window.removeEventListener("ncforge-reveal-in-tree", h);
+    window.addEventListener(REVEAL_IN_TREE_EVENT, h);
+    return () => window.removeEventListener(REVEAL_IN_TREE_EVENT, h);
   }, [locate]);
+
+  useEffect(() => () => pending.current?.abort(), []);
+
+  useEffect(() => {
+    // 树行提交且筛选视图恢复滚动位置后，才滚到目标行。
+    if (scrollRequest && !scrollRequest.signal.aborted) {
+      document.getElementById(treeRowId(scrollRequest.path))?.scrollIntoView({ block: "nearest" });
+    }
+  }, [scrollRequest]);
 }

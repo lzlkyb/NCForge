@@ -17,6 +17,7 @@ describe("isUnderPath", () => {
   it("含根自身，且按 Windows 规则不分大小写", () => {
     expect(isUnderPath("C:\\w\\newar", "C:\\w\\newar")).toBe(true);
     expect(isUnderPath("c:\\W\\NEWAR\\a\\B.java", "C:\\w\\newar")).toBe(true);
+    expect(isUnderPath("c:/W/NEWAR/a/B.java", "C:\\w\\newar")).toBe(true);
   });
 
   it("前缀相同但不在树上（newar2）不算", () => {

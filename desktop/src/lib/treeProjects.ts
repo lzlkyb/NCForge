@@ -1,5 +1,6 @@
 import { invoke } from "./tauri";
 import type { LinkedProject } from "./linkedProjects";
+import { filePathKey } from "./workspace";
 
 /**
  * 文件树要并排显示的工程根。
@@ -24,11 +25,11 @@ export function resolvableProjects(list: LinkedProject[]): LinkedProject[] {
   return out;
 }
 
-/** `path` 是否在 `root` 里（含 root 自身）。Windows 路径不分大小写。 */
+/** `path` 是否在 `root` 里（含 root 自身）。按 Windows 文件路径比较。 */
 export function isUnderPath(path: string, root: string): boolean {
-  const p = path.toLowerCase();
-  const r = root.toLowerCase();
-  return p === r || p.startsWith(r.endsWith("\\") ? r : `${r}\\`);
+  const p = filePathKey(path);
+  const r = filePathKey(root);
+  return p === r || p.startsWith(r.endsWith("/") ? r : `${r}/`);
 }
 
 /**
