@@ -49,11 +49,20 @@ export function TreeSvnProvider({ root, children }: { root: string; children: Re
         <span title={errorText}>
           {fetching ? "SVN · 正在扫描…" : failed ? "SVN · 读取失败" : !belongs ? "SVN · 非当前工作副本" : `${index.files.size} 个 SVN 变更`}
         </span>
-        <button type="button" disabled={fetching} onClick={() => { void refetchInfo(); void refetchStatus(); }}>刷新</button>
+        <button type="button" disabled={fetching} onClick={() => {
+          void refetchInfo();
+          void refetchStatus();
+          void qc.invalidateQueries({ queryKey: ["svn-file-commits", root] });
+        }}>刷新</button>
       </div>
     ),
-    [errorText, fetching, failed, belongs, index, refetchInfo, refetchStatus],
+    [errorText, fetching, failed, belongs, index, refetchInfo, refetchStatus, qc, root],
   );
-  const value = useMemo(() => ({ ...index, summary }), [index, summary]);
+  const host = info.data?.host;
+  const user = info.data?.user ?? null;
+  const repositoryRoot = info.data?.repositoryRoot;
+  const commitScope = useMemo(() => belongs && host !== undefined ? { root, repositoryRoot, host, user, client: qc } : undefined,
+    [belongs, host, root, repositoryRoot, user, qc]);
+  const value = useMemo(() => ({ ...index, summary, commitScope }), [index, summary, commitScope]);
   return <TreeSvnContext.Provider value={value}>{children}</TreeSvnContext.Provider>;
 }

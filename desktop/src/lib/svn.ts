@@ -11,6 +11,7 @@ import { withSvnWriteLock, getSvnWrite, type SvnWriteHandle } from "./svnWrite";
  */
 
 export interface SvnInfo {
+  repositoryRoot?: string;
   root: string;
   url: string;
   revision: number;
@@ -149,6 +150,18 @@ export interface BackupPurgeResult {
 }
 
 export const svnInfo = () => invoke<SvnInfo>("svn_info");
+
+export interface SvnFileCommit {
+  path: string;
+  repositoryRoot: string;
+  host: string;
+  author: string | null;
+  revision: number | null;
+  date: number | null;
+}
+
+export const svnFileCommits = (root: string, dir: string) =>
+  invoke<SvnFileCommit[]>("svn_file_commits", { root, dir });
 /**
  * 扫描改动。一次返回全部条目（构建产物带 `ignored` 标记），
  * 界面的「显示全部」开关只在本地过滤，不再重扫。

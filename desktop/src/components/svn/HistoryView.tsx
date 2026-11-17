@@ -13,7 +13,7 @@ import "../../svn-history.css";
 const PAGE = 30;
 const initial = { entries: [] as HistoryEntry[], loading: false, done: false, error: null as string | null };
 
-export function HistoryView({ path, title, modulePath, initialRevision, onBack }: { path: string; title: string; modulePath?: string; initialRevision?: number; onBack: () => void }) {
+export function HistoryView({ path, title, modulePath, initialRevision, backLabel = "返回审查", onBack }: { path: string; title: string; modulePath?: string; initialRevision?: number; backLabel?: string; onBack: () => void }) {
   const root = useWorkspaceRoot(); const epoch = workspaceEpoch();
   const [filters, setFilters] = useState({ scope: "file", keyword: "", author: "", since: "", until: "" });
   const [result, setResult] = useState(initial);
@@ -31,7 +31,11 @@ export function HistoryView({ path, title, modulePath, initialRevision, onBack }
       if (sequence !== requests.current.sequence) return;
       if (page.entries.length) requests.current.cursor = page.entries[page.entries.length - 1].revision;
       setResult(prev => ({ entries: [...new Map([...(reset ? [] : prev.entries), ...page.entries].map(entry => [entry.revision, entry])).values()], loading: false, done: page.entries.length < PAGE, error: null }));
-      if (reset) { const chosen = page.entries.find(entry => entry.revision === initialRevision); setRevision(chosen?.revision ?? null); setSelectedPath(chosen?.paths[0]?.path ?? null); }
+      if (reset) {
+        const chosen = page.entries.find(entry => entry.revision === initialRevision);
+        setRevision(chosen?.revision ?? null);
+        setSelectedPath(chosen?.paths.find(change => change.path === page.repositoryPath)?.path ?? chosen?.paths[0]?.path ?? null);
+      }
     } catch (error) { if (sequence === requests.current.sequence) setResult(prev => ({ ...prev, loading: false, error: friendlySvnError(error) })); }
     finally { if (sequence === requests.current.sequence) requests.current.loading = false; }
   }, [source, root, epoch, initialRevision]);
@@ -42,7 +46,7 @@ export function HistoryView({ path, title, modulePath, initialRevision, onBack }
   const patchFilter = (patch: Partial<typeof filters>) => setFilters(prev => ({ ...prev, ...patch }));
   const copy = async (text: string) => { try { await navigator.clipboard.writeText(text); toast("已复制", "success"); } catch { toast("复制失败", "error"); } };
   return <section className="vc-main vc-history">
-    <div className="vc-bar"><Icon name="history" size={14} /><b>提交历史</b><span className="vc-path" title={source}>{title}</span><span className="vc-sp" /><button className="vc-btn" onClick={onBack}>返回审查</button><button className="vc-btn" disabled={result.loading} onClick={() => void load(true)}><Icon name="refresh" size={12} className={result.loading ? "animate-spin" : undefined} />刷新</button></div>
+    <div className="vc-bar"><Icon name="history" size={14} /><b>提交历史</b><span className="vc-path" title={source}>{title}</span><span className="vc-sp" /><button className="vc-btn" onClick={onBack}>{backLabel}</button><button className="vc-btn" disabled={result.loading} onClick={() => void load(true)}><Icon name="refresh" size={12} className={result.loading ? "animate-spin" : undefined} />刷新</button></div>
     <div className="vc-history-filters">
       <select aria-label="历史范围" value={filters.scope} onChange={event => patchFilter({ scope: event.target.value })}><option value="file">当前路径</option>{modulePath && <option value="module">当前模块</option>}<option value="root">工作副本</option></select>
       <input aria-label="筛选已加载历史" placeholder="说明、版本或路径" value={filters.keyword} onChange={event => patchFilter({ keyword: event.target.value })} />

@@ -67,6 +67,7 @@ export async function applyWorkspace(
 
   void queryClient?.invalidateQueries({ queryKey: ["svn-info"] });
   void queryClient?.invalidateQueries({ queryKey: ["svn-status"] });
+  void queryClient?.invalidateQueries({ queryKey: ["svn-file-commits", shown], refetchType: "none" });
   return shown;
   });
 }

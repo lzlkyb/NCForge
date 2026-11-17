@@ -47,3 +47,27 @@
 .wb-svn-badge-action { cursor: pointer; }
 .wb-svn-badge-action:hover { box-shadow: 0 0 0 1px currentColor; }
 .wb-svn-badge-action:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+
+/* The tree overlay stays out of the row's flow so SVN changes cannot move the filename. */
+.wb-svn-overlay {
+  position:absolute;
+  inset-inline-end:-1px;
+  inset-block-end:-1px;
+  display:grid;
+  place-items:center;
+  width:8px;
+  height:8px;
+  border:1px solid hsl(var(--card));
+  border-radius:50%;
+  background:hsl(var(--card));
+  box-shadow:inset 0 0 0 1px hsl(var(--muted-foreground));
+}
+.wb-tree-type[data-glyph] .wb-svn-overlay { inset-inline-end:calc(50% - 9px); }
+.wb-svn-overlay[data-st="mod"] {
+  background:color-mix(in srgb, hsl(var(--warning)) 75%, hsl(var(--warning-ink)));
+  box-shadow:none;
+}
+.wb-svn-overlay:is([data-st="add"],[data-st="del"],[data-st="conflict"]) { width:11px; height:11px; box-shadow:none; }
+.wb-svn-overlay[data-st="add"] { background:hsl(var(--success-ink)); color:hsl(var(--card)); }
+.wb-svn-overlay:is([data-st="del"],[data-st="conflict"]) { background:hsl(var(--destructive-ink)); color:hsl(var(--card)); }
+.wb-svn-overlay[data-st="missing"] { box-shadow:none; border-color:hsl(var(--muted-foreground)); border-style:dashed; }

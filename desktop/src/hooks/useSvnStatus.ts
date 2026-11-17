@@ -84,6 +84,9 @@ export function useSvnStatus() {
   const refresh = useCallback(async (force = false): Promise<StatusResult | undefined> => {
     if (!root || getSession().root !== root) return undefined;
     const epoch = workspaceEpoch();
+    // 提交或更新可能只改工作副本元数据。丢弃写入前已开始的读取，避免旧作者回填。
+    const fileCommits = { queryKey: ["svn-file-commits", root] };
+    void qc.cancelQueries(fileCommits).then(() => qc.invalidateQueries(fileCommits));
     // 增量/全量只是 queryFn 的参数差异，用 fetchQuery 才能带上 force；
     // refetch 永远复用缓存里的 queryFn（也就是 force=false 那一份）。
     const scan = () => force
