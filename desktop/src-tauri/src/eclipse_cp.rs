@@ -1199,12 +1199,29 @@ mod tests {
     use super::*;
     use std::fs;
 
+    /// 每次调用都给一个**独一无二**的隔离壳序号。
+    ///
+    /// 🔴 为什么不能只用 `tag + pid`（2026-11-17 实测定位的偶发红灯真根因）：
+    /// 本文件里 `temp_dir("cycle")` 被**两个**测试用（`依赖成环时不死循环` 与
+    /// `循环依赖报出来但照旧收集目录`），同进程 pid 相同 ⇒ 两个测试拿到**同一个壳**。
+    /// 而本函数进门就 `remove_dir_all`、`cleanup` 出门又删一次，于是 2 线程并发时
+    /// 互相把对方刚建好的工程删掉。实测 `cargo test --lib 循环 -- --test-threads=2`
+    /// 跑 6 轮 **3 红 3 绿**，红的那次断言原文是
+    /// `只该有 a/bin 与 b/bin 各一次：[]` —— 返回**空**，不是逻辑错，是目录被删了。
+    ///
+    /// 用全局原子序号而不是「把两个 tag 改成不同名」：后者只修这一处，
+    /// 下次再有人复用 tag 又会踩，且同样是静默偶发。序号让复用 tag 天然安全。
+    static SHELL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
     /// 外面套一层隔离壳：`legacy_roots` 会把「工程根的兄弟目录」当工作区分组扫
     /// （`<兄弟>/<模块>/classes`），临时工程直接建在 `%TEMP%` 下会被并行用例污染。
+    /// 壳里**只放 `root` 一个目录**，所以兄弟扫描扫不到别人的工程 —— 这层嵌套不能省。
+    ///
+    /// 路径走 `test_support::tmp`（而非裸 `env::temp_dir`）：它返回 `canonicalize`
+    /// 后的路径，消掉 macOS `/var`→`/private/var` 与 Windows CI 8.3 短名的平台差异。
     fn temp_dir(tag: &str) -> PathBuf {
-        let mut shell = std::env::temp_dir();
-        shell.push(format!("ncforge-cp-{tag}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&shell);
+        let seq = SHELL_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let shell = crate::test_support::tmp(&format!("cp-{tag}-{seq}"));
         let d = shell.join("root");
         fs::create_dir_all(&d).unwrap();
         d
