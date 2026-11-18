@@ -14,7 +14,11 @@ export const TableFilterBar = forwardRef<{ queryValue: (column: string, value: s
   filterScope?: string;
   /** 表页读取的等待上限（秒）。只作用于下一次查询，不重查、不丢未写回的改动。 */
   timeoutSec?: number; onTimeout?: (seconds: number) => void;
-}>(function TableFilterBar({ connId, table, cols, disabled, busy = disabled, transactions, onApply, appliedQuery, filterScope = table, timeoutSec, onTimeout }, ref) {
+  /** 从文件导入入口。不传 = 数据页不显示导入按钮（控制台等非表页场景）。 */
+  onImport?: () => void;
+  /** 非空 = 禁用导入，值作为禁用原因展示（schema 错配等）。查询态不影响导入，所以不复用 `disabled`。 */
+  importBlocked?: string;
+}>(function TableFilterBar({ connId, table, cols, disabled, busy = disabled, transactions, onApply, appliedQuery, filterScope = table, timeoutSec, onTimeout, onImport, importBlocked }, ref) {
   // 上次编辑状态与上次查询结果成对恢复：切到「结构」再回来时，条件框和表格里的数据一致。
   const [savedView, setSavedView] = useState(() => loadFilterView(connId, filterScope) ?? loadFilterView(connId, table));
   const [filter, setFilter] = useState<TableFilter>(() => savedView?.filter ?? loadFilter(connId, table));
@@ -80,6 +84,8 @@ export const TableFilterBar = forwardRef<{ queryValue: (column: string, value: s
       <span className="dbx-filter-summary" title={summary}>{!advanced && applied && JSON.stringify(filter) === JSON.stringify(applied) ? "" : `待查询：${summary}`}</span>
       {dr && <button type="button" className="dbx-btn" aria-pressed={!!undeleted} disabled={!useQuick}
         onClick={() => undeleted && applied ? void apply({ ...applied, conditions: applied.conditions.filter(c => c !== undeleted) }) : queryValue(dr.name, "0")}>未删除</button>}
+      {onImport && <button type="button" className="dbx-btn" disabled={!!importBlocked}
+        title={importBlocked || "从 CSV / JSON / XLSX 文件导入数据到这张表"} onClick={onImport}><Icon name="upload" size={12} />导入</button>}
       <button type="button" className="dbx-btn pri" disabled={disabled || applying} aria-busy={busy} onClick={() => void apply()}><Icon name={busy ? "spinner" : "play"} size={12} />查询整表</button>
       {transactions}
     </div>

@@ -41,7 +41,7 @@ import { TableChangePreview } from "./TableChangePreview";
  * 双击单元格编辑，改过的格子标黄；「预览 SQL」看将要执行的 update；写回走当前连接的事务模式。
  * 没有主键的表或视图不给编辑入口——定位不到唯一行。
  */
-export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: ColumnInfo[] | null; isView: boolean; zh: Record<string, string> }) {
+export function TableData({ tab, cols, isView, zh, onImport, importBlocked }: { tab: TableTab; cols: ColumnInfo[] | null; isView: boolean; zh: Record<string, string>; /** 从文件导入入口；`importBlocked` 非空 = 禁用并说明原因。空表 / 未查询时筛选栏照样渲染，入口不消失。 */ onImport?: () => void; importBlocked?: string }) {
   const baseline = useCompareBaseline();
   const pk = useMemo(() => (cols ?? []).filter((c) => c.pk).map((c) => c.name), [cols]);
   // 打开表页时的 schema 固化在标签上：之后切默认 schema，这一页的查询、写回、
@@ -217,6 +217,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
       {cols && <TableFilterBar ref={filterBar} connId={tab.connId} table={tab.table} filterScope={tableRef}
         appliedQuery={page ? tableView.current : null} cols={cols} disabled={saving || loading || txLocked} busy={loading}
         timeoutSec={timeoutSec} onTimeout={n=>patchTab(tab.id,{timeoutSec:n})}
+        onImport={onImport} importBlocked={importBlocked}
         onApply={apply} />}
       {restored && q && <TableRestoreNotice where={q.where} page={q.page} onClear={() => void clearRestored()} />}
       {loading && data && <div className="dbx-read-status" role="status">正在查询，暂保留上一份结果…</div>}

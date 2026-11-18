@@ -54,3 +54,28 @@ it("快捷查询绑定单元格原值，只有查询返回的条件才可一键�
     expect(apply).toHaveBeenLastCalledWith("(DR = :1)", "", [{ number: "0" }]);
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
+
+it("导入入口：不传 onImport 不渲染，传入后可点，importBlocked 时禁用并给出原因", async () => {
+  localStorage.clear();
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const onImport = vi.fn();
+  const button = (name: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === name)!;
+  const render = (importBlocked?: string) =>
+    act(async () => root.render(<TableFilterBar connId="test" table="TEST" cols={[]} disabled={false} onApply={vi.fn()}
+      {...(importBlocked === undefined ? {} : { importBlocked })} onImport={onImport} />));
+  try {
+    await act(async () => root.render(<TableFilterBar connId="test" table="TEST" cols={[]} disabled={false} onApply={vi.fn()} />));
+    expect([...host.querySelectorAll("button")].some(b => b.textContent === "导入")).toBe(false);
+    await render();
+    expect(button("导入").disabled).toBe(false);
+    await act(async () => button("导入").click());
+    expect(onImport).toHaveBeenCalledOnce();
+    await render("此表页属于 A，当前默认 schema 已是 B：导入已停用");
+    expect(button("导入").disabled).toBe(true);
+    expect(button("导入").title).toContain("已停用");
+    await act(async () => button("导入").click());
+    expect(onImport).toHaveBeenCalledOnce();
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});

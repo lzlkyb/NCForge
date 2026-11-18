@@ -138,3 +138,15 @@ it("treats truncated CLOB cells as uneditable and never writes the preview back"
  const save=button("写回 1 行"); if(save) await act(async()=>save.click());
  expect(mocks.invoke.mock.calls.filter(([cmd,args])=>cmd==="db_exec_bound" && String(args.sql).startsWith("update"))).toHaveLength(0);
 });
+
+it("数据页常驻导入按钮：空表也渲染，schema 错配时禁用并说明原因",async()=>{
+ const onImport=vi.fn();
+ await act(async()=>root.unmount());root=createRoot(host);await act(async()=>root.render(<TableData tab={tab} cols={cols} isView={false} zh={{}} onImport={onImport}/>));
+ // 筛选栏不依赖查询结果：没查过表也要能点到导入。
+ expect(button("导入").disabled).toBe(false);
+ act(()=>button("导入").click());expect(onImport).toHaveBeenCalledOnce();
+ await act(async()=>root.unmount());root=createRoot(host);await act(async()=>root.render(<TableData tab={tab} cols={cols} isView={false} zh={{}} onImport={onImport} importBlocked="此表页属于 A，当前默认 schema 已是 B：导入按当前 schema 取表结构，已停用"/>));
+ expect(button("导入").disabled).toBe(true);
+ expect(button("导入").title).toContain("已停用");
+ act(()=>button("导入").click());expect(onImport).toHaveBeenCalledOnce();
+});

@@ -47,6 +47,11 @@ export function TablePage({ tab }: { tab: TableTab }) {
   const schemaMismatch = !!tab.schema && !!currentSchema && tab.schema.toUpperCase() !== currentSchema.toUpperCase();
   const isObj = !!tab.otype;
   const isView = !schemaMismatch && rt.tables?.find((t) => t.name === tab.table)?.kind === "VIEW";
+  // 导入按「当前默认 schema」取表结构、写数据，与表页固化的 tab.schema 会串表，
+  // 所以和右上「表操作」下拉同一口径停用。查询态（loading/saving）不影响导入，不进这里。
+  const importBlocked = schemaMismatch
+    ? `此表页属于 ${tab.schema}，当前默认 schema 已是 ${currentSchema}：导入按当前 schema 取表结构，已停用。切回 ${tab.schema} 或重新打开本表`
+    : undefined;
   const [cols, setCols] = useState<ColumnInfo[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [dlg, setDlg] = useState<"exp" | "imp" | "diff" | "move" | null>(null);
@@ -149,7 +154,7 @@ export function TablePage({ tab }: { tab: TableTab }) {
       {rt.status !== "connected" && <div className="dbx-empty">连接已断开，先在左侧连上</div>}
       {err && <div className="dbx-err">{err}</div>}
       {rt.status === "connected" && !isObj && tab.sub === "data" && (
-        <TableData tab={tab} cols={cols} isView={isView} zh={zh} />
+        <TableData tab={tab} cols={cols} isView={isView} zh={zh} onImport={() => setDlg("imp")} importBlocked={importBlocked} />
       )}
       {rt.status === "connected" && !isObj && tab.sub === "struct" && <StructView cols={cols} />}
       {rt.status === "connected" && isObj && tab.sub === "source" && <SourceView tab={tab} />}
