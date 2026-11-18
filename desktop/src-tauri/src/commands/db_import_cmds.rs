@@ -23,7 +23,7 @@ use crate::commands::db_cmds::{
     bridge_for, call, connect_args, drop_bridge, find_conn, prop_password_ready, PROBE_CONF,
     T_CONNECT,
 };
-use crate::sql_export::literal;
+use crate::sql_export::literal_fmt;
 use crate::state::AppState;
 
 /// 失败行最多回这么多条：坏文件可能每一行都错，几百条报文已经够定位问题了。
@@ -39,6 +39,9 @@ pub struct ImportCol {
     pub name: String,
     /// 目标列类型（`VARCHAR2` / `NUMBER` / `DATE`…）。空 = 按字符串处理。
     pub ty: Option<String>,
+    /// 日期列的解析格式预设键（见 [`crate::sql_export::preset_fmt`]）。
+    /// `None` = 只认 ISO 口径；未知键同样退回 ISO，绝不把前端串拼进 SQL。
+    pub date_format: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -96,7 +99,11 @@ pub fn build_insert(table: &str, columns: &[ImportCol], row: &[Option<String>]) 
             let raw = row.get(i).and_then(|v| v.as_deref());
             // 空串在 Oracle 里本来就等于 NULL，这里显式写 null，避免 `''` 让人误以为存了空串
             match raw {
-                Some(s) if !s.is_empty() => literal(Some(s), c.ty.as_deref().unwrap_or("")),
+                Some(s) if !s.is_empty() => literal_fmt(
+                    Some(s),
+                    c.ty.as_deref().unwrap_or(""),
+                    c.date_format.as_deref(),
+                ),
                 _ => "null".to_string(),
             }
         })
@@ -309,16 +316,52 @@ mod tests {
             ImportCol {
                 name: "ID".into(),
                 ty: Some("NUMBER".into()),
+                date_format: None,
             },
             ImportCol {
                 name: "NAME".into(),
                 ty: Some("VARCHAR2".into()),
+                date_format: None,
             },
             ImportCol {
                 name: "MAKEDATE".into(),
                 ty: Some("DATE".into()),
+                date_format: None,
             },
         ]
+    }
+
+    #[test]
+    fn 日期列按指定格式解析() {
+        let mut c = cols();
+        c[2].date_format = Some("slash".into());
+        let sql = build_insert(
+            "T",
+            &c,
+            &[
+                Some("1".into()),
+                Some("x".into()),
+                Some("2026/11/17".into()),
+            ],
+        );
+        assert!(sql.contains("to_date('2026/11/17', 'YYYY/MM/DD')"), "{sql}");
+    }
+
+    #[test]
+    fn 不认识的日期格式键退回_iso口径() {
+        // 前端传什么都行，但它只能从白名单里挑；认不出就当没指定
+        let mut c = cols();
+        c[2].date_format = Some("yyyy/mm/dd'; --".into());
+        let sql = build_insert(
+            "T",
+            &c,
+            &[
+                Some("1".into()),
+                Some("x".into()),
+                Some("2026-11-17".into()),
+            ],
+        );
+        assert!(sql.contains("to_date('2026-11-17', 'YYYY-MM-DD')"), "{sql}");
     }
 
     #[test]

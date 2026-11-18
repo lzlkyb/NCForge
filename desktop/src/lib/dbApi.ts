@@ -408,6 +408,11 @@ export interface TableInfo {
 export interface ImportColReq {
   name: string;
   ty?: string | null;
+  /**
+   * 日期列的解析格式键（`lib/importDate` 的 `DATE_PRESETS.id`）。
+   * 后端只认 `sql_export::preset_fmt` 的白名单，未知键按 ISO 处理。
+   */
+  dateFormat?: string;
 }
 
 export interface ImportFail {

@@ -5,10 +5,17 @@
 //! 「库把日期转成 1900 序列号 / 把 18 位单据号转成 f64」这类静默失真：这里一律给文本。
 //!
 //! 明确不支持：合并单元格（值只取左上角存的那一格）、公式重算（只读缓存值）、
-//! 日期格式（Excel 里是数字 + 样式，这里按数字原样给出）、多工作表（只读第一张）。
+//! 多工作表（只读第一张）。
+//!
+//! **日期**：Excel 把日期存成「1900 基准的天数」，光看值分不出 `45900` 是日期还是
+//! 一个普通数字，所以要先查单元格样式里的 `numFmtId`——判定与换算在 [`crate::xlsx_date`]。
+//! 认不出的格式仍然原样给数字，宁可让用户看到 `45900` 也不要猜错一整列。
 
+use std::collections::HashMap;
 use std::io::{Read, Seek};
 use std::path::Path;
+
+use crate::xlsx_date::{builtin_fmt, date_kind, serial_text, DateKind};
 
 /// 一次最多读多少行：给前端一个明确上限，避免用户把 100 万行的表拖进导入窗口。
 pub const MAX_ROWS: usize = 200_000;
@@ -36,10 +43,15 @@ pub fn read_xlsx_from<R: Read + Seek>(reader: R, max_rows: usize) -> Result<Shee
         // 没有共享字符串表是合法的（全部用 inlineStr 的导出工具就这样）。
         Err(_) => Vec::new(),
     };
+    // 没有样式表同样合法：那种文件里不会有日期，全是裸数字与文本。
+    let styles = match read_entry(&mut zip, "xl/styles.xml") {
+        Ok(xml) => parse_styles(&xml),
+        Err(_) => Vec::new(),
+    };
     let (sheet, sheet_path) = first_sheet(&mut zip)?;
     let xml =
         read_entry(&mut zip, &sheet_path).map_err(|e| format!("读不到工作表 {sheet}：{e}"))?;
-    let rows = parse_sheet(&xml, &shared, max_rows)?;
+    let rows = parse_sheet(&xml, &shared, &styles, max_rows)?;
     Ok(SheetData { sheet, rows })
 }
 
@@ -112,7 +124,55 @@ fn parse_shared(xml: &str) -> Vec<String> {
     out
 }
 
-fn parse_sheet(xml: &str, shared: &[String], max_rows: usize) -> Result<Vec<Vec<String>>, String> {
+/// 自定义数字格式：`numFmtId → formatCode`（Excel 给自定义格式分配的 id 从 164 起）。
+///
+/// `formatCode` 里的双引号在 XML 属性里写成 `&quot;`，`attr_of` 已经做过反转义，
+/// 所以这里拿到的是 `yyyy"年"m"月"` 这种原样格式串。
+fn custom_fmts(xml: &str) -> HashMap<u32, String> {
+    let mut out = HashMap::new();
+    let Some(block) = between(xml, "<numFmts", "</numFmts>") else {
+        return out;
+    };
+    for chunk in block.split("<numFmt").skip(1) {
+        let Some(id) = attr_of(chunk, "numFmtId").and_then(|v| v.trim().parse::<u32>().ok()) else {
+            continue;
+        };
+        if let Some(code) = attr_of(chunk, "formatCode") {
+            out.insert(id, code);
+        }
+    }
+    out
+}
+
+/// `cellXfs` 下标 → 该样式的日期类型。单元格上的 `s="N"` 指的就是这个下标。
+fn parse_styles(xml: &str) -> Vec<Option<DateKind>> {
+    let custom = custom_fmts(xml);
+    let Some(block) = between(xml, "<cellXfs", "</cellXfs>") else {
+        return Vec::new();
+    };
+    block
+        .split("<xf")
+        .skip(1)
+        .map(|xf| {
+            // 没写 numFmtId 默认 0 = General，不是日期
+            let id = attr_of(xf, "numFmtId")
+                .and_then(|v| v.trim().parse::<u32>().ok())
+                .unwrap_or(0);
+            let fmt = custom
+                .get(&id)
+                .map(String::as_str)
+                .or_else(|| builtin_fmt(id));
+            fmt.and_then(date_kind)
+        })
+        .collect()
+}
+
+fn parse_sheet(
+    xml: &str,
+    shared: &[String],
+    styles: &[Option<DateKind>],
+    max_rows: usize,
+) -> Result<Vec<Vec<String>>, String> {
     let mut rows: Vec<Vec<String>> = Vec::new();
     for chunk in xml.split("<row").skip(1) {
         let cells: Vec<&str> = chunk.split("<c").skip(1).collect();
@@ -135,8 +195,22 @@ fn parse_sheet(xml: &str, shared: &[String], max_rows: usize) -> Result<Vec<Vec<
                         .ok()
                         .and_then(|i| shared.get(i).cloned())
                         .unwrap_or_default()
-                } else {
+                } else if kind == "d" {
+                    // `t="d"` 本来就是 ISO 8601 文本（少数导出工具会写），不用换算
                     unescape(raw)
+                } else {
+                    // 数值通道：先看样式是不是日期，再看这个数能不能当序列号。
+                    // 任一步不成立就原样给数字——猜错一次就是整列脏数据。
+                    let as_date = attr_of(cell, "s")
+                        .and_then(|s| s.trim().parse::<usize>().ok())
+                        .and_then(|i| styles.get(i).copied().flatten())
+                        .and_then(|k| {
+                            raw.trim()
+                                .parse::<f64>()
+                                .ok()
+                                .and_then(|n| serial_text(n, k))
+                        });
+                    as_date.unwrap_or_else(|| unescape(raw))
                 }
             };
             if column >= 16_384 {
@@ -292,6 +366,14 @@ mod tests {
 
     /// 造一个最小 xlsx。测试不依赖外部样本文件，也顺带钉住 zip 布局。
     fn sample(shared: &[&str], sheet_xml: &str) -> tempfile::NamedTempFile {
+        sample_with(shared, None, sheet_xml)
+    }
+
+    fn sample_with(
+        shared: &[&str],
+        styles_xml: Option<&str>,
+        sheet_xml: &str,
+    ) -> tempfile::NamedTempFile {
         let file = tempfile::Builder::new().suffix(".xlsx").tempfile().unwrap();
         let mut zip = zip::ZipWriter::new(file.reopen().unwrap());
         let opt = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
@@ -309,6 +391,10 @@ mod tests {
         }
         xml.push_str("</sst>");
         zip.write_all(xml.as_bytes()).unwrap();
+        if let Some(st) = styles_xml {
+            zip.start_file("xl/styles.xml", opt).unwrap();
+            zip.write_all(st.as_bytes()).unwrap();
+        }
         zip.start_file("xl/worksheets/sheet1.xml", opt).unwrap();
         zip.write_all(sheet_xml.as_bytes()).unwrap();
         zip.finish().unwrap();
@@ -368,6 +454,48 @@ mod tests {
         // sheet 的 XML 显然超过 8 字节；zip 头 size 与实际读取两条路都要能挡住
         let err = read_entry_limited(&mut zip, "xl/worksheets/sheet1.xml", 8).unwrap_err();
         assert!(err.contains("超过 8 字节"), "{err}");
+    }
+
+    /// 日期是「数字 + 样式」，光看值分不出来——这是导入时最容易静默出错的一处。
+    #[test]
+    fn 日期样式把序列号换成文本() {
+        let styles = r#"<?xml version="1.0"?><styleSheet>
+<numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy/m/d h:mm:ss"/></numFmts>
+<cellXfs count="3"><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="164"/></cellXfs>
+</styleSheet>"#;
+        let path = sample_with(
+            &[],
+            Some(styles),
+            r#"<?xml version="1.0"?><worksheet><sheetData>
+<row r="1"><c r="A1" s="1"><v>25569</v></c><c r="B1" s="2"><v>25569.25</v></c><c r="C1" s="0"><v>42</v></c></row>
+</sheetData></worksheet>"#,
+        );
+        let out = read_xlsx(path.path(), MAX_ROWS).unwrap();
+        // A 内置 14 纯日期；B 自定义格式带时间；C 是 General，必须原样给数字
+        assert_eq!(out.rows[0], vec!["1970-01-01", "1970-01-01 06:00:00", "42"]);
+    }
+
+    #[test]
+    fn 没有样式表时数字保持原样() {
+        let path = sample(
+            &[],
+            r#"<?xml version="1.0"?><worksheet><sheetData><row r="1"><c r="A1"><v>45900</v></c></row></sheetData></worksheet>"#,
+        );
+        let out = read_xlsx(path.path(), MAX_ROWS).unwrap();
+        assert_eq!(out.rows[0], vec!["45900"]);
+    }
+
+    #[test]
+    fn 样式下标越界或格式认不出都不猜() {
+        // s="9" 指向不存在的样式；s="1" 是 General。两种都只能给原数字
+        let styles = r#"<styleSheet><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="0"/></cellXfs></styleSheet>"#;
+        let path = sample_with(
+            &[],
+            Some(styles),
+            r#"<worksheet><sheetData><row r="1"><c r="A1" s="9"><v>45900</v></c><c r="B1" s="1"><v>45901</v></c></row></sheetData></worksheet>"#,
+        );
+        let out = read_xlsx(path.path(), MAX_ROWS).unwrap();
+        assert_eq!(out.rows[0], vec!["45900", "45901"]);
     }
 
     #[test]

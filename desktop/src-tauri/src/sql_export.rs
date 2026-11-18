@@ -306,6 +306,32 @@ fn reorder_pk_first(cols: &mut Vec<EmitCol>, by_name: &HashMap<String, &ColMeta>
 
 /// 一个值渲染成 SQL 字面量。`None` 是 SQL NULL。
 pub fn literal(v: Option<&str>, ty: &str) -> String {
+    literal_fmt(v, ty, None)
+}
+
+/// 日期列的解析格式预设。**只认这张表里的键**。
+///
+/// 格式串会被拼进 `to_date(v, '<fmt>')`，让调用方传任意字符串等于开一条注入面；
+/// 而白名单带来的限制几乎无感——国内 Excel 导出的日期就这么几种写法。
+pub fn preset_fmt(id: &str) -> Option<&'static str> {
+    Some(match id {
+        "iso" => "YYYY-MM-DD",
+        "iso-ts" => "YYYY-MM-DD HH24:MI:SS",
+        "slash" => "YYYY/MM/DD",
+        "slash-ts" => "YYYY/MM/DD HH24:MI:SS",
+        "dot" => "YYYY.MM.DD",
+        "compact" => "YYYYMMDD",
+        "compact-ts" => "YYYYMMDDHH24MISS",
+        "dmy-slash" => "DD/MM/YYYY",
+        "mdy-slash" => "MM/DD/YYYY",
+        "dmy-dash" => "DD-MM-YYYY",
+        "cn" => "YYYY\"年\"MM\"月\"DD\"日\"",
+        _ => return None,
+    })
+}
+
+/// [`literal`] 带日期格式版：`fmt_id` 见 [`preset_fmt`]，`None`/未知键走 ISO 口径。
+pub fn literal_fmt(v: Option<&str>, ty: &str, fmt_id: Option<&str>) -> String {
     let Some(v) = v else {
         return "null".to_string();
     };
@@ -314,10 +340,10 @@ pub fn literal(v: Option<&str>, ty: &str) -> String {
         return "null".to_string();
     }
     if base == "DATE" {
-        return date_literal(v);
+        return date_literal(v, fmt_id);
     }
     if base.starts_with("TIMESTAMP") {
-        return timestamp_literal(v);
+        return timestamp_literal(v, fmt_id);
     }
     if is_number_type(&base) {
         return if is_numeric_text(v) {
@@ -366,7 +392,13 @@ fn is_numeric_text(s: &str) -> bool {
 
 /// `2023-10-19` / `2023-10-19 12:13:45` → 显式格式的 `to_date`。
 /// 认不出格式（时区、月份名等）就退回带引号的字符串，让导入方自己报错，不猜。
-fn date_literal(v: &str) -> String {
+///
+/// 指定了格式（`fmt_id`）就完全按它来：值必须转义，因为这时它已经是任意文本，
+/// 不像 ISO 分支那样能被 `is_date_only` 保证只含数字与连字符。
+fn date_literal(v: &str, fmt_id: Option<&str>) -> String {
+    if let Some(fmt) = fmt_id.and_then(preset_fmt) {
+        return format!("to_date({}, '{fmt}')", quote(v));
+    }
     if is_date_only(v) {
         format!("to_date('{v}', 'YYYY-MM-DD')")
     } else if is_datetime(v) {
@@ -376,7 +408,10 @@ fn date_literal(v: &str) -> String {
     }
 }
 
-fn timestamp_literal(v: &str) -> String {
+fn timestamp_literal(v: &str, fmt_id: Option<&str>) -> String {
+    if let Some(fmt) = fmt_id.and_then(preset_fmt) {
+        return format!("to_timestamp({}, '{fmt}')", quote(v));
+    }
     if is_timestamp(v) {
         format!("to_timestamp('{v}', 'YYYY-MM-DD HH24:MI:SS.FF')")
     } else if is_datetime(v) {
@@ -623,6 +658,42 @@ mod tests {
             literal(Some("2023-10-19 12:13:45.0"), "DATE"),
             "'2023-10-19 12:13:45.0'"
         );
+    }
+
+    #[test]
+    fn 指定日期格式后按它解析并转义值() {
+        // 国内 Excel 的斜杠日期：不指定格式就会被当成字符串走 NLS 隐式转换
+        assert_eq!(
+            literal_fmt(Some("2026/11/17"), "DATE", Some("slash")),
+            "to_date('2026/11/17', 'YYYY/MM/DD')"
+        );
+        assert_eq!(
+            literal_fmt(Some("2026/11/17 09:30:00"), "DATE", Some("slash-ts")),
+            "to_date('2026/11/17 09:30:00', 'YYYY/MM/DD HH24:MI:SS')"
+        );
+        assert_eq!(
+            literal_fmt(Some("2026/11/17"), "TIMESTAMP(6)", Some("slash")),
+            "to_timestamp('2026/11/17', 'YYYY/MM/DD')"
+        );
+        // 值这时是任意文本，必须转义单引号
+        assert_eq!(
+            literal_fmt(Some("o'brien"), "DATE", Some("slash")),
+            "to_date('o''brien', 'YYYY/MM/DD')"
+        );
+        // 未知键退回 ISO 口径，而不是把用户串拼进 SQL
+        assert_eq!(
+            literal_fmt(Some("2026/11/17"), "DATE", Some("x'; drop table t; --")),
+            "'2026/11/17'"
+        );
+    }
+
+    #[test]
+    fn 日期格式预设只认白名单() {
+        assert_eq!(preset_fmt("slash"), Some("YYYY/MM/DD"));
+        assert_eq!(preset_fmt("cn"), Some("YYYY\"年\"MM\"月\"DD\"日\""));
+        assert_eq!(preset_fmt(""), None);
+        assert_eq!(preset_fmt("YY/MM/DD"), None);
+        assert_eq!(preset_fmt("yyyy-mm-dd'; --"), None);
     }
 
     #[test]

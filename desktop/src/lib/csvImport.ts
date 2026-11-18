@@ -30,7 +30,7 @@ export interface ImportChunk {
 }
 
 export interface ImportPlan {
-  columns: { name: string; ty: string }[];
+  columns: { name: string; ty: string; dateFormat?: string }[];
   chunks: ImportChunk[];
 }
 
@@ -46,10 +46,13 @@ export function planImport(
   target: TargetCol[],
   picked: Mapping[],
   batch: number,
+  /** 目标列下标 → 日期格式预设键；没有就按 ISO 口径。 */
+  fmtOf?: (to: number) => string | undefined,
 ): ImportPlan {
   const columns = picked.map((p) => {
     const c = target[p.to];
-    return { name: c?.name ?? "", ty: c?.type ?? "" };
+    const dateFormat = fmtOf?.(p.to);
+    return dateFormat ? { name: c?.name ?? "", ty: c?.type ?? "", dateFormat } : { name: c?.name ?? "", ty: c?.type ?? "" };
   });
   // batch 是常量，但调用方传 0 / 负数会让 for 循环永不前进，宁可用 1 兜底也不死循环
   const step = Math.max(1, Math.floor(batch) || 1);

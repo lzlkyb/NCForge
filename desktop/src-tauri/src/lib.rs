@@ -136,6 +136,7 @@ pub mod svn_view;
 pub mod watcher;
 pub mod workspace;
 pub mod workspace_types;
+pub mod xlsx_date;
 pub mod xlsx_read;
 
 /// 测试专用工具（临时目录等）。只在 `cfg(test)` 下编译：unit test 用

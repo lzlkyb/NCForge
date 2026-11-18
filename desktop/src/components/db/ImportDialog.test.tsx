@@ -50,10 +50,10 @@ const flush = () => act(async () => {});
 const btn = (text: string) =>
   Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes(text));
 
-async function mountWith(name: string, content: string) {
+async function mountWith(name: string, content: string, cols: ColumnInfo[] = COLS) {
   await act(async () => {
     root.render(
-      <ImportDialog connId="c1" table="bd_material" cols={COLS} onClose={() => {}} onDone={() => {}} />,
+      <ImportDialog connId="c1" table="bd_material" cols={cols} onClose={() => {}} onDone={() => {}} />,
     );
   });
   await flush();
@@ -180,5 +180,85 @@ describe("ImportDialog 选 XLSX", () => {
     await mountWith("c.xls", "not a zip");
     await flush();
     expect(document.body.textContent ?? "").toContain("不支持旧版 .xls");
+  });
+});
+
+/**
+ * 日期格式：斜杠日期不定格式就会被 Oracle 按 NLS 隐式转换，
+ * `01/02/2026` 还会静默解析成另一个日期。所以歧义必须拦住。
+ */
+const DATE_COLS: ColumnInfo[] = [
+  { name: "ID", type: "VARCHAR2", size: 20, full: "VARCHAR2(20)", nullable: true, pk: true, default: null, comment: null, zh: null },
+  { name: "MAKEDATE", type: "DATE", size: 7, full: "DATE", nullable: true, pk: false, default: null, comment: null, zh: null },
+];
+
+const csvWithDate = (v: string) => ["ID,MAKEDATE", `1,${v}`].join("\n");
+
+/** 最后一个 select 是日期格式下拉（每行一个目标列下拉，日期行再多一个）。 */
+const fmtSelect = () => {
+  const all = Array.from(document.querySelectorAll("select"));
+  return all[all.length - 1] as HTMLSelectElement;
+};
+
+async function pickFmt(id: string) {
+  const sel = fmtSelect();
+  await act(async () => {
+    sel.value = id;
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await flush();
+}
+
+const startButton = () => btn("开始导入") as HTMLButtonElement | undefined;
+
+describe("ImportDialog 日期格式", () => {
+  it("01/02/2026 判不出日月顺序，不选就不许导", async () => {
+    await mountWith("d.csv", csvWithDate("01/02/2026"), DATE_COLS);
+    expect(document.body.textContent ?? "").toContain("必须选一个才能导");
+    expect(startButton()?.disabled).toBe(true);
+
+    await pickFmt("dmy-slash");
+    expect(document.body.textContent ?? "").not.toContain("必须选一个才能导");
+    expect(startButton()?.disabled).toBe(false);
+  });
+
+  it("选定的格式随请求发给后端", async () => {
+    mocks.invoke.mockImplementation((cmd: string) =>
+      cmd === "db_import_rows" ? Promise.resolve(ok(1)) : Promise.resolve({}),
+    );
+    await mountWith("d.csv", csvWithDate("01/02/2026"), DATE_COLS);
+    await pickFmt("dmy-slash");
+
+    await act(async () => {
+      startButton()?.click();
+    });
+    await flush();
+
+    const call = mocks.invoke.mock.calls.find((c) => c[0] === "db_import_rows");
+    const req = (call?.[1] as { req: { columns: { name: string; dateFormat?: string }[] } }).req;
+    expect(req.columns.find((c) => c.name === "MAKEDATE")?.dateFormat).toBe("dmy-slash");
+  });
+
+  it("唯一能确定的格式自动生效，不必手点", async () => {
+    mocks.invoke.mockImplementation((cmd: string) =>
+      cmd === "db_import_rows" ? Promise.resolve(ok(1)) : Promise.resolve({}),
+    );
+    await mountWith("e.csv", csvWithDate("2026/11/17"), DATE_COLS);
+    expect(startButton()?.disabled).toBe(false);
+
+    await act(async () => {
+      startButton()?.click();
+    });
+    await flush();
+
+    const call = mocks.invoke.mock.calls.find((c) => c[0] === "db_import_rows");
+    const req = (call?.[1] as { req: { columns: { name: string; dateFormat?: string }[] } }).req;
+    expect(req.columns.find((c) => c.name === "MAKEDATE")?.dateFormat).toBe("slash");
+  });
+
+  it("不是日期类型的目标列不显示格式选择", async () => {
+    await mountWith("f.csv", "ID,NAME\n1,甲", COLS);
+    // COLS 里两列都是 VARCHAR2，select 数量应等于映射行数（每行一个目标列下拉）
+    expect(document.querySelectorAll("select").length).toBe(2);
   });
 });
