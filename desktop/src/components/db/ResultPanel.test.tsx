@@ -15,14 +15,31 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ResultSet } from "../../lib/dbApi";
+import type { RowChange } from "../../lib/dbOptimisticEdit";
 import { dbApi } from "../../lib/dbApi";
 import { forgetColumnZh } from "../../lib/dbColumnZh";
 import type { ResultEntry, SqlTab } from "../../lib/dbStore";
 import { claimCursor, closeTab, openSqlTab, patchTab, useActiveDbTab } from "../../lib/dbStore";
+import { planDeepDive, relationHintOf } from "../../lib/resultRelationHint";
 import { ResultPanel } from "./ResultPanel";
 
 // 本测试验证结果集接线，错误区的跳转动作不应把 Monaco 加载到 jsdom。
 vi.mock("../../lib/dbActions",()=>({openTable:vi.fn(),disconnectConn:vi.fn()}));
+
+// 写回预览的装配要可控的 useResultSetEdit：网格键鼠编辑链在 jsdom 里又长又脆，
+// hook 内部逻辑在 useResultSetEdit.test.tsx 钉，这里只钉「入口 → 弹窗 → 提交」接线。
+const editMock = vi.hoisted(() => ({ useResultSetEdit: vi.fn() }));
+vi.mock("../../hooks/useResultSetEdit", () => editMock);
+
+// 「带出子表明细」只在这里装配（生成 SQL 的纯逻辑在 resultRelationHint.test.ts 里钉），
+// 这里钉 UI 行为：入口出不出现、点了之后 SQL 交给谁、绝不自动执行。
+vi.mock("../../lib/resultRelationHint", () => ({
+  relationHintOf: vi.fn((): { table: string; count: number } | null => null),
+  warmResultRelations: vi.fn(() => Promise.resolve()),
+  canDeepDive: vi.fn(() => true),
+  planDeepDive: vi.fn(async (): Promise<{ kind: "sql"; sql: string } | { kind: "locate"; line: number }> =>
+    ({ kind: "sql", sql: "SELECT a.*, b.* FROM po_order a LEFT JOIN po_order_b b ON a.pk_order = b.pk_order" })),
+}));
 
 // ResultGrid 的虚拟滚动靠 ResizeObserver，`scrollTo` 在 jsdom 上也不存在
 class RO {
@@ -70,6 +87,29 @@ function tabWith(e: ResultEntry): SqlTab {
   };
 }
 
+/** 默认「无可写回改动」的 hook 返回；行数跟传入走，其余 describe 的断言不受影响。 */
+const idleEdit = (rows: unknown[][]) => ({
+  edit: null,
+  blocked: "",
+  blockedHint: "",
+  diagnostics: { reason: "", next: "", sql: "", table: "bd_material", alias: null, identity: "未确定", keys: [], missing: [], readonlyColumns: [], readonly: false, forced: false, risky: false, detail: "" },
+  applyTarget: vi.fn(),
+  clearTarget: vi.fn(),
+  forced: false,
+  count: 0,
+  changes: [] as RowChange[],
+  pk: ["ID"],
+  addRow: vi.fn(),
+  undoChange: vi.fn(),
+  planError: "",
+  dirty: false,
+  saving: false,
+  save: vi.fn(),
+  reset: vi.fn(),
+  rows,
+  binarySqlForRow: () => null,
+});
+
 let host: HTMLDivElement;
 let root: Root;
 
@@ -77,6 +117,7 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
+  editMock.useResultSetEdit.mockImplementation((args: { rows: unknown[][] }) => idleEdit(args.rows));
 });
 
 afterEach(() => {
@@ -297,5 +338,131 @@ describe("结果视图保活不破坏滚动链", () => {
     expect(keep).toContain("flex-direction:column");
     expect(keep).toContain("min-height:0");
     expect(rule(".dbx-result-keep[hidden]")).toContain("display:none");
+  });
+});
+
+/**
+ * 「带出子表明细」（结果页深挖）。
+ *
+ * 盯三件事：① 只认**已读到的**关系，没读到整个入口不出现（说了能联查却点不动，
+ * 比不标更糟）；② 点下去生成的是联查 SQL，交给调用方填进编辑器，**不自动执行**；
+ * ③ 生成不了就退回「定位原 SQL」，不硬塞一份残 SQL。
+ */
+describe("结果页带出子表明细", () => {
+  const cols = [{ name: "PK_ORDER", type: "CHAR(20)", precision: 20, scale: 0 }];
+  const dive = () => [...host.querySelectorAll<HTMLElement>("button")].find(b => b.textContent?.includes("带出子表明细"));
+
+  it("有关系才出入口，点了把联查 SQL 交给调用方，不自动执行", async () => {
+    vi.mocked(relationHintOf).mockReturnValue({ table: "po_order", count: 2 });
+    const onFillSql = vi.fn();
+    const result = entry({ sql: "select * from po_order", startLine: 3, columns: cols, rows: [["1"]] });
+    await act(async () => root.render(<ResultPanel tab={tabWith(result)} height={300} onFillSql={onFillSql} />));
+    await flush();
+
+    expect(dive()?.textContent).toContain("带出子表明细 · 2 条关联");
+    await act(async () => dive()!.click());
+    await flush();
+    expect(vi.mocked(planDeepDive)).toHaveBeenCalledWith({ connId: "c1", table: "po_order", line: 3 });
+    expect(onFillSql).toHaveBeenCalledWith(expect.stringContaining("LEFT JOIN po_order_b"));
+  });
+
+  it("生成不了就退回定位，不填任何 SQL", async () => {
+    vi.mocked(relationHintOf).mockReturnValue({ table: "po_order", count: 1 });
+    vi.mocked(planDeepDive).mockResolvedValue({ kind: "locate", line: 9 });
+    const onFillSql = vi.fn(), onLocate = vi.fn();
+    const result = entry({ sql: "select * from po_order", startLine: 3, columns: cols, rows: [["1"]] });
+    await act(async () => root.render(<ResultPanel tab={tabWith(result)} height={300} onLocate={onLocate} onFillSql={onFillSql} />));
+    await flush();
+
+    await act(async () => dive()!.click());
+    await flush();
+    expect(onFillSql).not.toHaveBeenCalled();
+    expect(onLocate).toHaveBeenCalledWith(9);
+  });
+
+  it("没有已读到的关系：整个入口不出现", async () => {
+    vi.mocked(relationHintOf).mockReturnValue(null);
+    const result = entry({ sql: "select * from po_order", columns: cols, rows: [["1"]] });
+    await act(async () => root.render(<ResultPanel tab={tabWith(result)} height={300} onFillSql={vi.fn()} />));
+    await flush();
+    expect(dive()).toBeUndefined();
+  });
+});
+
+/**
+ * 写回预览与「+ 新增行」（结果页）。
+ *
+ * hook 内部逻辑在 useResultSetEdit.test.tsx；这里钉装配：入口出不出现、
+ * 点「写回」开的是预览弹窗而不是直接执行、提交才调 save。
+ */
+describe("结果页写回预览与新增行", () => {
+  const cols = [
+    { name: "ID", type: "NUMBER", precision: 10, scale: 0 },
+    { name: "CODE", type: "VARCHAR2(40)", precision: 40, scale: 0 },
+  ];
+  const update: RowChange = {
+    kind: "update",
+    row: 0,
+    sql: "update bd_material set CODE = :1 where ID = :2 and CODE = :3",
+    params: ["b", { number: "1" }, "a"],
+    cells: [{ column: 1, before: "a", after: "b" }],
+  };
+  /** 可编辑结果的最小 GridEdit：装配测试只走「按钮 → 弹窗」链，不碰网格交互。 */
+  const editable = () => ({
+    canEdit: () => true,
+    changed: new Map(),
+    onEdit: vi.fn(),
+    onCloneRow: vi.fn(),
+    rowState: () => undefined,
+    isDraftRow: () => false,
+    onDeleteRow: vi.fn(),
+    onRestoreRow: vi.fn(),
+  });
+  const buttonIn = (scope: ParentNode, label: string) =>
+    [...scope.querySelectorAll<HTMLElement>("button")].find(b => b.textContent?.includes(label));
+
+  it("有待写回改动时点「写回」开预览弹窗，提交后才调 save", async () => {
+    const save = vi.fn();
+    editMock.useResultSetEdit.mockReturnValue({ ...idleEdit([[1, "a"]]), edit: editable(), count: 1, changes: [update], dirty: true, save });
+    const result = entry({ sql: "select * from bd_material", columns: cols, rows: [[1, "a"]] });
+    await act(async () => root.render(<ResultPanel tab={tabWith(result)} height={300} />));
+    await flush();
+
+    const writeBtn = buttonIn(host, "写回 1 行")!;
+    expect(writeBtn).toBeTruthy();
+    await act(async () => writeBtn.click());
+    await flush();
+    // 弹窗走 portal 挂在 body 上；执行前必须能看见 diff 与生成的语句
+    expect(document.body.textContent).toContain("预览待写回的更改");
+    expect(document.body.textContent).toContain("update bd_material set CODE = :1");
+    expect(save).not.toHaveBeenCalled();
+
+    await act(async () => { buttonIn(document.body, "提交写回")!.click(); });
+    await flush();
+    expect(save).toHaveBeenCalledTimes(1);
+    // 弹窗进入关闭态（Modal 有退场动画，内容延迟卸载；看状态不看文案）
+    expect(document.body.querySelector('[role="dialog"][data-state="open"]')).toBeNull();
+  });
+
+  it("「+ 新增行」只在可编辑时出现，点了交给 hook 造草稿行", async () => {
+    const addRow = vi.fn();
+    editMock.useResultSetEdit.mockReturnValue({ ...idleEdit([[1, "a"]]), edit: editable(), addRow });
+    const result = entry({ sql: "select * from bd_material", columns: cols, rows: [[1, "a"]] });
+    await act(async () => root.render(<ResultPanel tab={tabWith(result)} height={300} />));
+    await flush();
+
+    const add = buttonIn(host, "+ 新增行")!;
+    expect(add).toBeTruthy();
+    await act(async () => add.click());
+    expect(addRow).toHaveBeenCalledTimes(1);
+  });
+
+  it("只读结果没有「+ 新增行」，也没有写回条", async () => {
+    editMock.useResultSetEdit.mockReturnValue(idleEdit([[1, "a"]]));
+    const result = entry({ sql: "select * from bd_material", columns: cols, rows: [[1, "a"]] });
+    await act(async () => root.render(<ResultPanel tab={tabWith(result)} height={300} />));
+    await flush();
+    expect(buttonIn(host, "+ 新增行")).toBeUndefined();
+    expect(host.querySelector(".dbx-writeback-bar")).toBeNull();
   });
 });

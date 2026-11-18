@@ -435,3 +435,52 @@ it("删除写回成功后就地标记「已写回删除」，不能退回普通�
   expect(latest.count).toBe(0);
   expect(latest.dirty).toBe(false);
 });
+
+it("写回预览口径：changes 带 SQL、pk 是列名、空白草稿不进计划、undoChange 分三类撤回", async () => {
+  await act(async () => root.render(<Probe sql="select * from bd_material" />));
+  await flush();
+  // 定位列名（不是下标）：预览 diff 表按它显示「哪一行」。
+  expect(latest.pk).toEqual(["ID"]);
+
+  latest.edit!.onEdit(0, 1, "b");
+  await act(async () => {});
+  expect(latest.changes).toHaveLength(1);
+  expect(latest.changes[0].sql).toBe("update bd_material set CODE = :1 where ID = :2 and CODE = :3");
+  // update 的撤销 = 清掉改动格子，显示行回落到快照原值。
+  latest.undoChange(latest.changes[0]);
+  await act(async () => {});
+  expect(latest.count).toBe(0);
+  expect(latest.edit!.changed.has("0:1")).toBe(false);
+
+  // 空白新增行：显示行多一行、算 dirty（关标签要问），但**不进写回计划**——
+  // 一个值都没填的行插不进库，也不该弹「新增行没有任何值」把工具条染红。
+  latest.addRow();
+  await act(async () => {});
+  expect(latest.rows.length).toBe(2);
+  expect(latest.rows[1]).toEqual([null, null]);
+  expect(latest.edit!.rowState!(1)).toBe("added");
+  expect(latest.dirty).toBe(true);
+  expect(latest.count).toBe(0);
+  expect(latest.planError).toBe("");
+
+  // 填了值才进计划：insert 只写填过的列，没填的走数据库默认值。
+  latest.edit!.onEdit(1, 1, "x");
+  await act(async () => {});
+  expect(latest.count).toBe(1);
+  expect(latest.changes[0].kind).toBe("insert");
+  expect(latest.changes[0].sql).toBe("insert into bd_material (CODE) values (:1)");
+  // insert 的撤销 = 撤掉草稿行本身。
+  latest.undoChange(latest.changes[0]);
+  await act(async () => {});
+  expect(latest.rows.length).toBe(1);
+  expect(latest.count).toBe(0);
+
+  // delete 的撤销 = 取消删除标记，行回到普通行。
+  latest.edit!.onDeleteRow!(0);
+  await act(async () => {});
+  expect(latest.changes[0].kind).toBe("delete");
+  latest.undoChange(latest.changes[0]);
+  await act(async () => {});
+  expect(latest.edit!.rowState!(0)).toBeUndefined();
+  expect(latest.count).toBe(0);
+});

@@ -255,6 +255,11 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
           }} onLocate={line => {
             if (split.focus === "results") split.setFocus("split");
             api.current?.reveal(line);
+          }} onFillSql={sql => {
+            // 「带出子表明细」：联查 SQL 填入编辑器，执不执行由用户定（与历史/片段抽屉同一口径）。
+            if (split.focus === "results") split.setFocus("split");
+            api.current?.setText(sql);
+            toast("联查 SQL 已填入编辑器 · 确认后执行", "success");
           }} />
         </div>
         {side === "history" && tab.connId && (

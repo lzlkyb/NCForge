@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DbWritebackBar } from "./DbWritebackBar";
 import { ResultTable } from "./ResultTable";
 import { QuerySettings } from "./QuerySettings";
 import { EditBlockedPanel } from "./EditBlockedPanel";
 import { EditTargetDialog } from "./EditTargetDialog";
+import { DbWritebackDialog } from "./DbWritebackDialog";
 import { useResultSetEdit } from "../../hooks/useResultSetEdit";
 import { useSaveShortcut } from "../../hooks/useSaveShortcut";
 import { ResultTabList, resultTabId } from "./ResultTabList";
@@ -17,6 +18,7 @@ import { connOf, isRunning, loadMore, rtOf, type ResultEntry, type SqlTab } from
 import { resultTargetIssue } from "../../lib/dbResultContext";
 import { useTxEpoch } from "../../lib/dbTxEpoch";
 import { reportEditCount, resultEditKey } from "../../lib/dbDirtyEdits";
+import { useResultDeepDive } from "../../hooks/useResultDeepDive";
 
 /**
  * 有行数据的结果。`dbms_sql.return_result` 可能一次带回多个结果集，
@@ -24,10 +26,13 @@ import { reportEditCount, resultEditKey } from "../../lib/dbDirtyEdits";
  *
  * 复制导出绑定本次结果来源；隐式结果集只允许导出已读取数据。
  */
-export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; entry: ResultEntry; isLast: boolean; onLocate?:(line:number)=>void }) {
+export function RowsEntryView({ tab, entry, isLast, onLocate, onFillSql }: { tab: SqlTab; entry: ResultEntry; isLast: boolean; onLocate?:(line:number)=>void; onFillSql?:(sql:string)=>void }) {
   const [pick, setPick] = useState(0);
   const [diagOpen, setDiagOpen] = useState(false);
   const [pickTarget, setPickTarget] = useState(false);
+  /** 写回预览弹窗：结果页没有就地展开空间，执行前先过一眼 diff 与生成的语句。 */
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const openPreview = useCallback(() => setPreviewOpen(true), []);
   const sets = entry.sets ?? [];
   const at = Math.min(pick, Math.max(0, sets.length - 1));
   const set = sets.length > 0 ? sets[at] : null;
@@ -57,12 +62,26 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
     seenTxEpoch.current = txEpoch.seq;
     if (txEpoch.action === "rollback") setStaleAfterRollback(true);
   }, [txEpoch.seq, txEpoch.action]);
-  // Ctrl+S = 写回，与表页一致；没有待写回内容时不接管这个键。
-  useSaveShortcut(editData.save, !!editData.edit && editData.count > 0, resultEditKey(tab.id, entry.id));
+  // Ctrl+S = 打开写回预览（执行前先给人看，与表页同一道闸）；没有待写回内容时不接管这个键。
+  useSaveShortcut(openPreview, !!editData.edit && editData.count > 0, resultEditKey(tab.id, entry.id));
   /** 隐式结果集取到上限还有剩：不能续取，只能调大行数重跑。 */
   const truncated = !!set?.hasMore;
   /** 列名 → NC 中文名。查不到（非 NC 库 / 算出来的列）时表头照旧显示类型。 */
   const zh = useColumnZh(tab.connId, entry.sql, columns);
+  const table = guessTable(entry.sql);
+
+  /**
+   * 「带出子表明细」：查完主表，手里已经有数据，最想顺着关系看子表明细。编辑器侧的
+   * 表名 chip 覆盖的是「写 SQL 时」，这里补的是「查完之后」这个时机。
+   * 只认**已读到的**关系（与编辑器 chip 同一条规矩）：没读到就整个不显示入口。
+   */
+  const dive = useResultDeepDive({ connId: tab.connId, table, line: entry.startLine ?? 1, onFillSql, onLocate });
+  const diveButton = dive.hint ? (
+    <button type="button" className="dbx-lk" disabled={dive.busy} onClick={dive.run}
+      title={`按已确认的关联生成联查 SQL 填入编辑器（${dive.hint.count} 条关联，最多带出 3 张子表），不自动执行`}>
+      {dive.busy ? "正在生成…" : `带出子表明细 · ${dive.hint.count} 条关联`}
+    </button>
+  ) : null;
 
   const prefix = `dbx-sets-${entry.id}`;
   const complete = sets.length ? !truncated : !entry.hasMore;
@@ -79,8 +98,8 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
         settings={<QuerySettings tab={tab} />}
         columns={columns}
         rows={rows}
-        table={guessTable(entry.sql)}
-        layoutKey={`${tab.connId}:${guessTable(entry.sql) || columns.map(c=>c.name).join("|")}`}
+        table={table}
+        layoutKey={`${tab.connId}:${table || columns.map(c=>c.name).join("|")}`}
         snapshot={{source:entry.context?.source ?? "执行来源未记录",schema:entry.context?.schema,originTabId:tab.id,sql:entry.sql,at:entry.completedAt ?? entry.context?.startedAt ?? 0,complete,columns,rows}}
         /* 隐式结果集（dbms_sql.return_result）的 SQL 是 PL/SQL 块，按行号外套查询取不到值：
            行号属于子结果集，重跑后外层结果集的行对不上，宁可不给这个入口。 */
@@ -107,7 +126,7 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
           </>
         }
         onServerSort={sets.length || entry.boundQuery ? undefined : (col, dir) => void reSortOnServer(tab.id, entry.sql, columns[col]?.name ?? "", dir, entry.context)}
-        transferSource={{connId:entry.context?.connId ?? tab.connId,resultId:`${entry.id}:${at}`,tabId:tab.id,sql:entry.sql,source:entry.context?.source ?? "执行来源未记录",schema:entry.context?.schema,connectionKey:entry.context?.connectionKey,complete,canRequery:!sets.length && !entry.boundQuery,timeoutSec:tab.timeoutSec,table:guessTable(entry.sql),sheets:sets.length>1 ? sets.map((s,i)=>({name:`结果集 ${i+1}${s.hasMore ? "-部分" : ""}`,data:{columns:s.columns,rows:s.rows,query:entry.sql}})) : undefined}}
+        transferSource={{connId:entry.context?.connId ?? tab.connId,resultId:`${entry.id}:${at}`,tabId:tab.id,sql:entry.sql,source:entry.context?.source ?? "执行来源未记录",schema:entry.context?.schema,connectionKey:entry.context?.connectionKey,complete,canRequery:!sets.length && !entry.boundQuery,timeoutSec:tab.timeoutSec,table,sheets:sets.length>1 ? sets.map((s,i)=>({name:`结果集 ${i+1}${s.hasMore ? "-部分" : ""}`,data:{columns:s.columns,rows:s.rows,query:entry.sql}})) : undefined}}
         zh={zh}
         edit={editData.edit}
         // 滚到底自动续取：与底栏「加载下 N 行」同一个入口，条件也一致（隐式结果集 / 失效游标不能续）。
@@ -126,6 +145,8 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
                 手动指定 {editData.diagnostics.table ?? ""} · 取消
               </button>
             )}
+            <button type="button" className="dbx-btn ghost" onClick={editData.addRow} title="新增一行空白草稿，写回时插入（没填的列走数据库默认值）">+ 新增行</button>
+            {diveButton}
 
           </>
         ) : (
@@ -138,11 +159,12 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
                 指定基表/定位列…
               </button>
             )}
+            {diveButton}
           </>
         )}
         foot={<>
           <DbWritebackBar count={editData.count} dirty={editData.dirty} error={editData.planError || undefined}
-            disabled={!editData.edit} saving={editData.saving} onUndo={editData.reset} onSave={editData.save} />
+            disabled={!editData.edit} saving={editData.saving} onUndo={editData.reset} onSave={openPreview} />
           <div className="dbx-rfoot">
             <strong>已加载 {thousands(rows.length)} 行</strong>
             <span>{thousands(entry.ms)} ms</span>
@@ -183,6 +205,19 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
         risky={editData.diagnostics.risky}
         onClose={() => setPickTarget(false)}
         onApply={editData.applyTarget}
+      />
+      <DbWritebackDialog
+        open={previewOpen}
+        changes={editData.changes}
+        columns={columns}
+        rows={rows}
+        pk={editData.pk}
+        zh={zh}
+        saving={editData.saving}
+        onUndo={editData.undoChange}
+        onUndoAll={editData.reset}
+        onSubmit={() => { setPreviewOpen(false); editData.save(); }}
+        onClose={() => setPreviewOpen(false)}
       />
       </div>
     </div>

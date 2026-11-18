@@ -23,7 +23,7 @@ import type { SqlQuickFix } from "../../lib/sqlQuickFix";
 type FixActions = { find: (entry: ResultEntry) => Promise<SqlQuickFix[]>; apply: (entry: ResultEntry, fix: SqlQuickFix) => void };
 
 /** SQL 控制台下半：每条语句一个结果标签 + 执行计划 + 输出。 */
-export function ResultPanel({ tab, height, onLocate, fixes }: { tab: SqlTab; height: number; onLocate?:(line:number)=>void; fixes?: FixActions }) {
+export function ResultPanel({ tab, height, onLocate, onFillSql, fixes }: { tab: SqlTab; height: number; onLocate?:(line:number)=>void; onFillSql?:(sql:string)=>void; fixes?: FixActions }) {
   const [motionHost, setMotionHost] = useState<HTMLDivElement | null>(null);
   /** 看过的结果视图保活：切标签回来时本地筛选、排序、滚动与单元格选择都还在。 */
   const [kept, setKept] = useState<string[]>([]);
@@ -116,7 +116,7 @@ export function ResultPanel({ tab, height, onLocate, fixes }: { tab: SqlTab; hei
       <div className="dbx-result-panes" data-layout={layout}>
       {rowViews.map(r => <section key={r.id} className="dbx-result-keep" hidden={!visible.includes(r.id)} style={{ order: visible.indexOf(r.id) }} aria-label={`查询 ${r.index} 结果`}>
         {paneHeading(r)}
-        <RowsEntryView tab={tab} entry={r} isLast={ownsCursor(tab.connId, tab.slot, r.id)} onLocate={onLocate} />
+        <RowsEntryView tab={tab} entry={r} isLast={ownsCursor(tab.connId, tab.slot, r.id)} onLocate={onLocate} onFillSql={onFillSql} />
       </section>)}
       {pending.filter(r => visible.includes(r.id)).map(r => <section key={r.id} className="dbx-result-keep" style={{ order: visible.indexOf(r.id) }} aria-label={`查询 ${r.index} 结果`}>
         {paneHeading(r)}

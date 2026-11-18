@@ -9,7 +9,7 @@ import { rowsWithDrafts } from "../lib/tableRows";
 import { patchTab, setTx, setTxNotice, type SqlTab } from "../lib/dbStore";
 import { beginOperation } from "../lib/operations";
 import { dbTaskSpec } from "../lib/dbOperations";
-import { useRowDrafts } from "./useRowDrafts";
+import { useResultSetDrafts } from "./useResultSetDrafts";
 import { useResultSetPlan } from "./useResultSetPlan";
 import { useTxEpoch } from "../lib/dbTxEpoch";
 import { useResultSetEditModel } from "./useResultSetEditModel";
@@ -61,7 +61,7 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
     if (txEpoch.action === "rollback") setApplied(new Map());
   }, [txEpoch.seq, txEpoch.action]);
   const [saving, setSaving] = useState(false);
-  const drafts = useRowDrafts(rows, columns.length);
+  const { drafts, addRow, undoChange } = useResultSetDrafts(rows, columns.length, setChanged);
   // `reset` 是稳定引用（useCallback），可以直接进依赖；`drafts` 对象本身每次渲染新建，不行。
   const resetDrafts = drafts.reset;
 
@@ -277,6 +277,12 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
     count,
     /** 计划生成失败 / 有大文本预览被改：工具条显示原因，不要静默归零。 */
     planError,
+    /** 待写回计划（含生成的 SQL 与参数）：预览弹窗直接展示，不再另算。 */
+    changes,
+    /** 定位列名：预览 diff 表按它显示「哪一行」。ROWID 定位时是 ["ROWID"]。 */
+    pk: keyInfo.keys,
+    addRow,
+    undoChange,
     dirty,
     saving,
     binarySqlForRow: (row: number, column: number) => {

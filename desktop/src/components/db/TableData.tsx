@@ -269,7 +269,7 @@ export function TableData({ tab, cols, isView, zh, onImport, importBlocked }: { 
               <TableEditTools count={changes.length} dirty={dirtyCount > 0} error={planError ? "无法写回：" + planError : undefined}
                 editable={editable} saving={saving} preview={preview} onUndo={() => { setChanged(new Map()); drafts.reset(); }}
                 onTogglePreview={() => setPreview(!preview)} onSave={() => void save()} />
-              {preview && <TableChangePreview changes={changes} sqls={sqls} columns={page.columns} rows={page.rows} pk={pk} zh={zh} disabled={saving} onUndo={undoChange} />}
+              {preview && <TableChangePreview changes={changes} columns={page.columns} rows={page.rows} pk={pk} zh={zh} disabled={saving} onUndo={undoChange} />}
               <TableDataFooter rows={page.rows.length} pageNumber={page.pageNumber} complete={page.pageNumber===1 && !page.hasNext}
                 previousDisabled={saving || loading || q.page===0} nextDisabled={saving || loading || !page.hasNext}
                 onPrevious={()=>void navTo({...q,page:q.page-1})} onNext={()=>void navTo({...q,page:q.page+1})}

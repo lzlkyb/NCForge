@@ -1,17 +1,19 @@
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import type { RowChange } from "../../lib/dbOptimisticEdit";
-import { ChangeReview } from "./ChangeReview";
+import { DbChangeSummary } from "./DbChangeSummary";
 
 /**
- * 「预览 SQL」展开后的两块内容：变更复核表 + 将要执行的语句（含绑定参数）。
+ * 表页「复核修改 / SQL」的就地展开内容。
  *
- * 抽成独立组件是为了让 `TableData` 只管状态编排、不再铺这段版式。
- * 没有变更就整块不渲染——`sqls` 是由 `changes` 派生的，两者必然同空。
+ * 2026-11-17：版式搬进 `DbChangeSummary`，与结果页写回弹窗共用同一块——
+ * 两边对执行顺序、绑定参数的展示口径不会各自走偏。原 `sqls` 参数删除：
+ * 语句文本本来就取自 `RowChange.sql`，外面再传一份必然同值。
+ *
+ * 表页保留就地展开（不改成弹窗）：用户可以看着 diff 直接回网格改那一格，
+ * 弹窗会把这个「边审边改」的循环切成两段。
  */
-export function TableChangePreview({ changes, sqls, columns, rows, pk, zh, disabled, onUndo }: {
+export function TableChangePreview({ changes, columns, rows, pk, zh, disabled, onUndo }: {
   changes: RowChange[];
-  /** 与 `changes` 一一对应的语句文本，只用于展示。 */
-  sqls: string[];
   columns: ColumnMeta[];
   rows: Cell[][];
   pk: string[];
@@ -20,15 +22,5 @@ export function TableChangePreview({ changes, sqls, columns, rows, pk, zh, disab
   /** 撤销单条变更：调用方按 kind 决定是清格子还是还原草稿行。 */
   onUndo: (change: RowChange) => void;
 }) {
-  if (changes.length === 0) return null;
-  return (
-    <>
-      <ChangeReview changes={changes} columns={columns} rows={rows} pk={pk} zh={zh} disabled={disabled} onUndo={onUndo} />
-      {sqls.length > 0 && (
-        <pre className="dbx-ddl" style={{ flex: "none", maxHeight: 140, borderTop: "1px solid hsl(var(--border))" }}>
-          {changes.map((c) => `${c.sql};\n-- 绑定参数: ${JSON.stringify(c.params)}`).join("\n")}
-        </pre>
-      )}
-    </>
-  );
+  return <DbChangeSummary changes={changes} columns={columns} rows={rows} pk={pk} zh={zh} disabled={disabled} onUndo={onUndo} />;
 }
