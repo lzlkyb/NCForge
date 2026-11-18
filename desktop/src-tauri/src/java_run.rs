@@ -376,6 +376,17 @@ pub fn execute_registered(
             }
         }
         if cancel.load(Ordering::Relaxed) || start.elapsed() > timeout {
+            // 先探再杀：drain 期间主循环可能堵在 log 回调里，进程早已自然退出
+            // （例如只写几百行就退的小进程），try_wait 观测到的退出码是既成事实、
+            // 不是杀出来的。与 server.rs 登记册同一把守：被杀的进程不编造退出码，
+            // 但自然退出过的必须记录，否则前端只能显示"未知"。
+            // （2026-11-18 CI release 首跑：windows-latest 上 powershell 冷启动
+            // 慢，时限在 try_wait 之前就触发，exit_code 丢成 None。）
+            if result.exit_code.is_none() {
+                if let Ok(Some(status)) = child.try_wait() {
+                    result.exit_code = status.code();
+                }
+            }
             tree.kill();
             let _ = child.kill();
             let _ = child.wait();
@@ -780,11 +791,15 @@ mod tests {
             ]);
             command
         };
+        // 死线要宽到容得下 windows-latest 的 powershell 冷启动（CI 上实测能到数秒）：
+        // 2s 时限下第一次超时检查就抢在进程写出之前，exit_code 观测不到（2026-11-18
+        // CI release 首跑两个计时测试全挂在这一处）。
+        let timeout = Duration::from_secs(6);
         let registry = Arc::new(ProcessRegistry::default());
         let watchdog_registry = registry.clone();
         let (done, wait_done) = mpsc::channel();
         let watchdog = std::thread::spawn(move || {
-            if wait_done.recv_timeout(Duration::from_secs(6)).is_err() {
+            if wait_done.recv_timeout(Duration::from_secs(12)).is_err() {
                 let trees: Vec<_> = watchdog_registry
                     .lock()
                     .unwrap()
@@ -803,16 +818,22 @@ mod tests {
             &mut command,
             "drain-timeout",
             &AtomicBool::new(false),
-            Duration::from_secs(2),
+            timeout,
             |line| {
                 lines += 1;
-                // Give the small writer time to exit before the first status check;
-                // the next batch then crosses the deadline while exit_code is already 0.
+                // Give the small writer time to exit before the first status check,
+                // so try_wait records exit_code 0 before the drain phase begins.
                 if lines == 1 {
                     std::thread::sleep(Duration::from_millis(200));
                 }
                 if lines == 130 {
-                    std::thread::sleep(Duration::from_millis(2500));
+                    // 睡到刚好越过死线：冷启动再慢，死线也一定在排水睡眠中跨过，
+                    // 醒来后的第一次检查必然走超时分支（而不是 2s 排水预算分支）。
+                    // 固定时长睡眠做不到这点——启动快时死线在睡醒后才跨，会改走
+                    // 排水分支，timed_out 断言反而挂。
+                    std::thread::sleep(
+                        timeout.saturating_sub(started.elapsed()) + Duration::from_millis(500),
+                    );
                 }
                 if line.contains("运行超过时间上限") {
                     timed_out = true;
@@ -824,7 +845,7 @@ mod tests {
         .unwrap();
         let _ = done.send(());
         watchdog.join().unwrap();
-        assert!(started.elapsed() < Duration::from_secs(6));
+        assert!(started.elapsed() < Duration::from_secs(10));
         assert_eq!(result.exit_code, Some(0));
         assert!(timed_out);
         assert!(!result.ok);
@@ -849,8 +870,10 @@ mod tests {
         let watchdog_registry = registry.clone();
         let (done, wait_done) = mpsc::channel();
         // Bound a broken regression too: a flood must not leave the test or child running.
+        // 16s：正常流程 = powershell 冷启动（CI 上能到数秒）+ 父进程 500ms + 排水，
+        // 必须宽过 bound 才配当看门狗。
         let watchdog = std::thread::spawn(move || {
-            if wait_done.recv_timeout(Duration::from_secs(6)).is_err() {
+            if wait_done.recv_timeout(Duration::from_secs(16)).is_err() {
                 let trees: Vec<_> = watchdog_registry
                     .lock()
                     .unwrap()
@@ -868,7 +891,9 @@ mod tests {
             &mut command,
             "pipe-flood",
             &AtomicBool::new(false),
-            Duration::from_secs(4),
+            // 10s：CI 上 powershell 冷启动 + 父进程 500ms 就能吃掉原来的 4s，
+            // 时限先于父退出触发会把 ok 打成 false（2026-11-18 release 首跑）。
+            Duration::from_secs(10),
             |line| {
                 if let Some(value) = line.trim().strip_prefix("CHILD:") {
                     child_pid = value.parse::<u32>().ok();
@@ -880,7 +905,9 @@ mod tests {
         .unwrap();
         let _ = done.send(());
         watchdog.join().unwrap();
-        assert!(start.elapsed() < Duration::from_secs(4));
+        // 14s 只是"洪水不许把测试或子进程留在线"的回归护栏，不是快机预算：
+        // CI 冷启动 + 500ms + 排水就能到 6.5s；真正的判据是下面三条语义断言。
+        assert!(start.elapsed() < Duration::from_secs(14));
         assert!(result.ok);
         assert!(registry.lock().unwrap().is_empty());
         assert!(
