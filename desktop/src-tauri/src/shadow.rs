@@ -438,7 +438,17 @@ mod tests {
     use super::*;
 
     fn temp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("nc-forge-shadow-{tag}-{}", std::process::id()));
+        // 🔴 根必须落在工程内 target/test-tmp，不能用系统 %TEMP%：
+        // 后者的路径段叫 Temp，会被 jdt.ls 的 IMPORT_EXCLUSIONS（**/temp/**，
+        // Windows 上大小写不敏感）整条排除 ⇒ 工作区从不导入 ⇒ 影子工程退化成
+        // 默认 classpath 的 invisible project ⇒ BaseDAO 解析不出来，
+        // `BaseDAO 应跳到 jdt:// ，实际 []`（2026-11-18 记录，java_debug_live.rs
+        // 坏掉同根因）。rust-gate 本来就 TMP 钉到 target/test-tmp，这里写死保证
+        // 直跑 cargo test 与过门禁走同一条路；段名 test-tmp ≠ temp，不中排除。
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("test-tmp")
+            .join(format!("nc-forge-shadow-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
