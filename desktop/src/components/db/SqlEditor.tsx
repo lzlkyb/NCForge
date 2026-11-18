@@ -3,6 +3,8 @@ import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { sqlModel, tabIdOfModel } from "../../lib/sqlModels";
 import { registerSqlProviders } from "../../lib/sqlProviders";
 import { wireSqlEditorAssist } from "../../lib/sqlEditorAssist";
+import { wireSqlSuggestLayout } from "../../lib/sqlSuggestLayout";
+import { wireSqlActionMenu } from "../../lib/sqlActionMenu";
 import { pickStatement } from "../../lib/sqlSplit";
 import { statementsOf } from "../../lib/sqlStmtCache";
 import type { SqlFormatScope } from "../../lib/sqlFormatTarget";
@@ -52,6 +54,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
   visible?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const overflowRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Editor | null>(null);
   const views = useRef(new Map<string, monaco.editor.ICodeEditorViewState>());
   const refreshScope = useRef<(() => void) | null>(null);
@@ -65,6 +68,13 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
     if (!hostRef.current) return;
     initMonaco();
     registerSqlProviders();
+    // The workbench clips its document area. Monaco positions these popups in viewport coordinates.
+    const doc = hostRef.current.ownerDocument;
+    const overflow = doc.createElement("div");
+    overflow.className = "monaco-editor dbx-sql-overflow";
+    overflow.hidden = !visibleRef.current;
+    doc.body.append(overflow);
+    overflowRef.current = overflow;
     const editor = monaco.editor.create(hostRef.current, {
       model: null,
       automaticLayout: true,
@@ -79,6 +89,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
       "semanticHighlighting.enabled": true,
       suggest: { showWords: false },
       fixedOverflowWidgets: true,
+      overflowWidgetsDomNode: overflow,
     });
     editorRef.current = editor;
     // 用 addAction 而不是 addCommand：前者能带 label 进编辑器右键菜单（键位由 Monaco 自动渲染在
@@ -148,7 +159,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
       });
     };
     refreshScope.current = highlight;
-    const subs = [wireSqlEditorAssist(editor),
+    const subs = [wireSqlEditorAssist(editor), wireSqlSuggestLayout(editor), wireSqlActionMenu(editor, overflow),
       editor.onDidChangeCursorPosition(highlight),
       editor.onDidChangeCursorSelection(highlight),
       editor.onDidChangeModelContent(() => {
@@ -195,6 +206,8 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
       apiRef.current = null;
       refreshScope.current = null;
       editor.dispose();
+      overflow.remove();
+      overflowRef.current = null;
       editorRef.current = null;
     };
   }, [apiRef]);
@@ -219,6 +232,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
     const editor = editorRef.current, model = editor?.getModel();
     const id = model && tabIdOfModel(model);
     previousVisible.current = visible;
+    if (overflowRef.current) overflowRef.current.hidden = !visible;
     if (!editor || !id) return;
     if (!visible) {
       const view = editor.saveViewState();

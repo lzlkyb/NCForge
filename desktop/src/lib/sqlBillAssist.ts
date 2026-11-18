@@ -27,7 +27,7 @@ import { tabIdOfModel } from "./sqlModels";
 import { dialectOfSqlModel, sqlAnalysisOf, SQL_LANGUAGE_IDS } from "./monacoSql";
 import { peekSqlBusinessMetadata, readSqlBusinessMetadata, type SqlBusinessMetadata } from "./sqlBusiness";
 import { plainName as normalized, pureName as pure } from "./sqlBillHint";
-import { billJoinSpecs } from "./sqlBillJoin";
+import { billJoinSpecs, rankBillRelations, type BillJoinGroup } from "./sqlBillJoin";
 import { sqlAssistColumns } from "./sqlAssistColumns";
 import { billQueryRelations, billQueryTemplates } from "./sqlBillTemplates";
 import { getSqlTemplatesEnabled } from "./sqlTemplates";
@@ -36,8 +36,11 @@ import { sqlScopeAt, sqlSourcesAt } from "./sqlScope";
 import { sqlName } from "./sqlLex";
 import { getSqlFormatPrefs } from "./sqlFormatPrefs";
 
-interface BillTarget { table: string; start: number; end: number; mode: "replace" | "append" }
-interface BillAction { title: string; sql: string; range: { start: number; end: number } }
+interface BillTarget { table: string; start: number; end: number; mode: "replace" | "append"; qualifier?: string; schema?: string }
+export interface SqlJoinPresentation { group: BillJoinGroup; table: string; label: string; sql: string; mode: BillTarget["mode"] }
+export type SqlActionPreview = { text: string; description?: boolean } | { read: (current: () => boolean) => Promise<string> };
+export type SqlCodeAction = monaco.languages.CodeAction & { ncforgeJoin?: SqlJoinPresentation; ncforgePreview?: SqlActionPreview };
+interface BillAction { title: string; range: { start: number; end: number }; preview: SqlJoinPresentation }
 
 /**
  * 光标所在的**表名**。
@@ -60,9 +63,25 @@ function targetAt(model: monaco.editor.ITextModel, offset: number): BillTarget |
   const table = normalized(sqlName(token));
   if (!pure(table)) return undefined;
   const hit = { table, start: token.start, end: token.end };
-  if (!sqlScopeAt(analysis, offset)) return { ...hit, mode: "replace" };
-  const declared = analysis.scopes.some(scope => scope.sources.some(source => source.declaration === index));
-  return declared ? { ...hit, mode: "append" } : undefined;
+  const scope = sqlScopeAt(analysis, offset);
+  if (!scope) return { ...hit, mode: "replace" };
+  if (scope.select !== undefined && analysis.tokens[scope.select]?.text.toUpperCase() !== "SELECT") return;
+  const source = scope.sources?.find(s => s.declaration === index);
+  if (!source?.table || source.quoted) return;
+  const aliasToken = source.aliasRef && analysis.tokens.slice(index + 1)
+    .find(t => !["space", "comment", "hint"].includes(t.kind) && t.text.toUpperCase() !== "AS");
+  let end = aliasToken ? aliasToken.end : token.end;
+  if (scope.sources[0] !== source) {
+    // A JOIN attached to an existing joined source must follow its ON clause.
+    const stop = scope.indices.find(i => i > index && /^(?:WHERE|GROUP|HAVING|ORDER|CONNECT|START|MODEL|UNION|INTERSECT|MINUS|FETCH|OFFSET|FOR|;)$/i.test(analysis.tokens[i].text));
+    const boundary = stop === undefined ? scope.end : analysis.tokens[stop].start;
+    // Scope indices skip strings. Count them here so a trailing ON literal stays intact.
+    for (let i = index + 1; i < analysis.tokens.length && analysis.tokens[i].start < boundary; i++) {
+      const part = analysis.tokens[i];
+      if (!["space", "comment", "hint"].includes(part.kind)) end = part.end;
+    }
+  }
+  return { ...hit, end, mode: "append", qualifier: source.aliasRef ?? table, schema: source.schema };
 }
 
 /** CodeAction 每次移光标都会被问一遍，算好的 SQL 缓存一小会儿，避免反复读列。 */
@@ -82,36 +101,38 @@ function appendActions(target: BillTarget, available: readonly string[], names: 
   // 复用真源 `sqlSourcesAt`（= sqlScopeAt(...)?.sources），别自己再取一遍 scope。
   const sources = sqlSourcesAt(sqlAnalysisOf(model), offset);
   // 表名可能带 schema 前缀（`nc65.po_order_b`），只比最后一段；大小写按 plainName 归一。
-  const joined = new Set(sources.map(source => {
+  const joined = new Set(sources.flatMap(source => {
     const raw = source.table ?? source.name;
-    return normalized(raw.slice(raw.lastIndexOf(".") + 1));
+    const table = normalized(raw.slice(raw.lastIndexOf(".") + 1));
+    return source.alias ? [table, normalized(source.alias)] : [table];
   }));
-  return billJoinSpecs(target.table, available, meta).flatMap((spec) => {
+  return billJoinSpecs(target.table, available, meta, names, target.qualifier).flatMap((spec) => {
     if (joined.has(normalized(spec.table))) return [];
-    return [{ title: `追加 LEFT JOIN：${names[spec.table] || spec.table}`, sql: spec.sql,
+    const label = names[spec.table] || spec.table;
+    return [{ title: `追加 LEFT JOIN：${label}`, preview: { ...spec, label, mode: "append" },
       range: { start: target.end, end: target.end } }];
   });
 }
 
 async function billActions(connId: string, table: string, available: readonly string[], names: Readonly<Record<string, string>>,
   meta: SqlBusinessMetadata, current: () => boolean): Promise<BillAction[]> {
-  const relations = billQueryRelations(table, available, meta).slice(0, 8);
+  const relations = rankBillRelations(table, billQueryRelations(table, available, meta), names).slice(0, 8);
   if (!relations.length) return [];
   const root = await sqlAssistColumns(connId, table, current, true).catch(() => []);
   if (!root.length || !current()) return [];
-  const others = [...new Set(relations.map(r => r.table))].slice(0, 3);
+  const others = [...new Set(relations.map(r => r.relation.table))].slice(0, 3);
   const related = await Promise.all(others.map(async other =>
     [other, await sqlAssistColumns(connId, other, current).catch(() => [])] as const));
   if (!current()) return [];
   const columns = { [table]: root, ...Object.fromEntries(related) }, upper = getSqlFormatPrefs().keywordCase !== "lower";
-  return relations.flatMap((relation) => {
+  return relations.flatMap(({ relation, group }) => {
     // `billQueryTemplates` 要求主表有 `vbillcode`，没有就返回空——那种表生成不出
     // 可执行的 SQL，宁可不给，也不塞一条要用户自己补条件的半成品。
     const tpl = billQueryTemplates(table, names, columns, [relation], upper, "plsql")[0];
     if (!tpl) return [];
     return [{
       title: `生成主子表联查：${names[table] || table} + ${names[relation.table] || relation.table}`,
-      sql: tpl.sql,
+      preview: { group, table: relation.table, label: names[relation.table] || relation.table, sql: tpl.sql, mode: "replace" },
       range: { start: -1, end: -1 },
     }];
   });
@@ -129,6 +150,8 @@ export function wireSqlBillAssist(editor: monaco.editor.IStandaloneCodeEditor): 
       const offset = model.getOffsetAt({ lineNumber: range.startLineNumber, column: range.startColumn });
       const target = targetAt(model, offset);
       if (!target) return { actions: [], dispose() {} };
+      const schema = rt.currentSchema ?? rt.info?.schema ?? "";
+      if (target.schema && target.schema.toLowerCase() !== schema.toLowerCase()) return { actions: [], dispose() {} };
       const version = model.getVersionId();
       const alive = () => !disposed && !model.isDisposed() && editor.getModel() === model && model.getVersionId() === version && !token.isCancellationRequested;
       // 列元数据版本进 key：重连或刷新表结构后，旧 SQL 里的 JOIN 条件可能已经变了。
@@ -136,7 +159,7 @@ export function wireSqlBillAssist(editor: monaco.editor.IStandaloneCodeEditor): 
       const cached = actionCache.get(cacheKey);
       // 空结果只压 10 秒：刚连上库、元数据还没备好时算出空，压满一分钟等于「没反应」。
       const ready = cached && Date.now() - cached.at < (cached.actions.length ? ACTION_TTL : 10_000) ? cached.actions : undefined;
-      const schema = rt.currentSchema ?? rt.info?.schema ?? "", scopeKey = sqlUsageScope(connectionKey(connOf(connId)), schema);
+      const scopeKey = sqlUsageScope(connectionKey(connOf(connId)), schema);
       const available = (rt.tables ?? []).map(t => t.name), names = rt.ncNames ?? {};
       const actions = ready ?? await (async () => {
         const meta = peekSqlBusinessMetadata(connId, scopeKey, target.table)
@@ -151,8 +174,9 @@ export function wireSqlBillAssist(editor: monaco.editor.IStandaloneCodeEditor): 
       })();
       if (!alive() || !actions.length) return { actions: [], dispose() {} };
       return {
-        actions: actions.map((action): monaco.languages.CodeAction => ({
+        actions: actions.map((action): SqlCodeAction => ({
           title: action.title, kind: "refactor.rewrite",
+          ncforgeJoin: action.preview,
           edit: { edits: [{
             resource: model.uri, versionId: version,
             textEdit: {
@@ -160,7 +184,7 @@ export function wireSqlBillAssist(editor: monaco.editor.IStandaloneCodeEditor): 
               range: monaco.Range.fromPositions(
                 model.getPositionAt(action.range.start < 0 ? target.start : action.range.start),
                 model.getPositionAt(action.range.end < 0 ? target.end : action.range.end)),
-              text: action.sql,
+              text: action.preview.sql,
             },
           }] },
         })),

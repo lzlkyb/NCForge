@@ -97,7 +97,7 @@ it("表位置的动作以补全项出现，选中后唤起同一个 CodeAction �
   const actions = (await complete("select * from bd_material")).suggestions
     .filter(s => (s.command as { id?: string } | undefined)?.id === "ncforge.sql.quickFix");
   // 已经在语句里：只能追加，替换整条会抹掉用户写的 SELECT。
-  expect(actions.map(s => (s.label as { label: string }).label)).toEqual(["追加子表 LEFT JOIN"]);
+  expect(actions.map(s => (s.label as { label: string }).label)).toEqual(["查看全部关联"]);
   // 不插任何字符：空 range + 空 insertText，只负责唤起菜单。
   expect(actions.every(s => s.insertText === "")).toBe(true);
 });
@@ -283,7 +283,8 @@ it("表名补全提供有来源的关联查询，保留默认单表查询", asyn
   const items = (await complete("物料")).suggestions;
   expect(items).toContainEqual(expect.objectContaining({ preselect: true, insertText: "SELECT * FROM bd_material;$0" }));
   expect(items).toContainEqual(expect.objectContaining({
-    label: { label: "关联查询 · 物料 + 项目", description: "NC类引用 · ref1" },
+    label: { label: "关联查询 · 物料 + 项目", description: "NC类引用" },
+    documentation: { value: expect.stringContaining("NC类引用 · ref1") },
     insertText: "SELECT a.*, b.*\nFROM bd_material a\nJOIN bd_project b ON b.material_id = a.id and b.org = a.org;",
   }));
 });
@@ -320,7 +321,8 @@ it("依据 NC 类引用提供采购主子表模板，插入空引号落点", asy
   await billSchema(async () => {
     const items = (await complete("po_order")).suggestions;
     const bill = items.find(s => typeof s.label !== "string" && s.label.label === "采购订单 · 按单号关联 采购订单子表")!;
-    expect(bill).toMatchObject({ insertText: "SELECT a.*, b.*\nFROM po_order a\nLEFT JOIN po_order_b b\n    ON a.pk_order = b.pk_order\nWHERE a.vbillcode = '$0';", insertTextRules: 4, filterText: "po_order" });
+    expect(bill).toMatchObject({ insertText: "SELECT a.*, b.*\nFROM po_order a\nLEFT JOIN po_order_b b\n    ON a.pk_order = b.pk_order\nWHERE a.vbillcode = '$0';", insertTextRules: 4, filterText: "po_order",
+      label: { description: "NC类引用" }, documentation: { value: expect.stringContaining("NC类引用 · body_head · a.pk_order = b.pk_order") } });
     expect(h.columns.mock.calls.map(call => call[1])).toEqual(["po_order", "po_order_b"]);
     expect(items.map(s => s.insertText)).toContain("SELECT * FROM po_order;$0");
   });

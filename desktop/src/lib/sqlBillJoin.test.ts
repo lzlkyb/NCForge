@@ -30,7 +30,7 @@ describe("光标前的表名", () => {
 describe("表名末尾的 JOIN 片段", () => {
   it("按关联列生成 LEFT JOIN，表名列名统一小写", () => {
     expect(billJoinSpecs("po_order", available, meta)).toEqual([
-      { table: "po_order_b", sql: " LEFT JOIN po_order_b ON po_order_b.pk_order = po_order.pk_order", source: "外键 · FK_ORDER_B" },
+      { table: "po_order_b", sql: " LEFT JOIN po_order_b ON po_order_b.pk_order = po_order.pk_order", source: "外键 · FK_ORDER_B", group: "detail" },
     ]);
   });
 
@@ -42,5 +42,14 @@ describe("表名末尾的 JOIN 片段", () => {
 
   it("关系还没读到时不给片段", () => {
     expect(billJoinSpecs("po_order", available, null)).toEqual([]);
+  });
+
+  it("已确认的单据明细优先，其他业务引用与档案都保留，只有相似的表名不能生成联查", () => {
+    const other = ["order_income", "order_tax", "order_version", "order_history", "order_delivery", "order_profit", "order_billing", "bd_tradetype"];
+    const relations = [...other.map(table => ({ ...meta.relations[0], id: `外键:${table}`, source: table })), ...meta.relations];
+    const specs = billJoinSpecs("po_order", [...available, ...other, "PO_ORDER_DETAIL"], { ...meta, relations });
+    expect(specs.map(({table}) => table)).toEqual(["po_order_b", ...other]);
+    expect(specs[0].group).toBe("detail");
+    expect(specs[specs.length - 1]?.group).toBe("lookup");
   });
 });

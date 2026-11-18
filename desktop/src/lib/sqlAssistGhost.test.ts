@@ -10,7 +10,7 @@ vi.mock("./monacoSetup", () => ({ monaco: {
   Range: class { constructor(readonly a: number, readonly b: number, readonly c: number, readonly d: number) {} },
   editor: { ContentWidgetPositionPreference: { EXACT: 0 } },
 } }));
-vi.mock("./dbStore", () => ({ sqlTabOf: () => ({ connId: "c" }), rtOf: () => h.rt, connOf: () => ({ id: "c" }) }));
+vi.mock("./dbStore", () => ({ sqlTabOf: () => ({ connId: "c" }), rtOf: () => h.rt, connOf: () => ({ id: "c", url: "jdbc:oracle:thin:@host" }) }));
 vi.mock("./dbResultContext", () => ({ connectionKey: () => "k" }));
 vi.mock("./sqlModels", () => ({ tabIdOfModel: () => "t" }));
 vi.mock("./sqlUsage", () => ({ sqlUsageScope: () => "s" }));
@@ -47,12 +47,13 @@ function fakeEditor(sql: string) {
   const actions = new Map<string, () => void>();
   const editor = {
     getModel: () => model, getPosition: () => model.getPositionAt(offset),
+    getSelection: () => null,
     setPosition: (p: { lineNumber: number; column: number }) => { offset = model.getOffsetAt(p); },
     focus: vi.fn(), trigger: vi.fn(), layoutContentWidget: vi.fn(), removeContentWidget: vi.fn(),
     getAction: (id: string) => { const run = actions.get(id); return run ? { run } : null; },
     addContentWidget: (w: monaco.editor.IContentWidget) => { widget = w; },
     createDecorationsCollection: () => ({ set: (d: typeof decorations) => { decorations.splice(0, decorations.length, ...d); }, clear: () => decorations.splice(0) }),
-    onDidChangeCursorPosition: listen("cursor"), onDidChangeModelContent: listen("content"), onDidChangeModel: listen("model"),
+    onDidChangeCursorPosition: listen("cursor"), onDidChangeCursorSelection: listen("selection"), onDidChangeModelContent: listen("content"), onDidChangeModel: listen("model"),
   };
   return {
     editor: editor as unknown as monaco.editor.IStandaloneCodeEditor, spy: editor, model, decorations, actions,
@@ -107,15 +108,13 @@ describe("SQL 行内提示", () => {
     expect(fake.position()).toBeNull();
   });
   // 「展开 *」原先只在右键菜单里：光标停在 * 上时屏幕上没有任何提示。
-  it("光标停在 SELECT 的 * 上时给出展开字段的入口，点击执行同一个 action", async () => {
-    const run = vi.fn();
+  it("光标停在 SELECT 的 * 上时给出展开字段的入口，点击打开补全供确认", async () => {
     const fake = await wire(fakeEditor("SELECT * FROM bd_material"));
-    fake.actions.set("ncforge.sql.expandStar", run);
     fake.move(7);
     expect(fake.chip()!.hidden).toBe(false);
     expect(fake.chip()!.textContent).toBe("展开字段");
     fake.chip()!.click();
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(fake.spy.trigger).toHaveBeenCalledWith("sql-ghost", "editor.action.triggerSuggest", {});
   });
   // 乘法里的 * 不是通配投影，展开会改坏语句。
   it("乘法里的 * 上不挂展开 chip", async () => {

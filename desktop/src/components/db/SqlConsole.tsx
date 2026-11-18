@@ -229,12 +229,15 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
             role="separator"
             aria-orientation="horizontal"
             aria-label="调整结果区高度"
+            title="上下拖动调整结果区高度"
+            data-dragging={split.dragging || undefined}
             tabIndex={0}
             aria-valuemin={split.min}
             aria-valuemax={split.max}
             aria-valuenow={split.height}
             onKeyDown={split.onKeyDown}
             onPointerDown={(e) => {
+              if (!e.isPrimary || e.button !== 0) return;
               e.preventDefault();
               split.startDrag(e.clientY);
             }}

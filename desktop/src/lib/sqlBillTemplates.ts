@@ -5,7 +5,7 @@ import type { SqlBusinessMetadata } from "./sqlBusiness";
 
 type Columns = Readonly<Partial<Record<string, readonly { name: string }[]>>>;
 export interface BillQueryTemplate extends SqlTemplate { sql: string; pickField?: boolean }
-export interface BillQueryRelation { table: string; rootColumns: string[]; otherColumns: string[]; source: string }
+export interface BillQueryRelation { table: string; rootColumns: string[]; otherColumns: string[]; source: string; incoming?: boolean }
 
 const plain = (name: string) => /^[a-z_][\w$#]*$/i.test(name) && (name === name.toUpperCase() || name === name.toLowerCase());
 const usable = (name: string) => plain(name) && sqlIdentifier(name.toLowerCase(), "plsql") === name.toLowerCase();
@@ -28,7 +28,7 @@ export function billQueryRelations(table: string, available: readonly string[], 
     const key = JSON.stringify([other, rootColumns.map((c, i) => [c, otherColumns[i]]).sort()]);
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ table: other, rootColumns, otherColumns, source: `${relation.kind} · ${relation.id.slice(relation.kind.length + 1)}` });
+    out.push({ table: other, rootColumns, otherColumns, source: `${relation.kind} · ${relation.id.slice(relation.kind.length + 1)}`, incoming: to === root });
   }
   return out;
 }

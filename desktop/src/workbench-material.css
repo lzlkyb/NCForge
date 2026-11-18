@@ -148,7 +148,7 @@ html[data-ui-style] .dbx-res {
 }
 /* Transparent borders preserve toolbar geometry without drawing permanent seams. */
 html[data-ui-style] .app-shell :is(.dbx-command-header, .dbx-result-head, .dbx-result-tools, .dbx-result-footer, .dbx-rfoot, .dbx-result-source, .wb-crumb-row, .wb-panel, .wb-tree-heading, .app-side-foot, .wb-settings-commandbar) { border-color: transparent; }
-html[data-ui-style] .app-shell :is(.dbx-result-head, .dbx-result-tools, .dbx-result-footer, .dbx-rfoot, .dbx-result-source) { background: hsl(var(--card)); }
+html[data-ui-style] .app-shell :is(.dbx-result-tools, .dbx-result-footer, .dbx-rfoot, .dbx-result-source) { background: hsl(var(--card)); }
 html[data-ui-style] .app-shell :is(.dbx-execution-primary, .dbx-context-session) { border-right-color: transparent; }
 html[data-ui-style] :is(.dbx-tool-divider, .wb-header-divider) { background: transparent; }
 html[data-ui-style] .app-side [class~="border-t"] { border-top-color: transparent; }
@@ -161,14 +161,6 @@ html[data-ui-style] .app-shell :is(.dbx-ghead, .dbx-gh) { background: color-mix(
 html[data-ui-style] .app-shell .dbx-gh { border-right-color: transparent; border-bottom-color: hsl(var(--border) / .35); }
 html[data-ui-style] .app-shell .dbx-gc { border-right-color: transparent; border-bottom-color: hsl(var(--border) / .22); }
 html[data-ui-style] .app-shell .dbx-gc.rn:not([data-range-heading]) { background: hsl(var(--card)); }
-html[data-ui-style] .dbx-splitbar {
-  position: relative; height: 5px; border: 0; background: transparent;
-}
-html[data-ui-style] .dbx-splitbar::before {
-  content: ""; position: absolute; width: 30px; height: 2px; top: 2px; left: calc(50% - 15px);
-  border-radius: 999px; background: hsl(var(--primary)); opacity: 0;
-}
-html[data-ui-style] .dbx-splitbar:is(:hover, :focus-visible)::before { opacity: 1; }
 html[data-ui-style] .app-shell :is(.wb-resize-x, .wb-resize-y) { border-color: transparent; background: transparent; }
 html[data-ui-style] .app-shell :is(.wb-resize-x, .wb-resize-y)::before {
   content: ""; position: absolute; border-radius: 999px; background: hsl(var(--primary)); opacity: 0; pointer-events: none;

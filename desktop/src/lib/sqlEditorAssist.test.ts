@@ -7,6 +7,7 @@ import type { ConnRuntime } from "./dbStore";
 const h = vi.hoisted(() => ({
   conn: null as DbConn | null, rt: { status: "connected" } as ConnRuntime, epoch: 0,
   commands: new Map<string, (...args: unknown[]) => void>(), columns: vi.fn(), toast: vi.fn(),
+  relations: vi.fn(),
 }));
 vi.mock("./monacoSetup", () => ({ monaco: { editor: {
   EditorOption: { quickSuggestions: 90 },
@@ -23,11 +24,16 @@ vi.mock("./sqlJoinMeaningAssist", () => ({ wireSqlJoinMeaningAssist: () => ({ di
 vi.mock("./sqlBillAssist", () => ({ wireSqlBillAssist: () => ({ dispose() {} }) }));
 vi.mock("./sqlSelectionAssist", () => ({ wireSqlSelectionAssist: () => ({ dispose() {} }) }));
 vi.mock("./sqlAssistGhost", () => ({ wireSqlAssistGhost: () => ({ dispose() {} }) }));
+vi.mock("./sqlBusiness", async importOriginal => ({
+  ...await importOriginal<typeof import("./sqlBusiness")>(),
+  peekSqlBusinessMetadata: () => null, readSqlBusinessMetadata: h.relations,
+}));
 const cleanups: (() => void)[] = [];
 
 beforeEach(() => {
   vi.resetModules(); localStorage.clear(); h.commands.clear(); h.columns.mockReset(); h.toast.mockReset();
   h.epoch = 0;
+  h.relations.mockReset().mockResolvedValue(null);
   h.conn = { id: "conn", name: "测试", source: "manual", url: "jdbc:oracle:thin:@host", user: "NC", engine: "java", propDs: "", autoCommit: true } as DbConn;
   h.rt = { status: "connected", currentSchema: "NC", tables: [{ name: "BD_MATERIAL", kind: "TABLE" }, { name: "BD_ORG", kind: "TABLE" }, { name: "Item", kind: "TABLE" }] };
   h.columns.mockResolvedValue([{ name: "CODE" }, { name: "NAME" }]);
@@ -54,6 +60,7 @@ function fakeEditor(sql: string) {
     getSelection: () => selection,
     onDidChangeModel: listen("model"), onDidChangeModelContent: listen("content"), onDidChangeCursorPosition: listen("cursor"),
     onDidChangeCursorSelection: listen("selection"),
+    onKeyDown: listen("keyDown"),
     onDidCompositionStart: listen("composeStart"), onDidCompositionEnd: listen("composeEnd"),
     getOption: () => ({ other: "on", comments: "off", strings: "off" }), updateOptions: vi.fn(), trigger: vi.fn(),
     addAction: (a: { id: string; run: () => unknown }) => { actions.set(a.id, a); return { dispose: () => actions.delete(a.id) }; },
@@ -109,6 +116,19 @@ describe("SQL 编辑器习惯与辅助操作", () => {
       expect(fake.spy.trigger).not.toHaveBeenCalled();
     } finally { vi.useRealTimers(); }
   });
+  it("关闭使用习惯记忆后，接受条件字段仍然提示运算符", async () => {
+    const fake = fakeEditor("SELECT * FROM bd_material WHERE code "); await wire(fake);
+    const usage = await import("./sqlUsage"), learning = await import("./sqlAssistLearning");
+    usage.setSqlUsageEnabled(false);
+    vi.useFakeTimers();
+    try {
+      const scope = learning.sqlAssistScope("conn")!;
+      h.commands.get("ncforge.sql.accept")!(null, { scope, key: usage.sqlUsageKey("bd_material", "code"), followOperator: true });
+      vi.runAllTimers();
+      expect(fake.spy.trigger).toHaveBeenCalledWith("sql-assist", "editor.action.triggerSuggest", {});
+      expect(usage.usageSnapshot(scope)).toEqual({});
+    } finally { vi.useRealTimers(); }
+  });
   it("光标已经离开表名末尾时不重弹", async () => {
     const fake = fakeEditor("SELECT * FROM bd_material WHERE code = 'x'"); await wire(fake);
     vi.useFakeTimers();
@@ -126,7 +146,7 @@ describe("SQL 编辑器习惯与辅助操作", () => {
     }));
   });
   // 空格曾经是补全触发字符：WHERE 里每敲一个空格都开面板，用户被训成「看见就 Esc」。
-  it("只有 FROM/JOIN 这类词后面的空格唤补全，WHERE 里的空格不弹", async () => {
+  it("只在表名或条件还需要输入时由空格唤起补全", async () => {
     const from = fakeEditor("SELECT * FROM "); await wire(from);
     vi.useFakeTimers();
     try {
@@ -136,13 +156,47 @@ describe("SQL 编辑器习惯与辅助操作", () => {
       expect(from.spy.trigger).toHaveBeenCalledWith("sql-assist", "editor.action.triggerSuggest", {});
     } finally { vi.useRealTimers(); }
 
-    const where = fakeEditor("SELECT * FROM bd_material WHERE "); await wire(where);
+    const where = fakeEditor("SELECT * FROM bd_material WHERE"); await wire(where);
     vi.useFakeTimers();
     try {
       where.spy.trigger.mockClear();
       where.change(where.model.getValue().length, 0, " ");
       vi.runAllTimers();
+      expect(where.spy.trigger).toHaveBeenCalledWith("sql-assist", "editor.action.triggerSuggest", {});
+      where.change(where.model.getValue().length, 0, "code = 'x'");
+      where.spy.trigger.mockClear();
+      where.change(where.model.getValue().length, 0, " ");
+      vi.runAllTimers();
       expect(where.spy.trigger).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("Esc 取消待打开的补全，下次输入仍可以打开", async () => {
+    const fake = fakeEditor("SELECT * FROM bd_material WHERE"); await wire(fake);
+    vi.useFakeTimers();
+    try {
+      fake.change(fake.model.getValue().length, 0, " ");
+      fake.handlers.get("keyDown")?.({ browserEvent: { key: "Escape" } });
+      vi.runAllTimers();
+      expect(fake.spy.trigger).not.toHaveBeenCalledWith("sql-assist", "editor.action.triggerSuggest", {});
+      fake.change(fake.model.getValue().length, 0, "code");
+      fake.change(fake.model.getValue().length, 0, " ");
+      vi.runAllTimers();
+      expect(fake.spy.trigger).toHaveBeenCalledWith("sql-assist", "editor.action.triggerSuggest", {});
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each([false, true])("晚到的关联只在当前输入未被关闭时更新（Esc=%s）", async dismiss => {
+    const fake = fakeEditor("SELECT * FROM bd_materia"); await wire(fake);
+    vi.useFakeTimers();
+    try {
+      h.relations.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({ relations: [{}] }), 600)));
+      fake.change(fake.model.getValue().length, 0, "l");
+      await vi.advanceTimersByTimeAsync(300);
+      expect(h.relations).toHaveBeenCalledTimes(1);
+      if (dismiss) fake.handlers.get("keyDown")?.({ browserEvent: { key: "Escape" } });
+      await vi.runAllTimersAsync();
+      expect(fake.spy.trigger.mock.calls.filter(([, command]) => command === "editor.action.triggerSuggest")).toHaveLength(dismiss ? 0 : 1);
     } finally { vi.useRealTimers(); }
   });
 
@@ -205,6 +259,7 @@ describe("SQL 编辑器习惯与辅助操作", () => {
     expect(fake.spy.updateOptions).toHaveBeenLastCalledWith({ quickSuggestions: false });
     fake.handlers.get("composeEnd")?.();
     expect(fake.spy.updateOptions).toHaveBeenLastCalledWith({ quickSuggestions: { other: "on", comments: "off", strings: "off" } });
+    await new Promise(resolve => setTimeout(resolve, 0));
     expect(fake.spy.trigger).toHaveBeenLastCalledWith("sql-assist", "editor.action.triggerSuggest", {});
     fake.handlers.get("composeStart")?.(); handle.dispose();
     expect(fake.spy.updateOptions).toHaveBeenLastCalledWith({ quickSuggestions: { other: "on", comments: "off", strings: "off" } });

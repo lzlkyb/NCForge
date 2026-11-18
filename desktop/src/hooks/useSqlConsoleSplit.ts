@@ -17,6 +17,7 @@ function savedHeight(): number {
 export function useSqlConsoleSplit(tabId: string) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const dragCleanup = useRef<(() => void) | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [initialHeight] = useState(savedHeight);
   const [layouts, setLayouts] = useState<Record<string, ConsoleLayout>>({});
   const preferred = layouts[tabId]?.preferred ?? initialHeight;
@@ -57,13 +58,16 @@ export function useSqlConsoleSplit(tabId: string) {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", finish);
-      dragCleanup.current = null; save();
+      dragCleanup.current = null;
+      setDragging(false);
+      save();
     };
     const move = (event: PointerEvent) => {
       if (event.buttons === 0) return finish();
       change(start + startY - event.clientY);
     };
     dragCleanup.current = finish;
+    setDragging(true);
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", finish, { once: true });
     window.addEventListener("pointercancel", finish, { once: true });
@@ -78,5 +82,5 @@ export function useSqlConsoleSplit(tabId: string) {
     else return;
     event.preventDefault(); save();
   };
-  return { bodyRef, height, resultHeight: focus === "results" ? bodyHeight || height : height, focus, setFocus, min: MIN_RESULT, max, startDrag, onKeyDown };
+  return { bodyRef, height, resultHeight: focus === "results" ? bodyHeight || height : height, focus, setFocus, min: MIN_RESULT, max, startDrag, onKeyDown, dragging };
 }

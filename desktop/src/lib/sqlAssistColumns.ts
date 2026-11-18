@@ -1,5 +1,15 @@
 import { columnsOf } from "./dbStore";
 import type { ColumnInfo } from "./dbApi";
+import type { SqlLanguage } from "sql-formatter";
+import { sqlIdentifier } from "./sqlCompletionContext";
+import { sqlWordKind } from "./sqlLex";
+
+export function sqlFieldIdentifiers(columns: readonly ColumnInfo[], dialect: SqlLanguage): string[] {
+  return columns.map(({ name }) => {
+    const folded = dialect !== "postgresql" && /^[A-Z_][A-Z0-9_$#]*$/.test(name) ? name.toLowerCase() : name;
+    return sqlIdentifier(sqlWordKind(folded, dialect) === "identifier" ? folded : name, dialect);
+  });
+}
 
 interface Waiter { current: () => boolean; resolve: (columns: ColumnInfo[]) => void; reject: (error: Error) => void }
 interface Request { key: string; connId: string; table: string; running: boolean; waiters: Waiter[] }

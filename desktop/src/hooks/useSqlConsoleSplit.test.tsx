@@ -9,7 +9,7 @@ let root: Root, host: HTMLDivElement;
 const disconnect = vi.fn();
 function Harness({ tabId = "a" }: { tabId?: string }) {
   const split = useSqlConsoleSplit(tabId);
-  return <div ref={split.bodyRef}><div data-height={split.height} data-focus={split.focus} data-result-height={split.resultHeight} /><div role="separator" aria-valuenow={split.height}
+  return <div ref={split.bodyRef}><div data-height={split.height} data-focus={split.focus} data-result-height={split.resultHeight} /><div role="separator" aria-valuenow={split.height} data-dragging={split.dragging || undefined}
     onKeyDown={split.onKeyDown} onPointerDown={e => split.startDrag(e.clientY)} />
     <button onClick={() => split.setFocus("results")}>专注结果</button>
     <button onClick={() => split.setFocus("editor")}>专注编辑器</button>
@@ -47,10 +47,13 @@ it("隐藏再显示不会将高度偏好清零，卸载释放尺寸监听", () =
 });
 it("拖动不能吞掉输入区，取消指针后保存并移除拖动监听", () => {
   mount();
-  act(() => host.querySelector('[role="separator"]')!.dispatchEvent(new MouseEvent("pointerdown", { clientY: 300, buttons: 1, bubbles: true })));
+  const separator = host.querySelector('[role="separator"]')!;
+  act(() => separator.dispatchEvent(new MouseEvent("pointerdown", { clientY: 300, buttons: 1, bubbles: true })));
+  expect(separator.getAttribute("data-dragging")).toBe("true");
   act(() => window.dispatchEvent(new MouseEvent("pointermove", { clientY: 0, buttons: 1 })));
   expect(height()).toBe(455);
   act(() => window.dispatchEvent(new Event("pointercancel")));
+  expect(separator.hasAttribute("data-dragging")).toBe(false);
   expect(localStorage.getItem("ncforge-db-result-height")).toBe("455");
   act(() => window.dispatchEvent(new MouseEvent("pointermove", { clientY: 400, buttons: 1 })));
   expect(height()).toBe(455);

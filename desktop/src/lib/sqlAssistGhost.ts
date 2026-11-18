@@ -27,6 +27,8 @@ import { billLinkHint } from "./sqlBillHint";
 import { peekSqlBusinessMetadata, readSqlBusinessMetadata } from "./sqlBusiness";
 import { getSqlTemplatesEnabled } from "./sqlTemplates";
 import { sqlWildcardAt } from "./sqlScope";
+import { verifiedSqlSource } from "./sqlAssistLearning";
+import { sqlEditorSelectionActions } from "./sqlSelectionAssist";
 
 type Editor = monaco.editor.IStandaloneCodeEditor;
 
@@ -55,10 +57,14 @@ export function wireSqlAssistGhost(editor: Editor): monaco.IDisposable {
   const lens = editor.createDecorationsCollection();
 
   /** 在某个 token 的末尾挂一枚 chip。同一枚按钮复用于所有入口，位置与动作随时换。 */
-  const showChip = (model: monaco.editor.ITextModel, end: number, text: string, title: string, run: () => void) => {
+  const showChip = (model: monaco.editor.ITextModel, end: number, text: string, title: string, run: () => void, keepSelection = false) => {
     chip.textContent = text;
     chip.title = title;
-    chipRun = () => { if (disposed || editor.getModel() !== model) return; editor.setPosition(model.getPositionAt(end)); editor.focus(); run(); };
+    chipRun = () => {
+      if (disposed || editor.getModel() !== model) return;
+      if (!keepSelection) editor.setPosition(model.getPositionAt(end));
+      editor.focus(); run();
+    };
     chip.hidden = false;
     position = { position: model.getPositionAt(end), preference: [monaco.editor.ContentWidgetPositionPreference.EXACT] };
     editor.layoutContentWidget(widget);
@@ -76,17 +82,25 @@ export function wireSqlAssistGhost(editor: Editor): monaco.IDisposable {
     const model = editor.getModel(), caret = editor.getPosition();
     if (!model || !caret) return hideChip();
     const tab = sqlTabOf(tabIdOfModel(model)), connId = tab?.connId, rt = connId ? rtOf(connId) : null;
-    if (!connId || !rt || rt.status !== "connected" || dialectOfSqlModel(model) !== "plsql") return hideChip();
+    if (!connId || !rt || rt.status !== "connected") return hideChip();
+    const selection = editor.getSelection();
+    if (selection && !selection.isEmpty()) {
+      const selected = sqlEditorSelectionActions(editor);
+      if (!selected?.actions.length) return hideChip();
+      const line = model.getPositionAt(selected.end).lineNumber;
+      return showChip(model, model.getOffsetAt({ lineNumber: line, column: model.getLineMaxColumn(line) }), "选区操作 · Ctrl+.",
+        selected.actions.map(action => action.title).join("\n"), () => editor.trigger("sql-ghost", "editor.action.quickFix", {}), true);
+    }
+    if (dialectOfSqlModel(model) !== "plsql") return hideChip();
     const schema = rt.currentSchema ?? rt.info?.schema ?? "";
     const analysis = sqlAnalysisOf(model), offset = model.getOffsetAt(caret);
     // ① `SELECT *` 上的展开入口。与「查询与条件模板」开关无关：展开字段不是模板，
     //    而它原先只在右键菜单里，用户根本撞不到。
     const wildcard = sqlWildcardAt(analysis, offset);
-    if (wildcard) {
-      // 🔴 文案里**不要键盘符号**：`⌥` 是 Mac 的 Option 键，这里的用户全在 Windows 上，
-      // 看到它既不知道按什么，也不知道能不能点。点击即执行，标题里再点出快捷键。
+    const verified = wildcard?.source && verifiedSqlSource(connId, wildcard.source);
+    if (wildcard && verified && !verified.quoted) {
       return showChip(model, analysis.tokens[wildcard.token].end, "展开字段",
-        "把 * 展开成字段列表（带中文名）· 点击或 Ctrl+.", () => { void editor.getAction("ncforge.sql.expandStar")?.run(); });
+        "把 * 展开成字段列表（带中文名）· Ctrl+空格", () => editor.trigger("sql-ghost", "editor.action.triggerSuggest", {}));
     }
     // 下面两条都依赖业务关系快照，归模板开关管：关掉模板就别再读库。
     if (!getSqlTemplatesEnabled()) return hideChip();
@@ -139,6 +153,7 @@ export function wireSqlAssistGhost(editor: Editor): monaco.IDisposable {
 
   const disposables: { dispose(): void }[] = [
     editor.onDidChangeCursorPosition(() => { refreshChip(); refreshLens(); }),
+    editor.onDidChangeCursorSelection(refreshChip),
     editor.onDidChangeModelContent(() => {
       meanings = null;
       refreshChip();

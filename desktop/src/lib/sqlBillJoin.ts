@@ -7,7 +7,7 @@
  * JOIN 片段 —— 只有说明却点不出东西，等于说了不给。
  */
 import type { SqlBusinessMetadata } from "./sqlBusiness";
-import { billQueryRelations } from "./sqlBillTemplates";
+import { billQueryRelations, type BillQueryRelation } from "./sqlBillTemplates";
 import { plainName } from "./sqlBillHint";
 
 /** 光标前的词精确命中的那张表（小写规范名）。半截前缀不猜。 */
@@ -21,7 +21,24 @@ export function billTableOf(prefix: string, names: readonly string[], ncNames: R
   return usable(name) ? name : "";
 }
 
-export interface BillJoinSpec { table: string; sql: string; source: string }
+export type BillJoinGroup = "detail" | "related" | "lookup";
+export const billJoinGroupLabels: Record<BillJoinGroup, string> = { detail: "单据明细", related: "其他关联", lookup: "档案与字典" };
+const priority: Record<BillJoinGroup, number> = { detail: 0, related: 1, lookup: 2 };
+
+export function rankBillRelations(table: string, relations: readonly BillQueryRelation[], names: Readonly<Record<string, string>> = {}) {
+  const root = table.toLowerCase(), rootName = names[root];
+  return relations.map(relation => {
+    const suffix = relation.table.startsWith(root + "_") ? relation.table.slice(root.length + 1) : "";
+    const label = names[relation.table];
+    // Naming can prioritize an existing inbound link, but never creates a JOIN on its own.
+    const detail = relation.incoming && (/^(?:b\d*|body|details?|lines?)$/.test(suffix)
+      || !!(rootName && label?.startsWith(rootName) && /(?:子表|表体|明细表?)$/.test(label)));
+    const group: BillJoinGroup = detail ? "detail" : relation.table.startsWith("bd_") ? "lookup" : "related";
+    return { relation, group };
+  }).sort((a, b) => priority[a.group] - priority[b.group]);
+}
+
+export interface BillJoinSpec { table: string; sql: string; source: string; group: BillJoinGroup }
 
 /**
  * 主表能接上的子表 JOIN 片段。
@@ -29,9 +46,10 @@ export interface BillJoinSpec { table: string; sql: string; source: string }
  * 表名与列名都用元数据里的小写规范名：Oracle 不区分大小写，拼出来的片段与用户
  * 手写的 `po_order` 一致，也不会因为 `sqlIdentifier` 给大写名加引号（`"PO_ORDER_B"`）。
  */
-export function billJoinSpecs(table: string, available: readonly string[], meta: SqlBusinessMetadata | null, limit = 6): BillJoinSpec[] {
-  return billQueryRelations(table, available, meta).slice(0, limit).flatMap(rel => {
-    const on = rel.otherColumns.map((column, i) => `${rel.table}.${column} = ${table}.${rel.rootColumns[i]}`).join(" AND ");
-    return [{ table: rel.table, sql: ` LEFT JOIN ${rel.table} ON ${on}`, source: rel.source }];
+export function billJoinSpecs(table: string, available: readonly string[], meta: SqlBusinessMetadata | null,
+  names?: Readonly<Record<string, string>>, qualifier = table): BillJoinSpec[] {
+  return rankBillRelations(table, billQueryRelations(table, available, meta), names).map(({ relation: rel, group }) => {
+    const on = rel.otherColumns.map((column, i) => `${rel.table}.${column} = ${qualifier}.${rel.rootColumns[i]}`).join(" AND ");
+    return { table: rel.table, sql: ` LEFT JOIN ${rel.table} ON ${on}`, source: rel.source, group };
   });
 }

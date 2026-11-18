@@ -117,6 +117,34 @@ it("语句内的表名上只追加 JOIN，不动用户写好的 SELECT", async (
   expect(edit.textEdit.text).toBe(" LEFT JOIN po_order_b ON po_order_b.pk_order = po_order.pk_order");
 });
 
+it("预览与实际插入使用主表别名，并把 LEFT JOIN 放在已有别名之后", async () => {
+  const { analyzeSql } = await vi.importActual<typeof import("./sqlScope")>("./sqlScope");
+  const sql = "SELECT * FROM po_order o WHERE o.vbillcode = '1'";
+  const analysis = analyzeSql(sql, "plsql");
+  h.analysis = { ...analysis };
+  h.scope = analysis.scopes[0];
+  const result = await ask(fake(sql), sql.indexOf("po_order") + 1);
+  const action = result?.actions[0];
+  const text = " LEFT JOIN po_order_b ON po_order_b.pk_order = o.pk_order";
+  expect(action).toMatchObject({ ncforgeJoin: { group: "detail", sql: text }, edit: { edits: [{
+    textEdit: { text, range: { startColumn: sql.indexOf(" WHERE") + 1, endColumn: sql.indexOf(" WHERE") + 1 } },
+  }] } });
+});
+
+it("从已有 JOIN 的表继续联查时，在完整的 ON 字符串条件后追加", async () => {
+  const { analyzeSql } = await vi.importActual<typeof import("./sqlScope")>("./sqlScope");
+  const sql = "SELECT * FROM org x JOIN po_order o ON x.id = o.org AND o.status = 'WHERE' WHERE x.enabled = 1";
+  const analysis = analyzeSql(sql, "plsql");
+  h.analysis = { ...analysis };
+  h.scope = analysis.scopes[0];
+  const result = await ask(fake(sql), sql.indexOf("po_order") + 1);
+  const insertion = sql.indexOf(" WHERE x.enabled") + 1;
+  expect(result?.actions[0]).toMatchObject({ edit: { edits: [{ textEdit: {
+    range: { startColumn: insertion, endColumn: insertion },
+    text: " LEFT JOIN po_order_b ON po_order_b.pk_order = o.pk_order",
+  } }] } });
+});
+
 // 补全列表里的动作项按「光标前的词」判定；CodeAction 若只认「光标压着的词」，
 // 用户打完表名多敲一个空格就会点出空菜单。
 it("光标停在表名后的空格上也认", async () => {

@@ -80,6 +80,58 @@
 .dbx-sql-empty-hint kbd { padding: 0 4px; border: 1px solid hsl(var(--border)); border-radius: 3px; font-family: var(--font-mono); font-size: 10px; }
 .dbx-editor { flex: 1; min-height: 140px; min-width: 0; position: relative; }
 .dbx-editor .wb-editor-host { position: absolute; inset: 0; }
+.monaco-editor.dbx-sql-overflow { position:fixed; inset:0; pointer-events:none; z-index:50; background:transparent; }
+.dbx-sql-overflow > :is(.overflowingContentWidgets, .overflowingOverlayWidgets) > * { pointer-events:auto; }
+.dbx-sql-overflow > .dbx-sql-action-view { padding:var(--gap-control); pointer-events:auto; }
+.dbx-sql-action-view .action-widget {
+  max-width:none;
+  --vscode-list-focusBackground:var(--color-accent);
+  --vscode-list-focusForeground:var(--color-accent-foreground);
+  --vscode-editorActionList-focusBackground:var(--color-accent);
+  --vscode-editorActionList-focusForeground:var(--color-accent-foreground);
+}
+.monaco-editor.dbx-sql-overflow .dbx-sql-action-view .action-widget { background:var(--color-popover)!important; backdrop-filter:none; }
+.dbx-sql-action-view .action-widget .monaco-list .monaco-scrollable-element { overflow:hidden; }
+.dbx-sql-action-view .action-widget .monaco-list-row.group-header { margin-top:0; color:var(--color-muted-foreground)!important; }
+.dbx-sql-action-view .action-widget .monaco-list-row.action .title, .dbx-sql-action-measure {
+  min-width:0; white-space:normal; overflow-wrap:anywhere; line-height:1.4;
+}
+.dbx-sql-action-measure { position:absolute; visibility:hidden; pointer-events:none; }
+.dbx-sql-action-keys {
+  padding:var(--gap-control); border-top:1px solid var(--color-border);
+  color:var(--color-muted-foreground); font-size:var(--dbx-fs-meta);
+}
+.dbx-sql-action-preview { padding:var(--gap-control); border-top:1px solid var(--color-border); color:var(--color-foreground); }
+.dbx-sql-action-preview > summary { cursor:pointer; color:var(--color-primary); }
+.dbx-sql-action-preview > pre {
+  max-height:24vh; margin:var(--gap-control) 0 0; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere;
+  font-family:var(--font-mono); line-height:1.5;
+}
+/* Give the name its natural width first. Monaco measures wrapped rows for scrolling. */
+.monaco-editor .dbx-suggest-fit { --vscode-editorSuggestWidget-focusHighlightForeground:var(--color-primary); }
+.monaco-editor .dbx-suggest-fit .monaco-list .monaco-list-row { min-height:var(--sql-suggest-line-height, 1.5em); }
+.monaco-editor .dbx-suggest-fit .monaco-list .monaco-list-row > .contents { display:block; min-width:0; height:auto; }
+.monaco-editor .dbx-suggest-fit .monaco-list .monaco-list-row > .contents > .main {
+  align-items:start;
+  padding-inline-end:var(--sql-suggest-line-height, 1.5em);
+}
+.monaco-editor .dbx-suggest-fit .monaco-list .monaco-list-row > .contents > .main > .left { flex:1 0 auto; min-width:0; max-width:100%; }
+.monaco-editor .dbx-suggest-fit .monaco-list .monaco-list-row > .contents > .main > .right { min-width:0; }
+.monaco-editor .dbx-suggest-fit .monaco-list .left .label-name { white-space:pre-wrap; overflow-wrap:anywhere; }
+.monaco-editor .dbx-suggest-fit .monaco-list .monaco-list-row .suggest-icon { align-self:start; line-height:var(--sql-suggest-line-height, 1.5em); }
+.monaco-editor .dbx-suggest-fit:not(.docs-side) .monaco-list .monaco-list-row.focused > .contents > .main > .right > .readMore { visibility:visible; top:0; }
+.monaco-editor .suggest-widget.dbx-suggest-fit.with-status-bar:not(.docs-side) .monaco-list .monaco-list-row.focused > .contents > .main > .right > .readMore { display:inline-block; }
+.monaco-editor .dbx-suggest-fit[data-sql-explicit] .suggest-status-bar::before {
+  content:"↑↓ 选择 · → 预览 · Enter 应用 · Esc 关闭";
+  padding-inline:var(--gap-control); color:var(--color-muted-foreground); white-space:nowrap;
+}
+.monaco-editor .dbx-suggest-fit[data-sql-explicit] .suggest-status-bar > :is(.left, .right) { display:none; }
+.monaco-editor.dbx-sql-overflow .suggest-details > .monaco-scrollable-element > .body > .docs.markdown-docs .monaco-tokenized-source {
+  white-space:pre-wrap; overflow-wrap:anywhere;
+}
+@media (max-width: 700px) {
+  .monaco-editor .suggest-widget.dbx-suggest-fit .monaco-list .monaco-list-row:has(.codicon-symbol-snippet) > .contents > .main > .right > .details-label { display:none; }
+}
 /* Monaco shares its theme across editors. Scope the SQL selection colors to this host. */
 .dbx-editor .monaco-editor {
   --vscode-editor-selectionBackground: hsl(var(--primary) / .17);
@@ -91,9 +143,24 @@
 }
 .dbx-stmt-hl { background: hsl(var(--primary) / .07); }
 .dbx-stmt-gl { border-left: 2px solid hsl(var(--primary)); margin-left: 3px; }
-.dbx-splitbar { height: 5px; background: hsl(var(--border) / .6); cursor: row-resize; flex-shrink: 0; }
-.dbx-splitbar:hover { background: hsl(var(--primary) / .4); }
-.dbx-splitbar:focus-visible { outline-offset: -2px; background: hsl(var(--primary) / .4); }
+.dbx-region-label { flex:none; color:var(--color-muted-foreground); font-size:var(--dbx-fs-meta); font-weight:600; white-space:nowrap; }
+.dbx-splitbar {
+  position:relative; height:5px; flex:none; cursor:row-resize; touch-action:none;
+  --dbx-split-line:color-mix(in srgb, var(--color-foreground) 24%, var(--color-border));
+  --dbx-split-grip:color-mix(in srgb, var(--color-foreground) 60%, var(--color-border));
+}
+.dbx-splitbar::before, .dbx-splitbar::after { content:""; position:absolute; top:50%; pointer-events:none; }
+.dbx-splitbar::before { inset-inline:0; height:1px; transform:translateY(-50%); background:var(--dbx-split-line); }
+.dbx-splitbar::after {
+  left:50%; width:var(--h-control); height:2px; transform:translate(-50%, -50%);
+  border-radius:var(--r-control); background:var(--dbx-split-grip);
+}
+.dbx-splitbar:is(:hover, :focus-visible, [data-dragging]) {
+  --dbx-split-line:color-mix(in srgb, var(--color-primary) 70%, var(--color-border));
+  --dbx-split-grip:var(--color-primary);
+}
+.dbx-splitbar:focus-visible { outline:1px solid var(--color-ring); outline-offset:-1px; }
+.dbx-splitbar:not([hidden]) + .dbx-res { border-top:0; }
 .dbx-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-body); padding: 24px; text-align: center; }
 
 /* ── SQL 工具条 ── */

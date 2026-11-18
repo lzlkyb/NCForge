@@ -1,14 +1,14 @@
 import { monaco } from "./monacoSetup";
 import { connOf, rtOf, sqlColumnEpoch, sqlTabOf } from "./dbStore";
-import { sqlAssistColumns } from "./sqlAssistColumns";
+import { sqlAssistColumns, sqlFieldIdentifiers } from "./sqlAssistColumns";
 import { tabIdOfModel } from "./sqlModels";
 import { analyzeSql, sqlCompletionAt, sqlScopeAt, sqlWildcardAt, sqlWildcardInScope, type SqlSource, type SqlWildcard } from "./sqlScope";
-import { sqlWordKind } from "./sqlLex";
 import { dialectOfSqlModel, sqlAnalysisOf } from "./monacoSql";
 import { getSqlFormatPrefs } from "./sqlFormatPrefs";
-import { sqlIdentifier } from "./sqlCompletionContext";
+import { completionContext } from "./sqlCompletionContext";
+import { sqlPredicateContext } from "./sqlPredicateContext";
 import { sqlAssistObjectKey, sqlAssistScope, verifiedSqlSource } from "./sqlAssistLearning";
-import { snippetEscape } from "./sqlTemplates";
+import { getSqlTemplatesEnabled, snippetEscape } from "./sqlTemplates";
 import { isPlsql, splitStatements } from "./sqlSplit";
 import { forgetSqlUsage, recordSqlUsage, rollbackSqlUsage, setSqlUsagePinned, sqlUsageKey, usageSnapshot, type SqlUsageReceipt } from "./sqlUsage";
 import { addSnippet } from "./dbSnippets";
@@ -19,10 +19,11 @@ import { wireSqlJoinMeaningAssist } from "./sqlJoinMeaningAssist";
 import { wireSqlBillAssist } from "./sqlBillAssist";
 import { wireSqlSelectionAssist } from "./sqlSelectionAssist";
 import { wireSqlAssistGhost } from "./sqlAssistGhost";
+import { peekSqlBusinessMetadata, readSqlBusinessMetadata } from "./sqlBusiness";
 import { toast } from "../components/ui/toast";
 
 type Editor = monaco.editor.IStandaloneCodeEditor;
-interface AcceptArgs { scope: string; key: string }
+interface AcceptArgs { scope: string; key: string; followOperator?: boolean }
 const accepts = new Map<Editor, (args: AcceptArgs) => void>();
 let acceptCommand: monaco.IDisposable | undefined;
 /** 补全列表里的动作条目只能带命令 id：命令执行时按焦点找到编辑器，交给它的 CodeAction 菜单。 */
@@ -58,13 +59,16 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
   // 主子表联查 / 条件含义 / 批量 IN / 核对查询四个能力**在屏幕上没有任何入口**——
   // 只剩 Ctrl+. 一条没人知道的暗路。`on` 比默认的 `onCode` 多覆盖空行。
   editor.updateOptions({ quickSuggestions: { other: true, comments: false, strings: false }, quickSuggestionsDelay: 100,
-    suggestSelection: "first", suggest: { showWords: false, localityBonus: false, shareSuggestSelections: false, selectionMode: "always" },
+    suggestSelection: "first", suggest: { showWords: false, localityBonus: false, shareSuggestSelections: false, selectionMode: "always", showStatusBar: true },
     glyphMargin: true, lightbulb: { enabled: monaco.editor.ShowLightbulbIconMode.On } });
   let disposed = false, composing = false, dirty: { start: number; end: number } | undefined;
   const accepted: { receipt: SqlUsageReceipt; tableKey: string; model: monaco.editor.ITextModel; at: number; start: number; end: number }[] = [];
   let typed: { receipt: SqlUsageReceipt; version: number } | undefined;
   const acceptedKeys = new Map<string, number>();
   let quick: monaco.editor.IQuickSuggestionsOptions | undefined;
+  let pendingSuggest: ReturnType<typeof setTimeout> | undefined;
+  let relationRequest = 0;
+  let dismissed: { model: monaco.editor.ITextModel; version: number; offset: number } | undefined;
   const disposables: monaco.IDisposable[] = [];
   disposables.push(wireSqlBatchAssist(editor));
   disposables.push(wireSqlQueryCheckAssist(editor));
@@ -76,7 +80,60 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
   disposables.push(wireSqlSelectionAssist(editor));
   // 行内提示：表名后的「主子表联查」chip 与 JOIN 条件的行尾说明。
   disposables.push(wireSqlAssistGhost(editor));
-  const reset = () => { dirty = undefined; accepted.length = 0; typed = undefined; acceptedKeys.clear(); };
+  const reset = () => { relationRequest++; clearTimeout(pendingSuggest); dismissed = undefined; dirty = undefined; accepted.length = 0; typed = undefined; acceptedKeys.clear(); };
+  const suggestAt = (model: monaco.editor.ITextModel, offset: number, eligible: (state: NonNullable<ReturnType<typeof current>>) => boolean, checkLateRelations = false) => {
+    clearTimeout(pendingSuggest);
+    const version = model.getVersionId();
+    pendingSuggest = setTimeout(() => {
+      if (disposed || composing || !editor.hasTextFocus() || editor.getModel() !== model || model.getVersionId() !== version
+        || dismissed?.model === model && dismissed.version === version && dismissed.offset === offset) return;
+      const state = current(editor);
+      if (!state || state.offset !== offset || editor.getSelection()?.isEmpty() === false) return;
+      const invoke = eligible(state);
+      if (checkLateRelations) watchRelations(state, invoke);
+      if (!invoke) return;
+      editor.trigger("sql-assist", "editor.action.triggerSuggest", {});
+    }, 0);
+  };
+  const expandableAt = (state: NonNullable<ReturnType<typeof current>>) => {
+    const source = sqlWildcardAt(state.analysis, state.offset)?.source;
+    const verified = source && rtOf(state.connId).status === "connected" && verifiedSqlSource(state.connId, source);
+    return !!verified && !verified.quoted;
+  };
+  const closeSuggestions = () => {
+    // Monaco's Escape keybinding only cancels visible widgets. Pending providers must also stop.
+    const controller = editor.getContribution("editor.contrib.suggestController") as unknown as { cancelSuggestWidget?(): void } | null;
+    if (controller?.cancelSuggestWidget) controller.cancelSuggestWidget();
+    else editor.trigger("sql-assist", "hideSuggestWidget", {});
+  };
+  function watchRelations(state: NonNullable<ReturnType<typeof current>>, invoked: boolean) {
+    const { analysis, model, offset, connId, scope, dialect } = state;
+    if (!scope || dialect !== "plsql" || rtOf(connId).status !== "connected" || !getSqlTemplatesEnabled()) return;
+    const query = sqlScopeAt(analysis, offset), source = query?.sources[0];
+    if (!query || analysis.tokens[query.select]?.text.toUpperCase() !== "SELECT" || !source || source.alias || analysis.tokens[source.declaration]?.end !== offset) return;
+    const verified = verifiedSqlSource(connId, source);
+    if (!verified || verified.quoted) return;
+    const table = verified.table.toLowerCase();
+    if (peekSqlBusinessMetadata(connId, scope, table)) return;
+    const version = model.getVersionId(), epoch = sqlColumnEpoch(connId), request = ++relationRequest, started = Date.now();
+    const sameScope = () => !disposed && rtOf(connId).status === "connected" && sqlColumnEpoch(connId) === epoch && sqlAssistScope(connId) === scope;
+    void readSqlBusinessMetadata(connId, scope, table, sameScope).then(metadata => {
+      // The first completion request is already waiting briefly for this same shared read.
+      // Refresh only on a late result and leave any user selection or dismissal alone.
+      if (!metadata?.relations.length || Date.now() - started < (invoked ? 500 : 220) || relationRequest !== request || !sameScope() || composing
+        || editor.getModel() !== model || model.getVersionId() !== version) return;
+      suggestAt(model, offset, next => next.connId === connId && getSqlTemplatesEnabled());
+    }).catch(() => undefined);
+  }
+  disposables.push(editor.onKeyDown(event => {
+    const key = event.browserEvent.key;
+    if (["Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab", "Enter"].includes(key)) relationRequest++;
+    if (key !== "Escape") return;
+    clearTimeout(pendingSuggest);
+    const model = editor.getModel(), position = editor.getPosition();
+    if (model && position) dismissed = { model, version: model.getVersionId(), offset: model.getOffsetAt(position) };
+    closeSuggestions();
+  }));
 
   accepts.set(editor, args => {
     const state = current(editor);
@@ -87,6 +144,12 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
     const [table, field] = parts as string[];
     const source = analyzeSql(`SELECT * FROM ${table}`, state.dialect).scopes[0]?.sources[0];
     if (!source || !verifiedSqlSource(state.connId, source)) return;
+    // Continue editing even when usage recording is disabled or deduplicates the acceptance.
+    if (field && args.followOperator) suggestAt(state.model, state.offset, next =>
+      getSqlTemplatesEnabled() && sqlPredicateContext(next.analysis, next.offset, completionContext(next.analysis, next.offset, next.dialect).clause)?.kind === "operator");
+    else if (!field && (sqlCompletionAt(state.analysis, state.offset).kind === "table" || !sqlScopeAt(state.analysis, state.offset))) {
+      suggestAt(state.model, state.offset, () => true, true);
+    }
     // Monaco fires content/cursor events before the completion command. Replace that weak signal.
     if (typed?.version === state.model.getVersionId() && typed.receipt.key === sqlUsageKey(table)) { rollbackSqlUsage(typed.receipt); typed = undefined; }
     const receipt = recordSqlUsage(args.scope, args.key, "accept");
@@ -97,21 +160,6 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
     acceptedKeys.set(sqlUsageKey(table), Date.now());
     if (field) acceptedKeys.set(args.key, Date.now());
     dirty = undefined;
-    /**
-     * 从候选列表点选表名后，Monaco 会把补全框关掉 —— 用户「用补全打完 `po_order`」
-     * 就再也看不到表名说明里的「N 个关联表」和 JOIN 片段，只有把名字逐字打全才会。
-     * 选完立刻再唤一次：`FROM` 位置给「接上子表」，裸表名位置给整条联查模板。
-     *
-     * 字段项不重弹（每次选字段都多一个框）；光标已离开表名末尾也不弹。
-     */
-    if (!field && (sqlCompletionAt(state.analysis, state.offset).kind === "table" || !sqlScopeAt(state.analysis, state.offset))) {
-      setTimeout(() => {
-        if (disposed || editor.getModel() !== state.model) return;
-        const position = editor.getPosition();
-        if (!position || state.model.getOffsetAt(position) !== state.offset) return;
-        editor.trigger("sql-assist", "editor.action.triggerSuggest", {});
-      }, 0);
-    }
   });
   if (!acceptCommand) acceptCommand = monaco.editor.registerCommand("ncforge.sql.accept", (_accessor, args: AcceptArgs) => {
     if (!args || typeof args.scope !== "string" || typeof args.key !== "string") return;
@@ -132,33 +180,39 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
   });
   disposables.push(editor.onDidChangeModel(reset));
   /**
-   * 空格 / 逗号后的补全：只在「该出表名的地方」主动唤一次。
+   * 在表名、字段、关联条件和运算符的输入边界接续补全。
    *
    * 原先靠 completion provider 的 `triggerCharacters: [" "]`，等于 WHERE 里每敲一个空格
    * 都开一次面板；用户按几次 Esc 之后就再也不指望它弹。这里按前一个词判定：
    * FROM / JOIN / INTO / UPDATE / TABLE 之后要表名，逗号之后要下一个表名或字段。
-   * 其余位置交给 Monaco 的打字即触发（quickSuggestions），不再额外开框。
+   * WHERE / ON 只在可补条件的位置主动打开，其余位置交给 Monaco 的普通补全。
    *
    * 延到下一拍再唤，与「接受补全后重弹」走同一条已验证的路径。
    */
-  const suggestAfterSeparator = (event: monaco.editor.IModelContentChangedEvent) => {
-    if (composing || !event.changes.some(c => c.text === " " || c.text === ",")) return;
+  const suggestAfterTyping = (event: monaco.editor.IModelContentChangedEvent) => {
+    const change = event.changes.length === 1 ? event.changes[0] : undefined;
+    if (composing || event.isUndoing || event.isRedoing || !change) return;
     const model = editor.getModel();
     if (!model) return;
-    setTimeout(() => {
-      if (disposed || editor.getModel() !== model) return;
-      const state = current(editor);
-      if (!state) return;
+    if (/^[\p{L}\p{N}_$#]$/u.test(change.text)) {
+      suggestAt(model, change.rangeOffset + change.text.length, () => false, true);
+      return;
+    }
+    if (![" ", ",", "*"].includes(change.text)) return;
+    suggestAt(model, change.rangeOffset + change.text.length, state => {
+      if (change.text === "*") return expandableAt(state);
+      const ctx = completionContext(state.analysis, state.offset, state.dialect);
+      if (ctx.kind === "none") return false;
       const before = state.analysis.tokens.filter(t => t.end <= state.offset && !["space", "comment", "hint"].includes(t.kind)).pop();
-      if (!before) return;
-      if (before.text !== "," && !["FROM", "JOIN", "INTO", "UPDATE", "TABLE"].includes(before.text.toUpperCase())) return;
-      editor.trigger("sql-assist", "editor.action.triggerSuggest", {});
-    }, 0);
+      if (before && (before.text === "," || ["FROM", "JOIN", "INTO", "UPDATE", "TABLE"].includes(before.text.toUpperCase()))) return true;
+      const predicate = sqlPredicateContext(state.analysis, state.offset, ctx.clause);
+      return predicate?.kind === "field" || predicate?.kind === "operator" && getSqlTemplatesEnabled();
+    });
   };
   disposables.push(editor.onDidChangeModelContent(event => {
     // setValue/history loading flushes the model; that is not a user's typing event.
     if (event.isFlush) { reset(); return; }
-    suggestAfterSeparator(event);
+    suggestAfterTyping(event);
     // Roll back newest receipts first so consecutive undo also restores earlier accepts.
     for (let i = accepted.length - 1; i >= 0; i--) {
       const item = accepted[i];
@@ -178,7 +232,11 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
       dirty = { start: Math.min(dirty?.start ?? c.rangeOffset, c.rangeOffset), end: Math.max(dirty?.end ?? end, end) };
     }
   }));
-  disposables.push(editor.onDidChangeCursorPosition(() => {
+  disposables.push(editor.onDidChangeCursorPosition(event => {
+    if (event?.source === "keyboard" && !composing) {
+      const state = current(editor);
+      if (state && expandableAt(state)) suggestAt(state.model, state.offset, expandableAt);
+    }
     if (!dirty || composing) return;
     const state = current(editor);
     if (!state?.scope) return;
@@ -202,14 +260,18 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
     if (!token) dirty = undefined;
   }));
   disposables.push(editor.onDidCompositionStart(() => {
+    relationRequest++;
+    clearTimeout(pendingSuggest);
     composing = true; quick = editor.getOption(monaco.editor.EditorOption.quickSuggestions);
-    editor.trigger("sql-assist", "hideSuggestWidget", {});
+    closeSuggestions();
     editor.updateOptions({ quickSuggestions: false });
   }));
   disposables.push(editor.onDidCompositionEnd(() => {
     composing = false;
     if (quick) editor.updateOptions({ quickSuggestions: quick });
-    quick = undefined; editor.trigger("sql-assist", "editor.action.triggerSuggest", {});
+    quick = undefined;
+    const state = current(editor);
+    if (state) suggestAt(state.model, state.offset, () => true);
   }));
 
   async function fields(insert: boolean) {
@@ -238,10 +300,7 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
     catch { if (stillCurrent()) toast("暂时无法读取字段，请刷新表结构后重试", "warning"); return; }
     if (!stillCurrent()) return;
     if (!cols.length) { toast("这张表暂时没有可用字段", "info"); return; }
-    const names = cols.map(c => {
-      const folded = state.dialect !== "postgresql" && /^[A-Z_][A-Z0-9_$#]*$/.test(c.name) ? c.name.toLowerCase() : c.name;
-      return sqlIdentifier(sqlWordKind(folded, state.dialect) === "identifier" ? folded : c.name, state.dialect);
-    });
+    const names = sqlFieldIdentifiers(cols, state.dialect);
     editor.pushUndoStop();
     if (insert) {
       const statement = splitStatements(state.sql).find(s => s.start <= state.offset && s.end >= state.offset);
@@ -300,6 +359,7 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
   return { dispose() {
     if (disposed) return;
     disposed = true;
+    clearTimeout(pendingSuggest);
     if (quick) editor.updateOptions({ quickSuggestions: quick });
     disposables.forEach(d => d.dispose()); accepts.delete(editor); reset();
     quickFixers.delete(editor); actionRunners.delete(editor);

@@ -98,8 +98,9 @@ export function ResultPanel({ tab, height, onLocate, onFillSql, fixes }: { tab: 
     <ResultPaneHeading result={result} options={options.filter(o => o.id === result.id || !pair.includes(o.id))} onPick={id => pickPane(pair.indexOf(result.id), id)} onLocate={onLocate} />;
 
   return (
-    <div className="dbx-res" style={{ height }}>
+    <section className="dbx-res" aria-labelledby={`${prefix}-region`} style={{ height }}>
       <div className="dbx-result-head">
+        <span id={`${prefix}-region`} className="dbx-region-label">结果区</span>
         <ResultTabList prefix={prefix} label="查询结果" items={items} value={view} onSelect={setView} />
         <ResultBaselineSummary /><SqlExecutionFeedback executionId={tab.run?.id} previousAt={cur ? cur.completedAt ?? 0 : undefined} />
         {layout === "tabs" && selectedResult && onLocate && <button type="button" className="dbx-ibtn"
@@ -133,7 +134,7 @@ export function ResultPanel({ tab, height, onLocate, onFillSql, fixes }: { tab: 
       ) : null}
       </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -185,7 +186,8 @@ function OutputView({ tab }: { tab: SqlTab }) {
   }, [tab.output.length]);
   return (
     <div ref={ref} className="dbx-output">
-      {tab.output.length === 0 && <span className="info">这里显示每条语句的执行情况与 DBMS_OUTPUT。</span>}
+      {tab.output.length === 0 && <span className="info">{tab.results.length || tab.plan || tab.run
+        ? "暂无执行输出。" : "执行 SQL 后，查询结果和执行信息会显示在这里。"}</span>}
       {tab.output.map((l, i) => (
         <div key={i} className={l.tone}>
           {l.text}

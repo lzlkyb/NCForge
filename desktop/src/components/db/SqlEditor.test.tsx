@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../lib/monacoSetup", () => {
   const editor = {
     updateOptions: vi.fn(),
+    getContribution: () => null,
     addAction: (action: ActionDesc) => { mocks.actions.push(action); return { dispose: () => {} }; },
     addCommand: () => { throw new Error("SQL 动作必须保留编辑器右键菜单"); },
     createDecorationsCollection: () => ({ set: () => {}, clear: () => {} }),
@@ -131,6 +132,18 @@ function select(range: Selection) {
 }
 
 describe("SQL 编辑器动作与真实执行目标", () => {
+  it("补全浮层挂在窗口层，随编辑器隐藏和移除", () => {
+    const { render } = mount();
+    const overflow = document.body.querySelector<HTMLElement>(".dbx-sql-overflow")!;
+    expect(overflow.parentElement).toBe(document.body);
+    expect(overflow.hidden).toBe(false);
+    render("t1", false);
+    expect(overflow.hidden).toBe(true);
+    render();
+    expect(overflow.hidden).toBe(false);
+    act(() => root.render(null));
+    expect(overflow.isConnected).toBe(false);
+  });
   it("主执行与当前语句分别接到一致的菜单和快捷键", () => {
     const onRun = vi.fn(); mount("", onRun);
     expect(mocks.actions.map(action => action.id)).toEqual(["ncforge.sql.run", "ncforge.sql.runCurrent", "ncforge.sql.runScript", "ncforge.sql.format"]);
