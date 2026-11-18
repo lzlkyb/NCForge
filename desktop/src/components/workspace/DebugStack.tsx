@@ -7,6 +7,7 @@ import { toast } from "../ui/toast";
 import { baseName } from "../../lib/workspace";
 import { copyText } from "../../lib/utils";
 import {
+  dropFrame,
   refreshThreadsNow,
   selectFrame,
   selectThread,
@@ -87,6 +88,17 @@ export function DebugStack({
               <span className="dbg-frame-loc">
                 {f.source?.path ? `${baseName(f.source.path)}:${f.line}` : "—"}
               </span>
+            </button>
+            <button
+              type="button"
+              className="dbg-icon-btn dbg-frame-drop"
+              title="重置此帧（Drop Frame）：从这一帧重新执行；最底层帧不支持，适配器会拒绝"
+              onClick={(e) => {
+                e.stopPropagation();
+                void dropFrame(f.id);
+              }}
+            >
+              <Icon name="rollback" size={11} />
             </button>
             <button
               type="button"

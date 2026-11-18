@@ -547,6 +547,13 @@ pub fn exception_breakpoints_args(filters: &[String]) -> Value {
     json!({ "filters": filters, "filterOptions": [] })
 }
 
+/// 字段观察点（watchpoint）的协议形状在子模块：两套 DAP 请求的判据不同，
+/// 拆开各自说清（见 `data_breakpoints` 头注释里的反编译依据）。
+mod data_breakpoints;
+pub use data_breakpoints::{
+    data_breakpoint_info_args, data_breakpoints_args, DataBreakpointSpec, DATA_BP_ACCESS_TYPES,
+};
+
 /// `variables`：`start` / `count` 只在父节点带 `indexedVariables` 时用于分页。
 pub fn variables_args(reference: i64, start: Option<i64>, count: Option<i64>) -> Value {
     let mut args = json!({ "variablesReference": reference });

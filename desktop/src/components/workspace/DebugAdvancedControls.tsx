@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { applyStepFilters, readStepFilters, runToCursor } from "../../lib/debugAdvanced";
+import { setSuspendAll } from "../../lib/debugSession";
 import { errorToast } from "../../lib/errorToast";
 import type { DebugSnapshot } from "../../lib/debugSession";
 import "../../java-runtime.css";
@@ -12,6 +13,17 @@ export function DebugAdvancedControls({ snap }: { snap: DebugSnapshot }) {
   return <div>
     <div className="dbg-bar">
       <button type="button" className="dbg-btn" disabled={!snap.paused || busy} onClick={() => void runToCursor()} title="运行至当前编辑器光标处；下次暂停后自动移除临时断点">运行到光标</button>
+      <button
+        type="button"
+        className="dbg-btn"
+        data-on={snap.suspendAll || undefined}
+        onClick={() => setSuspendAll(!snap.suspendAll)}
+        title={snap.suspendAll
+          ? "断点停住时把其他线程一并挂起，继续时统一恢复（推荐：适配器默认只停当前线程）"
+          : "当前只停命中线程（适配器默认行为）：后台线程继续运行，界面可能出现「停了还在跑」"}
+      >
+        挂起全部线程
+      </button>
       <button type="button" className="dbg-btn" disabled={snap.status.state !== "attached" || busy} aria-expanded={open} onClick={() => setOpen(value => !value)}>步进过滤</button>
     </div>
     {open && <div className="dbg-filter-form">

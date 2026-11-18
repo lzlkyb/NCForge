@@ -8,6 +8,7 @@ import { baseName } from "../../lib/workspace";
 import { DebugInspectorContent } from "./DebugInspectorDock";
 import { DebugStack } from "./DebugStack";
 import { DebugBreakpoints } from "./DebugBreakpoints";
+import { DebugWatchpoints } from "./DebugWatchpoints";
 import { DebugConsole } from "./DebugConsole";
 import { DebugAdvancedControls } from "./DebugAdvancedControls";
 import { DebugStopBanner } from "./DebugStopBanner";
@@ -220,6 +221,10 @@ export function DebugPanel({ onOpenAt }: { onOpenAt: (path: string, line: number
               enabledFilters={snap.enabledFilters}
               onOpenAt={onOpenAt}
             />
+            {/* 字段观察点挂在断点列下方：同一列都是「停在哪里」的配置，各自独立滚动 */}
+            <div className="dbg-wp-dock">
+              <DebugWatchpoints />
+            </div>
           </div>
         </div>
       )}

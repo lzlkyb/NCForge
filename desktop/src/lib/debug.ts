@@ -77,6 +77,25 @@ export interface DapThread {
   name: string;
 }
 
+/** 字段观察点的访问类型（DAP 线格式；适配器按 read/write/readWrite 分派 JDI 请求）。 */
+export type DataBreakpointAccessType = "read" | "write" | "readWrite";
+
+/** 一个字段观察点的下发规格。`dataId` 只能来自 `dataBreakpointInfo` 的回报。 */
+export interface DataBreakpointSpec {
+  dataId: string;
+  accessType?: DataBreakpointAccessType;
+  condition?: string;
+  hitCondition?: string;
+}
+
+/** `dataBreakpointInfo` 的回报：适配器说这个字段能不能观察、支持哪些访问类型。 */
+export interface DataBreakpointInfo {
+  dataId?: string | null;
+  description?: string;
+  accessTypes?: DataBreakpointAccessType[];
+  canPersist?: boolean;
+}
+
 export interface DapStackFrame {
   id: number;
   name: string;
@@ -137,6 +156,9 @@ export const debugStep = (target: DebugTarget, threadId: number, kind: "over" | 
   trackOperation({ key: `debug.control:${target}:${threadId}`, label: kind === "over" ? "调试步过" : kind === "into" ? "调试步入" : "调试步出", page: "files", panel: "debug" }, () => invoke<Record<string, unknown>>("debug_step", { target, threadId, kind }), () => ({ state: "success", detail: "步进请求已返回，等待下一次暂停事件" }));
 export const debugPause = (target: DebugTarget, threadId: number) =>
   trackOperation({ key: `debug.pause:${target}:${threadId}`, label: "请求调试暂停", page: "files", panel: "debug" }, () => invoke<Record<string, unknown>>("debug_pause", { target, threadId }), () => ({ state: "success", detail: "暂停请求已返回，暂停位置由调试事件确认" }));
+/** 重置栈帧（Drop Frame）：适配器随后 stepInto 到该方法首行，停住事件会自动刷新面板。 */
+export const debugRestartFrame = (target: DebugTarget, frameId: number) =>
+  trackOperation({ key: `debug.restart:${target}:${frameId}`, label: "重置栈帧", page: "files", panel: "debug" }, () => invoke<Record<string, unknown>>("debug_restart_frame", { target, frameId }), () => ({ state: "success", detail: "重置请求已返回，将从该帧重新执行" }));
 export const debugThreads = (target: DebugTarget) =>
   invoke<{ threads?: DapThread[] }>("debug_threads", { target });
 export const debugStackTrace = (target: DebugTarget, threadId: number) =>
@@ -157,6 +179,12 @@ export const debugSetVariable = (
   value: string,
 ) =>
   invoke<Partial<DapVariable>>("debug_set_variable", { target, variablesReference, name, value });
+/** 问适配器：这个字段能不能设观察点（返回 dataId / 描述 / 支持的访问类型）。 */
+export const debugDataBreakpointInfo = (target: DebugTarget, variablesReference: number, name: string) =>
+  invoke<DataBreakpointInfo>("debug_data_breakpoint_info", { target, variablesReference, name });
+/** 字段观察点整批下发（空数组 = 全部清掉）。返回的 breakpoints 与请求逐项同序。 */
+export const debugSetDataBreakpoints = (target: DebugTarget, breakpoints: DataBreakpointSpec[]) =>
+  invoke<{ breakpoints?: DapBreakpoint[] }>("debug_set_data_breakpoints", { target, breakpoints });
 export const debugExceptionInfo = (target: DebugTarget, threadId: number) =>
   invoke<{
     exceptionId?: string;

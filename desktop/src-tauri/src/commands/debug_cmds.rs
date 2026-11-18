@@ -16,15 +16,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{json, Value};
-use tauri::Emitter;
 
+use super::debug_events::{emit_status, Handler};
+use crate::app_error::AppError;
 use crate::debug::{self, DebugRun, DebugSession, DebugStatus, DebugTarget};
-use crate::lang::LangSession;
 use crate::lsp::uri_to_path;
 use crate::shadow;
 use crate::state::AppState;
 
-fn lock_debug(state: &AppState) -> std::sync::MutexGuard<'_, DebugRun> {
+/// 调试运行状态的锁。`pub(super)`：`debug_events`（事件处理器）也要用它收尾状态。
+pub(super) fn lock_debug(state: &AppState) -> std::sync::MutexGuard<'_, DebugRun> {
     state.debug.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -40,11 +41,6 @@ fn current(state: &AppState, target: DebugTarget) -> Result<Arc<DebugSession>, S
                 target.label()
             )
         })
-}
-
-fn emit_status(app: &tauri::AppHandle, state: &AppState, target: DebugTarget) {
-    let status = lock_debug(state).slot_ref(target).status.clone();
-    let _ = app.emit("debug-status", status);
 }
 
 /// 目标 JVM 的 JDWP 端口。两个本地进程的启动参数都由工作台生成，端口从这里取。
@@ -75,56 +71,6 @@ fn jdwp_port_for(state: &AppState, target: DebugTarget) -> Result<u16, String> {
             })
         }
         DebugTarget::Remote => Err("远程目标没有本地进程端口，请手工填写".to_string()),
-    }
-}
-
-/// 适配器事件处理器：路径映射与状态收尾都在这。
-struct Handler {
-    app: tauri::AppHandle,
-    state: Arc<AppState>,
-    target: DebugTarget,
-    /// 连接代数（见 `TargetRun::generation`）。
-    generation: u64,
-    lang: Arc<LangSession>,
-}
-
-impl Handler {
-    /// 会话结束（目标退出 / 适配器断开 / 主动停止的收尾）：只有当前这一代才动状态。
-    fn finish(&self, message: &str) {
-        let cleared = {
-            let mut run = lock_debug(&self.state);
-            let slot = run.slot(self.target);
-            if slot.generation == self.generation && slot.session.is_some() {
-                slot.session = None;
-                slot.status = DebugStatus::stopped(self.target);
-                slot.status.message = message.to_string();
-                true
-            } else {
-                false
-            }
-        };
-        if cleared {
-            emit_status(&self.app, &self.state, self.target);
-        }
-    }
-}
-
-impl debug::DapHandler for Handler {
-    fn on_event(&self, event: &str, body: Value) {
-        // 目标退出后适配器连接仍在，主动收尾，别让界面停在「已暂停」
-        if event == "terminated" {
-            self.finish("调试目标已结束");
-        }
-        // breakpoint 等事件里的 source.path 也是普通路径，要和请求回包走同一条映射
-        let body = self.lang.from_server_paths(&self.lang.from_server(&body));
-        let _ = self.app.emit(
-            "debug-event",
-            json!({ "target": self.target, "event": event, "body": body }),
-        );
-    }
-
-    fn on_exit(&self, reason: &str) {
-        self.finish(reason);
     }
 }
 
@@ -317,6 +263,55 @@ async fn ask(
     .map_err(|e| format!("后台任务失败: {e}"))?
 }
 
+/// `ask` 的结构化错误版（错误契约：新命令返 `Result<T, AppError>`，见 `app_error.rs`）。
+///
+/// 与 `ask` 的分工：存量命令仍走 String 版本（基线只许减），新命令走这里。
+/// 错误分类按「用户能改什么」判，不按字符串猜：
+/// - 会话未启动 → `input`（去服务页勾调试模式重启即可）；
+/// - DAP 请求失败 / 超时 → `unavailable`（适配器或 JVM 没响应，重试或修环境）；
+/// - 后台任务失败 → `internal`（我们自己的不变量，看到即 bug）。
+///
+/// `pub(super)`：`debug_watchpoint_cmds`（字段观察点命令）共用这一个助手。
+pub(super) async fn ask_app(
+    state: Arc<AppState>,
+    target: DebugTarget,
+    command: &'static str,
+    args: Value,
+    timeout: Duration,
+) -> Result<Value, AppError> {
+    let session = current_app(&state, target)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = session
+            .client
+            .request(command, args, timeout)
+            .map_err(|e| AppError::unavailable("debug.dapFailed", e.to_string()))?;
+        Ok(session
+            .lang
+            .from_server_paths(&session.lang.from_server(&out)))
+    })
+    .await
+    .map_err(|e| AppError::internal("debug.taskFailed", format!("后台任务失败: {e}")))?
+}
+
+/// `current` 的结构化错误版：会话没起是用户操作问题，带上怎么解决。
+fn current_app(state: &AppState, target: DebugTarget) -> Result<Arc<DebugSession>, AppError> {
+    lock_debug(state)
+        .slot_ref(target)
+        .session
+        .clone()
+        .ok_or_else(|| {
+            AppError::input(
+                "debug.sessionMissing",
+                format!(
+                    "{}调试会话未启动：先在服务页用「调试模式」启动{}，再附加调试器",
+                    target.label(),
+                    target.label()
+                ),
+            )
+            .with_hint("到「NC 服务」页勾选调试模式后启动，再回调试面板点「附加调试器」")
+        })
+}
+
 /// 设置某文件断点。空数组 = 清空该文件的所有断点。
 ///
 /// 每条断点可带 `condition` / `hitCondition` / `logMessage`（触发语义），
@@ -399,6 +394,27 @@ pub async fn debug_step(
         DebugTarget::parse(&target)?,
         command,
         json!({ "threadId": thread_id }),
+        Duration::from_secs(15),
+    )
+    .await
+}
+
+/// 重置栈帧（Drop Frame）：从选中帧重新执行。
+///
+/// 适配器（java-debug 0.32.0 RestartFrameHandler）先 popFrames 再 stepInto，
+/// 紧随会有一个 stopped 事件，前端面板照常刷新。最底层帧不支持，请求直接报错
+/// （"Current stack frame doesn't support restart."），交给调用方提示。
+#[tauri::command]
+pub async fn debug_restart_frame(
+    state: tauri::State<'_, Arc<AppState>>,
+    target: String,
+    frame_id: i64,
+) -> Result<Value, AppError> {
+    ask_app(
+        state.inner().clone(),
+        DebugTarget::parse(&target).map_err(|e| AppError::input("debug.badTarget", e))?,
+        "restartFrame",
+        json!({ "frameId": frame_id }),
         Duration::from_secs(15),
     )
     .await
@@ -504,6 +520,9 @@ pub async fn debug_set_variable(
     )
     .await
 }
+
+// 字段观察点（watchpoint）命令在 `debug_watchpoint_cmds.rs`：另一套 DAP 请求、
+// 另一份同步状态机，单独成文件。适配器事件处理器在 `debug_events.rs`。
 
 /// 异常停靠的详情（类型、消息、栈）。仅在 stopped 原因是 exception 时有意义。
 #[tauri::command]

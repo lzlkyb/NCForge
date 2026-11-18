@@ -8,6 +8,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { invoke, listen } from "./tauri";
 import { toast } from "../components/ui/toast";
 import { reinstallBreakpoints } from "./debugSync";
+import { reinstallWatchpoints } from "./watchpointSync";
 import { requestServiceRestart } from "./servicePanel";
 
 export type HotswapState = "ok" | "partial" | "failed";
@@ -167,10 +168,13 @@ export function startHotswapEvents(queryClient: QueryClient): void {
       return;
     }
     if (report.redefined.length === 0) return;
-    // 断点也要按目标重装：替换的是哪个 JVM，调试会话就是那一个
+    // 断点与字段观察点都要按目标重装：替换的是哪个 JVM，调试会话就是那一个。
+    // JDI 请求可能随类重定义失效，而适配器对「清单没变」只改条件不重装——
+    // 先清空再整批重发，逼出新对象重新 install。
     void reinstallBreakpoints(report.target).then((n) => {
       if (lastEvent?.report === report) emit({ report, breakpoints: n });
     });
+    void reinstallWatchpoints(report.target);
   });
   void listen<number>("hotswap-pending", refresh);
 }

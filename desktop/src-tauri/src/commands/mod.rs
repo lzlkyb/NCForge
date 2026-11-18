@@ -29,6 +29,8 @@ mod db_user_cmds;
 mod db_workbench_cmds;
 mod debug_advanced_cmds;
 mod debug_cmds;
+mod debug_events;
+mod debug_watchpoint_cmds;
 mod decompile_cmds;
 mod deploy_cmds;
 mod diagnostics_cmds;
@@ -88,6 +90,7 @@ pub use db_user_cmds::*;
 pub use db_workbench_cmds::*;
 pub use debug_advanced_cmds::*;
 pub use debug_cmds::*;
+pub use debug_watchpoint_cmds::*;
 pub use decompile_cmds::*;
 pub use deploy_cmds::*;
 pub use diagnostics_cmds::*;
@@ -216,12 +219,15 @@ macro_rules! nc_forge_commands {
         $crate::commands::debug_set_exception_breakpoints,
         $crate::commands::debug_continue,
         $crate::commands::debug_step,
+        $crate::commands::debug_restart_frame,
         $crate::commands::debug_pause,
         $crate::commands::debug_threads,
         $crate::commands::debug_stack_trace,
         $crate::commands::debug_scopes,
         $crate::commands::debug_variables,
         $crate::commands::debug_set_variable,
+        $crate::commands::debug_data_breakpoint_info,
+        $crate::commands::debug_set_data_breakpoints,
         $crate::commands::debug_exception_info,
         $crate::commands::debug_evaluate,
         $crate::commands::search_workspace,

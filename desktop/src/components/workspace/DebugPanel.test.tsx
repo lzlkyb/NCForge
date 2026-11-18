@@ -121,7 +121,62 @@ describe("调试面板的断点清单", () => {
     expect(clear.disabled).toBe(false);
 
     await act(async () => clear.click());
-    expect(JSON.parse(localStorage.getItem(KEY) ?? "null")).toEqual([]);
+    // v2 存盘形状：items + muted + disabledGroups（2026-11-18 加分组/静音时改的，
+    // v1 裸数组仍能读）。这条用例钉的是「清空并落盘」：items 必须为空。
+    const stored = JSON.parse(localStorage.getItem(KEY) ?? "null");
+    expect(stored).toEqual({ items: [], muted: false, disabledGroups: [] });
     expect(clear.disabled).toBe(true);
+  });
+  it("静音：点一下全部临时失效（落盘 + 提示条 + 行置灰），再点恢复", async () => {
+    // 断点 store 的 currentRoot 跨用例不重置：新用例必须换工作区根，否则读到上一个用例的残留
+    setSession({ root: "C:/bp-mute" });
+    localStorage.setItem("ncforge-breakpoints:c:/bp-mute", JSON.stringify([{ path: "C:/bp-mute/a.java", line: 3 }]));
+    await act(async () => root.render(<DebugPanel onOpenAt={vi.fn()} />));
+    expect(document.querySelector(".dbg-bp-col .dbg-col-h")?.textContent).toContain("· 1");
+
+    // 按钮标题在两种状态下都含「静音」，一个 finder 兼顾
+    const findMute = () =>
+      [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.title.includes("静音"))!;
+    await act(async () => findMute().click());
+
+    expect(JSON.parse(localStorage.getItem("ncforge-breakpoints:c:/bp-mute") ?? "null").muted).toBe(true);
+    expect(document.querySelector(".dbg-bp-muted")?.textContent).toContain("已静音");
+    // 清单不清（还能看到行），但全部置灰
+    const rows = document.querySelectorAll(".dbg-bp-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].hasAttribute("data-off")).toBe(true);
+
+    await act(async () => findMute().click());
+    expect(JSON.parse(localStorage.getItem("ncforge-breakpoints:c:/bp-mute") ?? "null").muted).toBe(false);
+    expect(document.querySelector(".dbg-bp-muted")).toBeNull();
+    expect(document.querySelector(".dbg-bp-row")?.hasAttribute("data-off")).toBe(false);
+  });
+  it("分组：chip 显示组名与条数，点一下整组禁用（行置灰、落盘）", async () => {
+    setSession({ root: "C:/bp-grp" });
+    localStorage.setItem(
+      "ncforge-breakpoints:c:/bp-grp",
+      JSON.stringify({
+        items: [
+          { path: "C:/bp-grp/a.java", line: 3, group: "g1" },
+          { path: "C:/bp-grp/b.java", line: 8 },
+        ],
+        muted: false,
+        disabledGroups: [],
+      }),
+    );
+    await act(async () => root.render(<DebugPanel onOpenAt={vi.fn()} />));
+
+    const chip = document.querySelector(".dbg-bp-gchip");
+    expect(chip?.textContent).toContain("g1");
+    expect(chip?.textContent).toContain("1");
+    // 组内断点行上有组徽标
+    expect(document.querySelector('.dbg-bp-badge[data-kind="group"]')?.textContent).toBe("g1");
+
+    const toggle = chip!.querySelector<HTMLButtonElement>(".dbg-gchip-name")!;
+    await act(async () => toggle.click());
+    expect(JSON.parse(localStorage.getItem("ncforge-breakpoints:c:/bp-grp") ?? "null").disabledGroups).toEqual(["g1"]);
+    const rows = [...document.querySelectorAll(".dbg-bp-row")];
+    expect(rows[0].hasAttribute("data-off")).toBe(true); // a.java:3 在禁用组里
+    expect(rows[1].hasAttribute("data-off")).toBe(false); // b.java:8 默认组不受影响
   });
 });

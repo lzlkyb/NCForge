@@ -9,7 +9,7 @@
 // 由各自的 classpath 决定，不能因为客户端没这个类就把中间件的落点也涂掉。
 import type { DebugTarget } from "./debug";
 import { DEBUG_TARGETS } from "./debug";
-import { bpKey, breakpointGroupSig, getBreakpoints, groupBreakpoints, subscribeBreakpoints } from "./breakpoints";
+import { bpKey, breakpointGroupSig, getBreakpoints, groupBreakpoints, isMuted, subscribeBreakpoints } from "./breakpoints";
 import { debugSetBreakpoints } from "./debug";
 import type { DapBreakpoint } from "./debug";
 
@@ -69,8 +69,17 @@ function groupsForTarget(target: DebugTarget): ReturnType<typeof groupBreakpoint
   const items = getBreakpoints();
   // A logpoint or false condition is verified too, but cannot stop at the cursor.
   // Override only this target's outgoing rule and restore the stored rule on cleanup.
-  return groupBreakpoints(extra
-    ? [...items.filter(b => bpKey(b.path, b.line) !== bpKey(extra.path, extra.line)), { ...extra, enabled: true }] : items);
+  if (extra) {
+    return groupBreakpoints([
+      ...items.filter((b) => bpKey(b.path, b.line) !== bpKey(extra.path, extra.line)),
+      { ...extra, enabled: true },
+    ]);
+  }
+  // 全局静音（Mute）：一个组都不发。下面「清空已同步文件」的分支会把适配器上的
+  // 断点显式删掉；取消静音后签名对不上，整批重发——这正是 Mute 要的语义。
+  // 临时断点不受静音影响：运行到光标处是明确的一次性动作。
+  if (isMuted()) return new Map();
+  return groupBreakpoints(items);
 }
 
 async function waitForSync(): Promise<void> {

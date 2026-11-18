@@ -15,9 +15,11 @@ import { toggleBreakpointAt } from "./breakpoints";
 import {
   DEBUG_TARGETS,
   debugContinue,
+  debugDataBreakpointInfo,
   debugEvaluate,
   debugExceptionInfo,
   debugPause,
+  debugRestartFrame,
   debugScopes,
   debugSetExceptionBreakpoints,
   debugSetVariable,
@@ -44,6 +46,12 @@ import type {
   RemoteEndpoint,
 } from "./debug";
 import { applyBreakpointEvent, resetBreakpointSync, startBreakpointSync, syncBreakpoints } from "./debugSync";
+import { addWatchpoint } from "./watchpoints";
+import {
+  resetWatchpointSync,
+  startWatchpointSync,
+  syncWatchpoints,
+} from "./watchpointSync";
 
 export type DebugAction = "resume" | "over" | "into" | "out";
 export type DebugBusy = "attach" | "detach" | null;
@@ -121,9 +129,43 @@ export interface DebugSnapshot extends TargetState {
   anyPaused: boolean;
   /** 当前启用的异常断点过滤器 id（跨目标共享）。 */
   enabledFilters: string[];
+  /** 断点停住时是否把其他线程一并挂起（跨目标共享的会话偏好）。 */
+  suspendAll: boolean;
 }
 
 const EXCEPTION_FILTER_KEY = "ncforge-debug-exception-filters";
+
+/** 挂起策略偏好。默认开：适配器是 EVENT_THREAD 单线程挂起，NC 中间件后台线程多，
+ *  不停全部会让用户看到「断点停了、界面还在跑」的割裂感。关闭则回到适配器默认行为。 */
+const SUSPEND_ALL_KEY = "ncforge-debug-suspend-all";
+
+function readSuspendAll(): boolean {
+  try {
+    const raw = localStorage.getItem(SUSPEND_ALL_KEY);
+    return raw === null ? true : raw === "1";
+  } catch {
+    return true;
+  }
+}
+
+let suspendAll = readSuspendAll();
+let enabledFilters = readEnabledFilters();
+
+function persistSuspendAll(): void {
+  try {
+    localStorage.setItem(SUSPEND_ALL_KEY, suspendAll ? "1" : "0");
+  } catch {
+    // 隐私模式：本次会话内仍生效
+  }
+}
+
+/** 改「停住时挂起全部线程」。只影响下一次停住，不改已暂停现场的线程状态。 */
+export function setSuspendAll(value: boolean): void {
+  if (suspendAll === value) return;
+  suspendAll = value;
+  persistSuspendAll();
+  commit();
+}
 
 function readEnabledFilters(): string[] {
   try {
@@ -136,8 +178,6 @@ function readEnabledFilters(): string[] {
     return [];
   }
 }
-
-let enabledFilters = readEnabledFilters();
 
 function persistEnabledFilters(): void {
   try {
@@ -199,6 +239,7 @@ function rebuild(): DebugSnapshot {
     },
     anyPaused: states.server.paused || states.client.paused || states.remote.paused,
     enabledFilters,
+    suspendAll,
   };
 }
 
@@ -365,6 +406,26 @@ export async function setVariableValue(ref: number, name: string, value: string)
     setFor(target, { error: errText(e) });
     throw e;
   }
+}
+
+// ── 字段观察点 ──────────────────────────────────────────────────────────────
+/**
+ * 给变量树里的一个字段加观察点（变量行的「眼睛」按钮），返回加入结果。
+ *
+ * 🔴 dataId 必须问适配器要（`dataBreakpointInfo`）：java-debug 0.32.0 的 dataId 是
+ * 「对象运行时类型名#字段名」，本地拼不出来——子类实例的字段可能声明在父类，
+ * 运行时类型名未必是声明类，适配器按 ObjectReference 解析出来的才是真相。
+ * 局部变量的引用解析不到 ObjectReference，适配器直接报错，所以入口只开在
+ * 「已展开对象的字段行」上（parentRef > 0）。加入清单后 `watchpointSync`
+ * 会自动整批下发，不需要在这里碰适配器的 setDataBreakpoints。
+ */
+export async function watchField(parentRef: number, name: string): Promise<"added" | "exists"> {
+  const target = active;
+  if (parentRef <= 0) return "exists";
+  const info = await debugDataBreakpointInfo(target, parentRef, name);
+  const dataId = typeof info.dataId === "string" ? info.dataId.trim() : "";
+  if (!dataId) throw new Error(`适配器没有给出字段 ${name} 的观察点身份（dataId）`);
+  return addWatchpoint({ dataId, accessType: "readWrite" }) ? "added" : "exists";
 }
 
 // ── 监视表达式 ─────────────────────────────────────────────────────────────
@@ -554,18 +615,59 @@ export async function setExceptionFilter(filter: string, on: boolean): Promise<v
   if (failures.length > 0) setFor(active, { error: failures.join("；") });
 }
 
-async function refreshThreads(target: DebugTarget): Promise<void> {
-  if (states[target].status.state !== "attached") return;
+async function refreshThreads(target: DebugTarget): Promise<DapThread[]> {
+  if (states[target].status.state !== "attached") return [];
   try {
     const list = (await debugThreads(target)).threads ?? [];
     if (states[target].status.state === "attached") setFor(target, { threads: list });
+    return list;
   } catch {
     // 线程列表只服务「暂停」按钮；拿不到就把按钮留着禁用态
+    return [];
+  }
+}
+
+/**
+ * 「挂起全部」的半边：停住后把其余线程逐一 pause，并记账。
+ * 适配器默认 EVENT_THREAD 只停当前线程；这里用现成的 pause 请求补齐，
+ * 不依赖适配器任何新能力（0.32.0 无 per-breakpoint suspend policy）。
+ */
+async function pauseOtherThreads(target: DebugTarget, stoppedThread: number | null, list: DapThread[]): Promise<void> {
+  const seen = autoPaused[target];
+  for (const t of list) {
+    if (t.id <= 0 || t.id === stoppedThread || seen.has(t.id)) continue;
+    seen.add(t.id);
+    try {
+      await debugPause(target, t.id);
+    } catch {
+      // 线程可能已退出 / 正在 native 里停不下来：没挂成就不记账，恢复时也不去 continue 它
+      seen.delete(t.id);
+    }
+  }
+}
+
+/** 「挂起全部」的另半边：继续/步进/断开时把账上的线程统一放行，否则它们还僵在暂停态。 */
+async function resumeAutoPaused(target: DebugTarget): Promise<void> {
+  const ids = [...autoPaused[target]];
+  autoPaused[target].clear();
+  for (const id of ids) {
+    try {
+      await debugContinue(target, id);
+    } catch {
+      // 线程可能已经没了：忽略
+    }
   }
 }
 
 /** 每个目标各自计数：另一边的事件不该让这边的失败恢复失效。 */
 const revisions: Record<DebugTarget, number> = { server: 0, client: 0, remote: 0 };
+
+/** 「挂起全部」时被我们代为 pause 的线程：它们的 stopped 事件不切上下文，continued 时统一放行。 */
+const autoPaused: Record<DebugTarget, Set<number>> = {
+  server: new Set(),
+  client: new Set(),
+  remote: new Set(),
+};
 
 function targetOf(raw: unknown): DebugTarget {
   return raw === "client" || raw === "remote" ? raw : "server";
@@ -578,6 +680,8 @@ function onEvent(e: DebugEvent): void {
   switch (e.event) {
     case "stopped": {
       const threadId = num(body.threadId);
+      // 自己代为 pause 出来的挂起不切上下文：用户还停在原来的断点上，别被后台线程抢走面板
+      if (threadId !== null && states[target].paused && autoPaused[target].has(threadId)) break;
       const seq = states[target].stopSeq + 1;
       prepareDebugSourceNavigation(target, seq);
       const reason = typeof body.reason === "string" ? body.reason : null;
@@ -601,7 +705,11 @@ function onEvent(e: DebugEvent): void {
       clearWatchResults();
       commit();
       // Stopping clears the old stack and threads; request the new list even without a thread event.
-      void refreshThreads(target);
+      void refreshThreads(target).then((list) => {
+        // 同一现场还没被新的 stopped 顶掉，才补挂起其余线程（seq 守卫防串台）
+        if (!suspendAll || !states[target].paused || states[target].stopSeq !== seq) return;
+        void pauseOtherThreads(target, threadId, list);
+      });
       if (threadId) {
         void loadStack(target, threadId, seq);
         // 异常停靠：stopped 事件只有一句话，类型和消息要再问适配器
@@ -613,6 +721,8 @@ function onEvent(e: DebugEvent): void {
     }
     case "continued":
     case "terminated":
+      // 当前线程放行了，代为挂起的线程也要放行，否则它们僵在暂停态、程序看着像卡死
+      void resumeAutoPaused(target);
       setFor(target, idleFields());
       // 另一边继续运行不该把这一边的监视结果清掉
       if (target === active) {
@@ -624,6 +734,26 @@ function onEvent(e: DebugEvent): void {
       const b = body.breakpoint as { verified?: boolean; line?: number; source?: { path?: string } } | undefined;
       if (b?.source?.path && typeof b.line === "number") {
         applyBreakpointEvent(target, b.source.path, b.line, !!b.verified);
+      }
+      break;
+    }
+    case "usernotification": {
+      // 适配器自己的诊断出口：条件/日志断点求值失败、条件结果不是 boolean……
+      // condition/logMessage 是命中时才编译的（探针结论），运行时报错只从这来，
+      // 不接的话用户看到的就是「莫名停住」或「日志断点没反应」——必须落到控制台。
+      const message = typeof body.message === "string" ? body.message.trim() : "";
+      if (message) {
+        const level = typeof body.notificationType === "string" ? body.notificationType : "";
+        const prefix = level === "ERROR" ? "【错误】" : level === "WARNING" ? "【警告】" : "";
+        const entry: DebugConsoleEntry = {
+          id: ++consoleSeq,
+          expression: "适配器通知",
+          result: null,
+          type: null,
+          error: `${prefix}${message}`,
+          pending: false,
+        };
+        setFor(target, { console: [...states[target].console, entry].slice(-MAX_DEBUG_CONSOLE) });
       }
       break;
     }
@@ -644,12 +774,16 @@ function applyStatus(s: DebugStatus): void {
   setFor(target, { status: s, ...(nowAttached ? {} : idleFields()) });
   if (nowAttached && !wasAttached) {
     void syncBreakpoints();
+    void syncWatchpoints();
     void refreshThreads(target);
     // 异常断点属于「会话偏好」：每次附加都要重新告诉适配器
     void applyExceptionFilters(target);
   }
   if (!nowAttached && wasAttached) {
     resetBreakpointSync(target);
+    resetWatchpointSync(target);
+    // 会话结束：代为挂起的线程清单作废（进程都没了，继续发 continue 只会报错）
+    autoPaused[target].clear();
     // 另一个目标还挂着就保留监视表达式；两边都断了才清。清结果也只清正在看的这一边。
     if (DEBUG_TARGETS.every((t) => states[t].status.state !== "attached")) watches = [];
     else if (target === active) clearWatchResults();
@@ -678,6 +812,7 @@ function ensureListeners(): void {
       });
   }
   startBreakpointSync(() => DEBUG_TARGETS.filter((t) => states[t].status.state === "attached"));
+  startWatchpointSync(() => DEBUG_TARGETS.filter((t) => states[t].status.state === "attached"));
 }
 
 export function useDebugSnapshot(): DebugSnapshot {
@@ -712,6 +847,7 @@ export async function attachDebugger(
     setFor(target, { status, busy: null });
     if (status.state === "attached") {
       void syncBreakpoints();
+      void syncWatchpoints();
       void refreshThreads(target);
       void applyExceptionFilters(target);
     }
@@ -729,6 +865,7 @@ export async function detachDebugger(target: DebugTarget = active): Promise<void
     await debugStop(target);
     setFor(target, { status: stoppedStatus(target), ...idleFields(), busy: null, console: [] });
     resetBreakpointSync(target);
+    resetWatchpointSync(target);
     if (DEBUG_TARGETS.every((t) => states[t].status.state !== "attached")) watches = [];
     else if (target === active) clearWatchResults();
     commit();
@@ -795,7 +932,33 @@ export function toggleBreakpointHere(path: string, line: number): "added" | "rem
   return toggleBreakpointAt(path, line);
 }
 
+/**
+ * Drop Frame：从选中栈帧重新执行（适配器 popFrames + stepInto）。
+ * 成功后的 stopped 事件会照常刷新栈与变量；失败（最底层帧等）把适配器
+ * 的原话写进 error，界面直接显示。
+ */
+export async function dropFrame(frameId: number): Promise<void> {
+  const target = active;
+  const st = states[target];
+  if (!st.paused || !frameId) return;
+  try {
+    await debugRestartFrame(target, frameId);
+  } catch (e) {
+    setFor(target, { error: errText(e) });
+  }
+}
+
 /** 单测用：直接把快照摆到「暂停在某一帧」，不依赖事件桥。 */
 export function __setDebugFrameForTest(frameId: number | null): void {
   set({ paused: frameId !== null, frameId, scopes: [], variables: {} });
+}
+
+/** 单测用：按适配器的原样投递一个调试事件（走 onEvent 同一路径）。 */
+export function __emitDebugEventForTest(event: string, body: Record<string, unknown> | null, target: DebugTarget = "server"): void {
+  onEvent({ target, event, body });
+}
+
+/** 单测用：摆目标的附加状态，走 applyStatus 同一条路径（事件才有线程列表可拉）。 */
+export function __setDebugStatusForTest(target: DebugTarget, state: DebugState): void {
+  applyStatus({ ...stoppedStatus(target), state });
 }

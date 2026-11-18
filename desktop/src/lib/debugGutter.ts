@@ -9,21 +9,25 @@
 import { monaco } from "./monacoSetup";
 import { pathOfModel } from "./editorStore";
 import {
+  breakpointInactiveReason,
   breakpointItemsIn,
-  isBreakpointEnabled,
   subscribeBreakpoints,
   type Breakpoint,
 } from "./breakpoints";
 import { isVerified, subscribeVerified } from "./debugSync";
 import { getDebugSnapshot, subscribeDebug, toggleBreakpointHere } from "./debugSession";
+import { inlineValueHints } from "./debugInlineValues";
 
 type Editor = ReturnType<typeof monaco.editor.create>;
 
 const norm = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 
-/** 一条断点的视觉类别：日志点（蓝）、条件点（红环）、禁用（灰空心）、普通（实心红）。 */
+/** 一条断点的视觉类别：静音/组禁用（灰空心）、日志点（蓝）、条件点（红环）、
+ * 禁用（灰空心）、普通（实心红）。静音与禁用同形——语义靠悬停说明区分。 */
 function glyphClass(path: string, bp: Breakpoint): string {
-  if (!isBreakpointEnabled(bp)) return "ncforge-bp-glyph ncforge-bp-glyph-disabled";
+  const reason = breakpointInactiveReason(bp);
+  if (reason === "muted" || reason === "group") return "ncforge-bp-glyph ncforge-bp-glyph-muted";
+  if (reason === "off") return "ncforge-bp-glyph ncforge-bp-glyph-disabled";
   if (bp.logMessage) return "ncforge-bp-glyph ncforge-bp-glyph-log";
   if (isVerified(path, bp.line)) {
     return bp.condition || bp.hitCondition
@@ -33,10 +37,14 @@ function glyphClass(path: string, bp: Breakpoint): string {
   return "ncforge-bp-glyph ncforge-bp-glyph-unverified";
 }
 
-/** 悬停说明：禁用/日志/条件/未落点都要说清楚「为什么和普通的红点不一样」。 */
+/** 悬停说明：禁用/日志/条件/未落点/静音/组禁用都要说清楚「为什么和普通的红点不一样」。 */
 function glyphTip(path: string, bp: Breakpoint): string {
   const parts = [`断点 · 第 ${bp.line} 行`];
-  if (!isBreakpointEnabled(bp)) return `${parts[0]}（已禁用，不会停下）`;
+  const reason = breakpointInactiveReason(bp);
+  if (reason === "muted") return `${parts[0]}（全局静音中：所有断点临时失效，取消静音即恢复）`;
+  if (reason === "group") return `${parts[0]}（所属组「${bp.group}」已禁用）`;
+  if (reason === "off") return `${parts[0]}（已禁用，不会停下）`;
+  if (bp.group) parts.push(`组：${bp.group}`);
   if (bp.logMessage) parts.push(`日志断点：${bp.logMessage}`);
   if (bp.condition) parts.push(`条件：${bp.condition}`);
   if (bp.hitCondition) parts.push(`命中次数：${bp.hitCondition}`);
@@ -91,6 +99,37 @@ function applyStopped(editor: Editor): { clear(): void } | null {
 }
 
 /**
+ * 暂停行的行尾内联变量值（IDEA 调试内联提示）。
+ *
+ * 只画当前选中帧那一行：文案来自快照里已拉到的 scopes/variables，异步展开途中
+ * 会随每次 setFor 重画（subscribeDebug 已经覆盖这些变化）。没有可显示的变量时
+ * 返回 null——不画空尾巴。
+ */
+function applyInlineValues(editor: Editor): { clear(): void } | null {
+  const model = editor.getModel();
+  if (!model) return null;
+  const path = pathOfModel(model);
+  if (!path) return null;
+  const snap = getDebugSnapshot();
+  if (!snap.paused || !snap.frameId) return null;
+  const frame = snap.frames.find((f) => f.id === snap.frameId);
+  if (!frame?.source?.path || norm(frame.source.path) !== norm(path)) return null;
+  const hints = inlineValueHints(frame, snap.scopes, snap.variables);
+  if (hints.length === 0) return null;
+  const collection = editor.createDecorationsCollection();
+  collection.set(
+    hints.map((h) => ({
+      range: new monaco.Range(h.line, 1, h.line, 1),
+      options: {
+        after: { content: `  ${h.label}`, inlineClassName: "ncforge-debug-inline" },
+        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+      },
+    })),
+  );
+  return collection;
+}
+
+/**
  * 给编辑器挂上断点点位与暂停行装饰，返回清理函数。
  *
  * 切 model（换文件）必须重算：装饰挂在具体 model 上，换文件后旧装饰不会跟着走。
@@ -98,12 +137,15 @@ function applyStopped(editor: Editor): { clear(): void } | null {
 export function attachDebugGutter(editor: Editor): () => void {
   let bps: { clear(): void } | null = null;
   let stopped: { clear(): void } | null = null;
+  let inline: { clear(): void } | null = null;
 
   const apply = () => {
     bps?.clear();
     stopped?.clear();
+    inline?.clear();
     bps = applyBreakpoints(editor);
     stopped = applyStopped(editor);
+    inline = applyInlineValues(editor);
   };
 
   apply();
@@ -129,5 +171,6 @@ export function attachDebugGutter(editor: Editor): () => void {
     offClick.dispose();
     bps?.clear();
     stopped?.clear();
+    inline?.clear();
   };
 }

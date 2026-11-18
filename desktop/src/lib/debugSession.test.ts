@@ -16,14 +16,18 @@ vi.mock("./tauri", () => ({
 
 import {
   MAX_DEBUG_WATCHES,
+  __emitDebugEventForTest,
   __setDebugFrameForTest,
   addWatch,
   clearConsole,
+  dropFrame,
   evaluateConsole,
   expandVariables,
   getDebugSnapshot,
   removeWatch,
   selectFrame,
+  setSuspendAll,
+  __setDebugStatusForTest,
 } from "./debugSession";
 
 const clearWatches = () => {
@@ -168,5 +172,131 @@ describe("调试控制台与变量分页", () => {
       count: 100,
     });
     expect(getDebugSnapshot().variables[9].map((v) => v.name)).toEqual(["0", "1", "2"]);
+  });
+});
+
+describe("适配器通知（usernotification）", () => {
+  // condition / logMessage 是命中时才编译的，运行时报错只从 usernotification 来：
+  // 不接就是「莫名停住」或「日志断点没反应」。见 breakpointCondition.ts 注释。
+  it("求值失败的通知落到控制台，带级别前缀", () => {
+    __emitDebugEventForTest("usernotification", {
+      notificationType: "ERROR",
+      message: "Breakpoint condition 'a = b' error: Syntax error",
+    });
+
+    const entries = getDebugSnapshot().console;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ expression: "适配器通知", pending: false });
+    expect(entries[0].error).toContain("【错误】");
+    expect(entries[0].error).toContain("Breakpoint condition");
+  });
+
+  it("WARNING 用警告前缀；空消息不入列", () => {
+    __emitDebugEventForTest("usernotification", {
+      notificationType: "WARNING",
+      message: "Result of breakpoint condition 'x' is not a boolean, please correct your expression.",
+    });
+    __emitDebugEventForTest("usernotification", { notificationType: "ERROR", message: "   " });
+    __emitDebugEventForTest("usernotification", null);
+
+    const entries = getDebugSnapshot().console;
+    expect(entries).toHaveLength(1);
+    expect(entries[0].error).toContain("【警告】");
+    expect(entries[0].error).toContain("is not a boolean");
+  });
+});
+
+describe("Drop Frame（重置栈帧）", () => {
+  it("暂停时下发 restartFrame；适配器拒绝时原话进 error", async () => {
+    __setDebugFrameForTest(7);
+    mocks.invoke.mockResolvedValue({});
+
+    await dropFrame(7);
+    expect(mocks.invoke).toHaveBeenCalledWith("debug_restart_frame", { target: "server", frameId: 7 });
+
+    mocks.invoke.mockRejectedValueOnce(new Error("Current stack frame doesn't support restart."));
+    await dropFrame(7);
+    expect(getDebugSnapshot().error).toContain("doesn't support restart");
+  });
+
+  it("未暂停时不下发", async () => {
+    await dropFrame(7);
+    expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("挂起策略（停住时挂起全部线程）", () => {
+  // 适配器默认 EVENT_THREAD 只停命中线程；这里用现成 pause/continue 请求补齐
+  // 「停全部 / 统一恢复」，不依赖适配器新能力（0.32.0 无 per-breakpoint suspend policy）。
+  const threadsMock = () => {
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "debug_threads") {
+        return { threads: [{ id: 7, name: "main" }, { id: 12, name: "worker" }, { id: 13, name: "worker-2" }] };
+      }
+      if (cmd === "debug_stack_trace") return { stackFrames: [] };
+      return {};
+    });
+  };
+  const calls = (cmd: string) => mocks.invoke.mock.calls.filter((c) => c[0] === cmd);
+
+  beforeEach(() => {
+    __setDebugStatusForTest("server", "attached");
+    // 清掉上一个用例留下的「代为挂起」记账（continued 会统一放行并清空集合）
+    __emitDebugEventForTest("continued", { threadId: 0 });
+  });
+
+  it("默认开启：停住后把其余线程逐一 pause（顺序即线程表顺序）", async () => {
+    threadsMock();
+    __emitDebugEventForTest("stopped", { threadId: 7, reason: "breakpoint" });
+
+    await vi.waitFor(() => {
+      const pauses = calls("debug_pause");
+      expect(pauses.map((c) => (c[1] as { threadId: number }).threadId)).toEqual([12, 13]);
+      expect(pauses.every((c) => (c[1] as { target: string }).target === "server")).toBe(true);
+    });
+  });
+
+  it("代为 pause 的线程自己的 stopped 事件不切上下文", async () => {
+    threadsMock();
+    __emitDebugEventForTest("stopped", { threadId: 7, reason: "breakpoint" });
+    await vi.waitFor(() => expect(calls("debug_pause").length).toBe(2));
+
+    __emitDebugEventForTest("stopped", { threadId: 12, reason: "pause" });
+
+    expect(getDebugSnapshot().threadId).toBe(7);
+    expect(getDebugSnapshot().stopReason).toBe("breakpoint");
+  });
+
+  it("continued 时把代为挂起的线程统一放行", async () => {
+    threadsMock();
+    __emitDebugEventForTest("stopped", { threadId: 7, reason: "breakpoint" });
+    await vi.waitFor(() => expect(calls("debug_pause").length).toBe(2));
+
+    mocks.invoke.mockClear();
+    __emitDebugEventForTest("continued", { threadId: 7 });
+
+    await vi.waitFor(() => {
+      const continues = calls("debug_continue");
+      expect(continues.map((c) => (c[1] as { threadId: number }).threadId)).toEqual([12, 13]);
+    });
+    expect(getDebugSnapshot().paused).toBe(false);
+  });
+
+  it("关掉偏好后只停当前线程，恢复时也不多发 continue", async () => {
+    setSuspendAll(false);
+    try {
+      threadsMock();
+      __emitDebugEventForTest("stopped", { threadId: 7, reason: "breakpoint" });
+      await vi.waitFor(() => expect(calls("debug_threads").length).toBe(1));
+      await new Promise((r) => setTimeout(r, 30)); // 等异步链走完
+      expect(calls("debug_pause")).toHaveLength(0);
+
+      mocks.invoke.mockClear();
+      __emitDebugEventForTest("continued", { threadId: 7 });
+      await new Promise((r) => setTimeout(r, 30));
+      expect(calls("debug_continue")).toHaveLength(0);
+    } finally {
+      setSuspendAll(true);
+    }
   });
 });

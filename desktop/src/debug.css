@@ -35,6 +35,16 @@
   background: hsl(var(--warning) / 0.14);
 }
 
+/* 暂停行行尾的内联变量值（IDEA 调试内联提示）：与 Error Lens 同一套路——
+   斜体灰字、不折行、不占布局宽度 */
+.ncforge-debug-inline {
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-style: italic;
+  opacity: 0.92;
+  white-space: pre;
+}
+
 .ncforge-debug-arrow::before {
   content: "";
   display: block;
@@ -682,8 +692,16 @@
   opacity: 0;
 }
 
+.dbg-frame-drop {
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+}
+
 .dbg-frame-row:hover .dbg-frame-copy,
-.dbg-frame-row:focus-within .dbg-frame-copy {
+.dbg-frame-row:focus-within .dbg-frame-copy,
+.dbg-frame-row:hover .dbg-frame-drop,
+.dbg-frame-row:focus-within .dbg-frame-drop {
   opacity: 1;
 }
 
@@ -762,9 +780,22 @@
 .dbg-bp-col {
   display: flex;
   flex-direction: column;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
-  height: 100%;
+}
+
+/* 字段观察点停在断点列下方：内容矮时只占需要的高度（最高 46%），长了内部滚动 */
+.dbg-wp-dock {
+  display: flex;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 46%;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.dbg-wp-dock > .dbg-bp-col {
+  flex: 1 1 auto;
 }
 
 .dbg-bp-group + .dbg-bp-group {
@@ -839,6 +870,186 @@
   color: hsl(var(--primary));
 }
 
+/* ── 字段观察点 ─────────────────────────────────────────────────────────────
+   行结构复用断点行（.dbg-bp-row / .dbg-bp-check / .dbg-bp-act），只补三件：
+   类.字段名、verified 小圆点、访问类型循环徽标。 */
+.dbg-wp-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: hsl(var(--foreground));
+}
+
+.dbg-wp-name[data-ok] {
+  color: hsl(var(--primary));
+}
+
+.dbg-wp-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: hsl(var(--muted-foreground) / 0.45);
+}
+
+.dbg-wp-dot[data-ok] {
+  background: hsl(var(--primary));
+}
+
+.dbg-wp-access {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  background: hsl(var(--card));
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  line-height: 15px;
+  cursor: pointer;
+}
+
+.dbg-wp-access:hover {
+  background: hsl(var(--secondary));
+}
+
+/* 访问类型三种色调：读偏信息色、写偏告警色、读写最重（两者都观察） */
+.dbg-wp-access[data-kind="read"] {
+  background: hsl(var(--primary) / 0.13);
+  color: hsl(var(--primary));
+}
+
+.dbg-wp-access[data-kind="write"] {
+  background: hsl(var(--destructive) / 0.13);
+  color: hsl(var(--destructive-ink));
+}
+
+.dbg-wp-access[data-kind="readWrite"] {
+  background: hsl(var(--primary) / 0.22);
+  color: hsl(var(--primary));
+  border-color: hsl(var(--primary) / 0.4);
+}
+
+/* 断点分组 chip 行：组名 + 条数，点一下整组启用/禁用（IDEA 的组开关同语义） */
+.dbg-bp-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 4px 6px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.dbg-bp-gchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dbg-bp-gchip:hover {
+  background: hsl(var(--secondary));
+}
+
+/* 组禁用：chip 置灰加删除线，和行内置灰一个语气 */
+.dbg-bp-gchip[data-off] {
+  color: hsl(var(--muted-foreground));
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.dbg-bp-gchip-count {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+}
+
+.dbg-bp-gchip[data-off] .dbg-bp-gchip-count {
+  text-decoration: none;
+}
+
+/* chip 里的组名本体：撑满剩余宽度，点它 = 整组开关 */
+.dbg-gchip-name {
+  min-width: 0;
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* 重命名 / 解散：与断点行的行内操作同款——悬停才出现 */
+.dbg-gchip-act {
+  width: 16px;
+  height: 16px;
+  opacity: 0;
+}
+
+.dbg-bp-gchip:hover .dbg-gchip-act,
+.dbg-bp-gchip:focus-within .dbg-gchip-act {
+  opacity: 1;
+}
+
+/* 重命名中的 chip：就地变成输入框，不弹对话框 */
+.dbg-bp-gchip-rename {
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid hsl(var(--ring));
+  border-radius: 999px;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 11px;
+}
+
+/* 行尾的组徽标：与条件/日志徽标同族，换个色系（primary 的低透明度底） */
+.dbg-bp-badge[data-kind="group"] {
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 静音条：全局静音时的一条提示，说明「点还在、一个都不停」 */
+.dbg-bp-muted {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--warning) / 0.12);
+  color: hsl(var(--warning-ink));
+  font-size: 11px;
+}
+
+.dbg-bp-muted-act {
+  margin-left: auto;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .dbg-bp-act {
   width: 22px;
   height: 22px;
@@ -883,6 +1094,17 @@
 
 .dbg-bp-edit input:focus {
   border-color: hsl(var(--ring));
+}
+
+/* 字段级校验错误：红框 + 行下红字（适配器不校验，这里挡在保存前） */
+.dbg-bp-edit label[data-err] input {
+  border-color: hsl(var(--destructive));
+}
+
+.dbg-bp-field-err {
+  font-size: 11px;
+  line-height: 1.4;
+  color: hsl(var(--destructive-ink));
 }
 
 .dbg-bp-edit-actions {
@@ -969,6 +1191,18 @@
 
 .dbg-var-row:hover .dbg-var-edit,
 .dbg-var-row:focus-within .dbg-var-edit {
+  opacity: 1;
+}
+
+/* 字段行的「眼睛」：装观察点。与改写按钮同模式（悬停显现），避免行尾太挤 */
+.dbg-var-watch {
+  width: 20px;
+  height: 20px;
+  opacity: 0;
+}
+
+.dbg-var-row:hover .dbg-var-watch,
+.dbg-var-row:focus-within .dbg-var-watch {
   opacity: 1;
 }
 
@@ -1103,6 +1337,13 @@
 /* ── 行号槽：禁用 / 日志 / 条件断点 ──────────────────────────────────────── */
 /* 禁用：灰空心圆，和「未落点」的红色虚线区分开 */
 .ncforge-bp-glyph-disabled::before {
+  background: transparent;
+  border: 1.5px solid hsl(var(--muted-foreground) / 0.6);
+}
+
+/* 静音 / 组禁用：与单个禁用同形（灰空心）。全局静音时一排灰点，
+   语义（为什么没生效）看悬停说明——颜色不再多一种，免得多一套记忆 */
+.ncforge-bp-glyph-muted::before {
   background: transparent;
   border: 1.5px solid hsl(var(--muted-foreground) / 0.6);
 }

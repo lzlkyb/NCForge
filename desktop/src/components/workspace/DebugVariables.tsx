@@ -6,10 +6,14 @@
 //
 // 集合类父节点带 `indexedVariables` 总数，取满一页后给「加载更多」；
 // 暂停时也可以改写变量的值（只改 JVM 现场，不改源码）。
+// 展开对象的字段行还给一个「眼睛」：给这个字段装观察点（watchpoint）。
+// 🔴 只开在 depth ≥ 1 的行：java-debug 的 dataBreakpointInfo 要求引用能解析到
+// ObjectReference，局部变量（StackFrameReference）会直接被适配器拒绝。
 import { useState } from "react";
 import { Icon } from "../ui/icon";
 import { errorToast } from "../../lib/errorToast";
-import { expandVariables, setVariableValue } from "../../lib/debugSession";
+import { toast } from "../ui/toast";
+import { expandVariables, setVariableValue, watchField } from "../../lib/debugSession";
 import type { DapScope, DapVariable } from "../../lib/debug";
 
 const MAX_DEPTH = 6;
@@ -54,6 +58,17 @@ function VarRow({
     );
   };
 
+  // 字段行（depth ≥ 1）才能装观察点：父引用此时是对象引用，局部变量不是
+  const canWatch = depth >= 1 && parentRef > 0;
+  const watch = () => {
+    void watchField(parentRef, v.name)
+      .then((r) => {
+        if (r === "added") toast(`已观察字段 ${v.name}：被读写时会停下`, "success");
+        else toast(`字段 ${v.name} 已在观察列表中`, "success");
+      })
+      .catch((e) => errorToast(`观察字段 ${v.name}`, e));
+  };
+
   return (
     <>
       <div className="dbg-var-row">
@@ -76,6 +91,16 @@ function VarRow({
         <button type="button" className="dbg-icon-btn dbg-var-edit" title="改写这个变量的值" onClick={beginEdit}>
           <Icon name="edit" size={10} />
         </button>
+        {canWatch && (
+          <button
+            type="button"
+            className="dbg-icon-btn dbg-var-watch"
+            title={`观察字段 ${v.name} 的读写：被访问或改写时停下`}
+            onClick={watch}
+          >
+            <Icon name="eye" size={10} />
+          </button>
+        )}
       </div>
       {editing && (
         <div className="dbg-var-edit-row" style={{ paddingLeft: 26 + depth * 14 }}>
