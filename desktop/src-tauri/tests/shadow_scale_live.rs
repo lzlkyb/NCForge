@@ -359,10 +359,9 @@ fn lib_module(line: &str) -> Option<String> {
     let p = rest[..end].replace('\\', "/");
     let tail = if let Some(t) = p.strip_suffix("/classes") {
         t
-    } else if let Some(i) = p.rfind("/out/") {
-        &p[i + "/out/".len()..]
     } else {
-        return None;
+        let i = p.rfind("/out/")?;
+        &p[i + "/out/".len()..]
     };
     if tail.is_empty() || tail.contains('/') {
         return None;
