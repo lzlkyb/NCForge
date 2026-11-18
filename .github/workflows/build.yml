@@ -474,8 +474,21 @@ jobs:
         run: npm ci
         working-directory: desktop
 
+      # 🔴 以下三个 release 步骤都关掉 sccache（RUSTC_WRAPPER 置空 = cargo 直接调 rustc）。
+      # 根因同上面 test job 的 cargo test：编译 nc_forge 的 release 命令行带 292 个
+      # `-L dependency=…\target\release\build\<crate>\<hash>\out`，实测整条 41888 字符，
+      # 超 Windows 32767 的 CreateProcess 上限；sccache 转手 spawn rustc 时越界，
+      # 报 `The filename or extension is too long. (os error 206)`，编译直接失败
+      # （2026-11-18 v0.6.0 连续两次 tag 构建死在这一步，测试/产物全没出来）。
+      # cargo 自己 spawn 同样的命令没问题（同一棵树本地 release 全绿）——它走 @response
+      # file，sccache 不走。依赖 crate 的命令行短本可以继续吃缓存，但同一步里没法只对
+      # nc_forge 一个 crate 关 wrapper，故整步置空；冷编译代价由 rust-cache 的
+      # target/release 目录缓存兜（跨 run 命中后 cargo 只验指纹，不重编）。
+
       # 用 release profile 跑测试，编译出的 release 依赖产物直接被下面 tauri build 复用。
       - name: cargo test (release, 复用后续 build 的编译产物)
+        env:
+          RUSTC_WRAPPER: ""
         run: cargo test --release --no-default-features
         working-directory: desktop/src-tauri
 
@@ -483,10 +496,14 @@ jobs:
       # CI 上没有真实 NC_HOME，只跑合成语料（典型主子表 + 100×50 病态样本），
       # 断言 P95/硬上限；超预算直接失败并打印阶段耗时。
       - name: 生成性能门禁 (release, 合成语料)
+        env:
+          RUSTC_WRAPPER: ""
         run: cargo test --release --no-default-features --test bmf_gen_perf -- --ignored --nocapture --test-threads=1
         working-directory: desktop/src-tauri
 
       - name: Build Tauri desktop app (NSIS installer)
+        env:
+          RUSTC_WRAPPER: ""
         shell: pwsh
         run: |
           # Workaround for https://github.com/npm/cli/issues/4828 — Tauri CLI 的 Windows native binding
