@@ -45,7 +45,7 @@ fn 跨模块jdt目标改写为工作区源码_对照未改写() {
     assert!(root.is_dir(), "工作区不存在：{}", root.display());
     let cache = test_support::tmp("nav-live");
     let index = workspace_types::shared(&root, &cache);
-    assert!(index.len() > 0, "工作区类型索引为空，无法对照");
+    assert!(!index.is_empty(), "工作区类型索引为空，无法对照");
     println!("索引类型数：{}", index.len());
 
     // 前提 1：工作区里真的有这个类的源码（否则「显示 jar」是正确行为，本测试无意义）
