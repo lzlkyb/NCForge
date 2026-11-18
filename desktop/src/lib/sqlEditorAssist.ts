@@ -11,6 +11,7 @@ import { sqlAssistObjectKey, sqlAssistScope, verifiedSqlSource } from "./sqlAssi
 import { snippetEscape } from "./sqlTemplates";
 import { isPlsql, splitStatements } from "./sqlSplit";
 import { forgetSqlUsage, recordSqlUsage, rollbackSqlUsage, setSqlUsagePinned, sqlUsageKey, usageSnapshot, type SqlUsageReceipt } from "./sqlUsage";
+import { addSnippet } from "./dbSnippets";
 import { listCommands } from "./commandRegistry";
 import { wireSqlBatchAssist } from "./sqlBatchAssist";
 import { wireSqlQueryCheckAssist } from "./sqlQueryCheckAssist";
@@ -270,7 +271,24 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
     if (forget) { forgetSqlUsage(state.scope, key); acceptedKeys.delete(key); toast("已忘记这张表的使用偏好", "success"); }
     else { const pinned = !usageSnapshot(state.scope)[key]?.pinned; setSqlUsagePinned(state.scope, key, pinned); toast(pinned ? "已固定到表名提示前列" : "已取消固定", "success"); }
   }
+  /**
+   * 保存为 SQL 片段：有选区存选区，无选区存光标所在语句。
+   * 不弹命名框——「随手存一条」多一步对话框就没人存了；名字由 SQL 首行兜底，
+   * 不满意去片段抽屉改名（那里也能改作用域）。
+   */
+  function saveSnippet() {
+    const state = current(editor);
+    if (!state) return;
+    const selection = editor.getSelection();
+    const picked = selection && !selection.isEmpty() ? state.model.getValueInRange(selection) : (splitStatements(state.sql).find(s => s.start <= state.offset && s.end >= state.offset)?.text ?? "");
+    const sql = picked.trim();
+    if (!sql) { toast("没有可保存的 SQL：选中一段，或把光标放进一条语句里", "info"); return; }
+    const saved = addSnippet({ name: "", sql, connId: state.connId, schema: state.schema });
+    toast(`已保存到 SQL 片段：${saved.name}`, "success");
+    editor.focus();
+  }
   for (const [id, label, run] of [
+    ["ncforge.sql.saveSnippet", "保存为 SQL 片段", saveSnippet],
     ["ncforge.sql.expandStar", "展开 * 为字段列表", () => fields(false)],
     ["ncforge.sql.insertTemplate", "生成 INSERT 模板", () => fields(true)],
     ["ncforge.sql.pinTable", "固定 / 取消固定当前表", () => memory(false)],

@@ -20,7 +20,7 @@ import { buildBillRelationChecks, buildIncomingDetailCountChecks } from "./sqlQu
 import { archiveExpansion, archiveProjectionAt, archiveRelations } from "./sqlArchiveExpansion";
 import { completionContext, sqlIdentifier } from "./sqlCompletionContext";
 import { sqlAssistSort, sqlMatchQuality, sqlSnippetText } from "./sqlAssistRanking";
-import { sqlAssistFunctions, sqlAssistKeywords } from "./sqlAssistDialect";
+import { sqlAssistFunctionsFor, sqlAssistKeywords } from "./sqlAssistDialect";
 import { sqlUsageKey, sqlUsageReason, sqlUsageScope } from "./sqlUsage";
 import { filterSnippets, listSnippets } from "./dbSnippets";
 import { clearSqlBusinessCache, peekSqlBusinessMetadata, readSqlBusinessMetadata, sqlConditionSuggestions, sqlEnumSuggestions, sqlJoinSuggestions, sqlRelatedQueries, type BusinessSuggestion } from "./sqlBusiness";
@@ -436,8 +436,10 @@ export async function provideSqlAssist(model: monaco.editor.ITextModel, position
   const cols = visible.flatMap(s => s.table ? fromColumns(s, loaded.get(s) ?? [], sources.length > 1) : derived(s, sources.length > 1));
   const archiveItems = (await Promise.all(visible.slice(0, 4).map(s => archives(s, loaded.get(s) ?? [])))).flat();
   const aliases: Item[] = visible.filter(s => match(s.alias ?? s.name) < 9).map(s => ({ label: { label: s.alias ?? s.name, description: `来源 ${s.tableRef ?? "查询输出"} · 输入 . 查看字段` }, kind: K.Variable, insertText: qualifierText(s), filterText: filter(s.alias ?? s.name), range, sortText: sqlAssistSort(match(s.alias ?? s.name), 3, s.name) }));
-  const functions: Item[] = sqlAssistFunctions(dialect).filter(f => match(f.name) < 9 && !["set", "order", "group"].includes(ctx.clause)).map(f => ({ label: { label: f.name, detail: `(${f.args.join(", ")})`, description: f.description }, kind: K.Function,
-    insertText: `${f.name}(${f.args.map((arg, i) => `\${${i + 1}:${arg}}`).join(", ")})`, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, filterText: filter(f.name), range, sortText: sqlAssistSort(match(f.name), 6, f.name), documentation: f.description }));
+  // 无前缀（Ctrl+空格）时函数按子句收窄，否则 58 个函数会把字段和表名挤出可见区；
+  // 有前缀就是在找函数，全量交前缀过滤。`SYSDATE` / `USER` 无参，不能补出 `SYSDATE()`。
+  const functions: Item[] = sqlAssistFunctionsFor(dialect, ctx.clause, !!prefix).filter(f => match(f.name) < 9 && !["set", "order", "group"].includes(ctx.clause)).map(f => ({ label: { label: f.name, detail: f.args.length ? `(${f.args.join(", ")})` : "", description: f.description }, kind: K.Function,
+    insertText: f.snippet ?? (f.args.length ? `${f.name}(${f.args.map((arg, i) => `\${${i + 1}:${arg}}`).join(", ")})` : f.name), insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, filterText: filter(f.name), range, sortText: sqlAssistSort(match(f.name), 6, f.name), documentation: f.description }));
   const keywords: Item[] = sqlAssistKeywords(ctx.clause, dialect).filter(k => match(k) < 9).map(k => ({ label: k, kind: K.Keyword, insertText: k, filterText: filter(k), range, sortText: sqlAssistSort(match(k), 7, k) }));
   const snippets: Item[] = prefix ? filterSnippets(listSnippets(connId ?? null), prefix).map(s => ({ label: { label: s.name, description: "已保存 SQL 片段" }, kind: K.Snippet, insertText: sqlSnippetText(s.sql), insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, filterText: filter(s.name), range, sortText: sqlAssistSort(match(s.name, s.sql), 5, s.name), documentation: { value: s.sql } })) : [];
   const projections: Item[] = ctx.projections.filter(name => match(name) < 9).map(name => ({ label: { label: name, description: "当前 SELECT 输出" }, kind: K.Field, insertText: sqlIdentifier(name, dialect), filterText: filter(name), range, sortText: sqlAssistSort(match(name), 0, name) }));

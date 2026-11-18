@@ -39,15 +39,19 @@ function fakeEditor(sql: string) {
   const handlers = new Map<string, (event?: unknown) => void>();
   const actions = new Map<string, { run: () => unknown }>();
   let offset = sql.length, value = sql, version = 1, focus = true;
+  let selection: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number; isEmpty?: () => boolean } | null = null;
   const model = {
     id: "tab", getValue: () => value, getVersionId: () => version, isDisposed: () => false,
     getPositionAt: (at: number) => { const lines = value.slice(0, at).split("\n"); return { lineNumber: lines.length, column: lines[lines.length - 1].length + 1 }; },
     getOffsetAt: (p: { lineNumber: number; column: number }) => value.split("\n").slice(0, p.lineNumber - 1).reduce((n, line) => n + line.length + 1, 0) + p.column - 1,
+    getValueInRange: (r: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }) =>
+      value.slice(model.getOffsetAt({ lineNumber: r.startLineNumber, column: r.startColumn }), model.getOffsetAt({ lineNumber: r.endLineNumber, column: r.endColumn })),
   };
   const listen = (id: string) => (fn: (event?: unknown) => void) => { handlers.set(id, fn); return { dispose: () => handlers.delete(id) }; };
   const snippet = { insert: vi.fn() }, executeEdits = vi.fn();
   const editor = {
     getModel: () => model, getPosition: () => model.getPositionAt(offset), hasTextFocus: () => focus,
+    getSelection: () => selection,
     onDidChangeModel: listen("model"), onDidChangeModelContent: listen("content"), onDidChangeCursorPosition: listen("cursor"),
     onDidChangeCursorSelection: listen("selection"),
     onDidCompositionStart: listen("composeStart"), onDidCompositionEnd: listen("composeEnd"),
@@ -60,6 +64,10 @@ function fakeEditor(sql: string) {
   return {
     editor: editor as unknown as monaco.editor.IStandaloneCodeEditor, spy: editor, model, actions, handlers, snippet, executeEdits,
     focus: (f: boolean) => { focus = f; },
+    select: (r: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number } | null) => {
+      selection = r ? { ...r, isEmpty: () => r.startLineNumber === r.endLineNumber && r.startColumn === r.endColumn } : null;
+      handlers.get("selection")?.();
+    },
     move: (at: number) => { offset = at; handlers.get("cursor")?.(); },
     change: (start: number, length: number, text: string, undo = false) => {
       const change: Change = { rangeOffset: start, rangeLength: length, text };
@@ -281,5 +289,30 @@ describe("SQL 编辑器习惯与辅助操作", () => {
     // 共用命令（accept / quickFix / runAction）留到最后一个编辑器注销；每个编辑器自己的选择命令先走。
     expect(u.usageSnapshot(scope)[key].accept).toBe(1); a.dispose(); expect(h.commands.size).toBe(4);
     b.dispose(); expect(h.commands.size).toBe(0);
+  });
+
+  it("保存为 SQL 片段：无选区存光标所在语句，有选区存选区，空内容只提示不存", async () => {
+    const sql = "SELECT code, name FROM bd_material WHERE dr = 0;\nSELECT 1 FROM dual;";
+    const fake = fakeEditor(sql);
+    await wire(fake);
+    const { listSnippets } = await import("./dbSnippets");
+    // 光标默认在文尾（第二条语句里）→ 存第二条（splitStatements 的文本不含分号）
+    await fake.actions.get("ncforge.sql.saveSnippet")!.run();
+    expect(listSnippets("conn").map(s => s.sql)).toEqual(["SELECT 1 FROM dual"]);
+    expect(h.toast).toHaveBeenLastCalledWith(expect.stringContaining("已保存到 SQL 片段"), "success");
+    // 选中第一段 → 存选区原样（两端空白修掉；选中的分号保留，与语句路径不同）
+    fake.select({ startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 49 });
+    await fake.actions.get("ncforge.sql.saveSnippet")!.run();
+    expect(listSnippets("conn").map(s => s.sql)).toEqual(["SELECT code, name FROM bd_material WHERE dr = 0;", "SELECT 1 FROM dual"]);
+    // 光标挪到两条语句之间的空白处（第 1 行行尾的分号后）也不炸，落到相邻语句
+    fake.move(sql.indexOf(";") + 1);
+    await fake.actions.get("ncforge.sql.saveSnippet")!.run();
+    expect(listSnippets("conn")).toHaveLength(3);
+    // 空编辑器：没有可保存的内容，只提示
+    const blank = fakeEditor("   \n  ");
+    await wire(blank);
+    await blank.actions.get("ncforge.sql.saveSnippet")!.run();
+    expect(h.toast).toHaveBeenLastCalledWith(expect.stringContaining("没有可保存的 SQL"), "info");
+    expect(listSnippets("conn")).toHaveLength(3);
   });
 });
