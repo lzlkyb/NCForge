@@ -8,7 +8,7 @@ import { useSvnWrite } from "../../lib/svnWrite";
 import { svnConflictSnapshot, svnResolveWorking } from "../../lib/svnHistory";
 import { friendlySvnError, type ChangeItem } from "../../lib/svn";
 import { SvnDiffEditor } from "./SvnDiffEditor";
-import { svnDiffLanguage } from "./DiffPane";
+import { svnDiffLanguage } from "../../lib/svnDiffLanguage";
 import "../../svn-history.css";
 type Choice = "mine" | "theirs" | "base";
 const tags: Record<Choice, string> = { mine: "我的内容", base: "基线内容", theirs: "服务器内容" };
@@ -37,7 +37,7 @@ export function ConflictPane({ file, busy, onResolve, onOpenFile, onLater }: { f
     {query.error && <div className="vc-alert" data-tone="warn"><span>{friendlySvnError(query.error)}</span><button className="vc-btn" disabled={query.isFetching} onClick={() => void query.refetch()}>重试</button></div>}
     {data && <><div className="vc-conflict-notice vc-alert" data-tone={supported ? "info" : "warn"}>{data.treeConflict ? "这是树冲突，请在 SVN 客户端处理路径移动或删除关系。" : data.propertyConflict ? "包含属性冲突，请在 SVN 客户端处理属性后重新扫描。" : binary ? "这是二进制冲突，文本预览与手工合并不可用，请在 SVN 客户端处理。" : !data.textConflict ? "文本冲突已经解除，请刷新改动列表。" : "先核对真实副本，再选择最终内容。只有确认解决才会写入；写入前备份副本与当前工作文件。"}</div>
       <div className="vc-conflict-options">{(["mine", "base", "theirs"] as Choice[]).map(role => { const version = data[role]; return <div className="vc-conflict-option" key={role}><button className="vc-btn" data-on={preview === role || undefined} disabled={!version || version.binary} onClick={() => setPreview(role)}>{tags[role]}{version && version.revision > 0 ? ` · r${version.revision}` : ""}</button><span className="vc-hint" title={version?.name}>{version?.name ?? "无此副本"}</span><button className="vc-btn" aria-pressed={choice === role} disabled={locked || !supported || !version} onClick={() => setChoice(role)}>{choice === role ? "已选作最终内容" : "选作最终内容"}</button></div>; })}</div>
-      {supported && viewed && data.base && <SvnDiffEditor original={data.base.text} modified={viewed.text} sourceKey={`conflict:${root}:${epoch}:${file.path}:${preview}`} root={root} language={svnDiffLanguage(file.path)} originalLabel={`基线 ${data.base.revision > 0 ? `r${data.base.revision}` : data.base.name}`} modifiedLabel={`${tags[preview]} ${viewed.revision > 0 ? `r${viewed.revision}` : viewed.name}`} />}
+      {supported && viewed && data.base && <SvnDiffEditor original={data.base.text} modified={viewed.text} sourceKey={`conflict:${root}:${epoch}:${file.path}:${preview}`} root={root} language={svnDiffLanguage(file.path, viewed.text || data.base.text)} originalLabel={`基线 ${data.base.revision > 0 ? `r${data.base.revision}` : data.base.name}`} modifiedLabel={`${tags[preview]} ${viewed.revision > 0 ? `r${viewed.revision}` : viewed.name}`} />}
       <div className="vc-commit-foot"><button className="vc-btn" disabled={locked} onClick={onLater}>稍后处理</button><span className="vc-sp" /><button className="vc-btn" disabled={locked || !supported || !data.workingReadable || data.workingHasMarkers} onClick={() => void keepWorking()} title={data.workingHasMarkers ? "工作副本仍含冲突标记：先完成手工合并、保存并刷新副本" : "保留已保存的工作副本正文，备份后只解除文本冲突"}>{saving ? "验证与备份中…" : "保留手工合并结果"}</button><button className="vc-btn vc-btn-primary" disabled={locked || !supported || !choice || query.isFetching} onClick={() => choice && onResolve(choice)}>确认使用所选版本</button></div>
     </>}
   </section>;

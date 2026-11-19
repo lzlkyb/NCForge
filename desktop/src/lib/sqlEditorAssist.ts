@@ -20,12 +20,14 @@ import { wireSqlBillAssist } from "./sqlBillAssist";
 import { wireSqlSelectionAssist } from "./sqlSelectionAssist";
 import { wireSqlAssistGhost } from "./sqlAssistGhost";
 import { peekSqlBusinessMetadata, readSqlBusinessMetadata } from "./sqlBusiness";
+import { recordAssistAccept } from "./sqlAssistStats";
 import { toast } from "../components/ui/toast";
 
 type Editor = monaco.editor.IStandaloneCodeEditor;
-interface AcceptArgs { scope: string; key: string; followOperator?: boolean }
+interface AcceptArgs { scope: string; key: string; followOperator?: boolean; source?: string }
 const accepts = new Map<Editor, (args: AcceptArgs) => void>();
 let acceptCommand: monaco.IDisposable | undefined;
+let acceptStatCommand: monaco.IDisposable | undefined;
 /** 补全列表里的动作条目只能带命令 id：命令执行时按焦点找到编辑器，交给它的 CodeAction 菜单。 */
 const quickFixers = new Map<Editor, () => void>();
 let quickFixCommand: monaco.IDisposable | undefined;
@@ -163,7 +165,13 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
   });
   if (!acceptCommand) acceptCommand = monaco.editor.registerCommand("ncforge.sql.accept", (_accessor, args: AcceptArgs) => {
     if (!args || typeof args.scope !== "string" || typeof args.key !== "string") return;
+    // 质量统计先于使用记忆的校验：学习关闭或 scope 失配时接受仍然计数。
+    if (typeof args.source === "string") recordAssistAccept(args.source);
     for (const [candidate, accept] of accepts) if (candidate.hasTextFocus()) { accept(args); break; }
+  });
+  // 没有使用记忆键的条目（模板/业务建议/函数/关键字等）只挂这条纯统计命令。
+  if (!acceptStatCommand) acceptStatCommand = monaco.editor.registerCommand("ncforge.sql.acceptStat", (_accessor, args: { source?: string }) => {
+    if (args && typeof args.source === "string") recordAssistAccept(args.source);
   });
   // 补全列表末尾的「动作」条目只带命令 id，真正的菜单仍由 Monaco 的 CodeAction 出：
   // 这里只负责把焦点编辑器交出去，判定与实现都留在原 provider 里，不复制一份。
@@ -363,7 +371,7 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
     if (quick) editor.updateOptions({ quickSuggestions: quick });
     disposables.forEach(d => d.dispose()); accepts.delete(editor); reset();
     quickFixers.delete(editor); actionRunners.delete(editor);
-    if (!accepts.size) { acceptCommand?.dispose(); acceptCommand = undefined; }
+    if (!accepts.size) { acceptCommand?.dispose(); acceptCommand = undefined; acceptStatCommand?.dispose(); acceptStatCommand = undefined; }
     if (!quickFixers.size) { quickFixCommand?.dispose(); quickFixCommand = undefined; }
     if (!actionRunners.size) { runActionCommand?.dispose(); runActionCommand = undefined; }
   } };

@@ -1,11 +1,20 @@
 import type { FlatSymbol } from "./symbols";
+import { fileFormat } from "./fileFormats";
 
-const kinds = { endpoint: 201, component: 202, node: 203 };
-const labels: Record<number, string> = { 201: "端点", 202: "组件", 203: "节点" };
+/** XML 族符号类别。204 给 upm 私有装配（`<private>` 层），与公开组件区分。 */
+export const ncKinds = { endpoint: 201, component: 202, node: 203, privateComponent: 204 };
+const labels: Record<number, string> = { 201: "端点", 202: "组件", 203: "节点", 204: "私有组件" };
 export const ncDeclarationLabel = (kind: number): string | undefined => labels[kind];
 
-export function isNcDeclaration(path: string): boolean {
-  return /\.(?:rest|upm)$/i.test(path);
+/**
+ * XML 族格式判定：从格式真源（`fileFormats`）派生，不再硬编码扩展名。
+ * 覆盖 xml/upm/bmf/bpf/rest/aop/mbe/mbp/xsd 与长尾 NC 设计模型等全部
+ * 映射到 xml / xml-content 的格式；标签大纲、面包屑、符号面板共用这一处。
+ * 端点/组件之外的标签一律按「节点」处理，通用 XML 也适用。
+ */
+export function isXmlFamily(path: string): boolean {
+  const { language } = fileFormat(path);
+  return language === "xml" || language === "xml-content";
 }
 
 // Scan tags only. Comments, CDATA, quoted > signs and DOCTYPE subsets must not create phantom rows.
@@ -39,12 +48,12 @@ export function ncDeclarationOutline(text: string): FlatSymbol[] {
       continue;
     }
     const local = qualified.slice(qualified.lastIndexOf(":") + 1);
-    const kind = /^(?:rest)?endpoint$/i.test(local) ? kinds.endpoint
-      : /^(?:upm)?component$/i.test(local) ? kinds.component : kinds.node;
+    const kind = /^(?:rest)?endpoint$/i.test(local) ? ncKinds.endpoint
+      : /^(?:upm)?component$/i.test(local) ? ncKinds.component : ncKinds.node;
     const attrs = new Map(Array.from(token.matchAll(/\s([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g),
       ([, key, double, single]) => [key.toLowerCase(), double ?? single]));
     const name = ["id", "xml:id", "name", "path", "uri", "service", "code"].map(key => attrs.get(key)?.trim()).find(Boolean);
-    const symbol: FlatSymbol | undefined = !open.length || name || kind !== kinds.node
+    const symbol: FlatSymbol | undefined = !open.length || name || kind !== ncKinds.node
       ? { name: name || local, kind, depth: ancestors.length, container: ancestors.map(s => s.name).join("."),
           line, column: match.index - lineStart + 1, startLine: line, endLine: line }
       : undefined;

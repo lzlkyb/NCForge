@@ -93,8 +93,13 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
             finally { setChecking(false); }
           }}>{checking ? "正在检查…" : "检查可用修复"}</button>}
         {fixes?.length === 0 && <span>没有找到可确认的替换。</span>}
-        {fixes?.map(fix => <button type="button" className="dbx-btn" key={fix.text}
-          onClick={() => { onApply?.(fix); setFixes(null); }}>替换为 {fix.text}</button>)}
+        {fixes?.map(fix => {
+          // 同一错列名可能出现多处（ORA-00904 每处都给修复）：同名候选要能区分、key 不能撞。
+          const twins = fixes.filter(other => other.text === fix.text);
+          const at = twins.length > 1 ? (() => { const before = sql.slice(0, fix.start); return `（第 ${before.split("\n").length} 行第 ${fix.start - before.lastIndexOf("\n")} 列）`; })() : "";
+          return <button type="button" className="dbx-btn" key={`${fix.start}:${fix.text}`}
+            onClick={() => { onApply?.(fix); setFixes(null); }}>替换为 {fix.text}{at}</button>;
+        })}
         {onLocate && <button type="button" className="dbx-btn" onClick={() => onLocate()}>定位 SQL 行</button>}
         {connId && ["ORA-00942","ORA-00904"].includes(ora ?? "") && tableRefs(sql).slice(0,1).map(t=><button key={t} type="button" className="dbx-btn" onClick={()=>void openTable(connId,t,"struct")}>查看 {t} 结构</button>)}
         {connId && ["ORA-00054","ORA-00060","ORA-01013"].includes(ora ?? "") && <button type="button" className="dbx-btn" onClick={()=>openSessionPanel(connId)}>查看会话与锁</button>}

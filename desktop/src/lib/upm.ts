@@ -61,6 +61,30 @@ export interface UpmHit {
   matchedBy: "interface" | "implementation";
 }
 
+/** 一条 `<component>`，与 Rust `nc_upm::UpmComponent` 的 serde 字段一一对应。 */
+export interface UpmComponent {
+  interface: string;
+  implementation: string;
+  /** `public` / `private`；不在任何层里则空串。 */
+  visibility: string;
+  remote: boolean;
+  singleton: boolean;
+  tx: string;
+  alias: boolean;
+  priority: number | null;
+}
+
+/** 一个 upm 文件的解析结果（`nc_upm_file`）。 */
+export interface UpmFile {
+  /** `<module name>` 声明的名字，仅作诊断用；归属真源是 `module`。 */
+  declaredModule: string;
+  /** 路径推出的模块名（`.../<模块>/META-INF/x.upm`）。 */
+  module: string;
+  path: string;
+  origin: "project" | "product";
+  components: UpmComponent[];
+}
+
 export const UPM_ISSUE_LABEL: Record<UpmIssueKind, string> = {
   "missing-impl": "实现类缺失",
   "missing-interface": "接口缺失",
@@ -90,6 +114,14 @@ export function upmIndex(opts: {
 /** 按类名查装配：接口名查实现，实现类名查它被谁装配。 */
 export function upmLookup(query: string, root?: string | null): Promise<UpmHit[]> {
   return trackOperation({ key: `upm.lookup:${root}:${query}`, label: "查找 UPM 装配", scope: root ?? "工作区", page: "linked", phase: "按类名读取装配注册" }, () => invoke<UpmHit[]>("nc_upm_lookup", { query, root: root ?? null }));
+}
+
+/**
+ * 单个 upm 文件的装配清单（代码页大纲）。
+ * `text` 传编辑器当前内容（含未保存修改）；不传则后端读磁盘。
+ */
+export function upmFile(path: string, text?: string): Promise<UpmFile> {
+  return invoke<UpmFile>("nc_upm_file", { path, text: text ?? null });
 }
 
 /** 装配表格里那一列「实现 / 修饰」的短描述。 */

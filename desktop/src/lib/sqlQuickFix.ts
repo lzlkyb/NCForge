@@ -39,19 +39,32 @@ export async function sqlQuickFixes(error: string, sql: string, tables: string[]
     if (tokens[i - 1]?.text === "." || tokens[i + 1]?.text === "@") return [];
     return similarTo(sqlName(token), tables).map(name => ({ start: token.start, end: token.end, text: format(name) }));
   }
-  if (hint?.location?.occurrences !== 1) return [];
-  const at = tokens.findIndex(t => t.kind === "identifier" && t.text.toUpperCase() === hint.location!.ident.toUpperCase());
-  if (at < 0) return [];
-  const token = tokens[at];
-  const role = analysis.roles.get(analysis.tokens.indexOf(token));
-  if (role && role !== "column" || tokens[at + 1]?.text === ".") return [];
-  const sources = sqlSourcesAt(analysis, token.start);
-  const qualifier = tokens[at - 2];
-  const source = tokens[at - 1]?.text === "." && qualifier
-    ? resolveSqlQualifier(analysis, token.start, sqlName(qualifier), qualifier.text)
-    : sources.length === 1 ? sources[0] : undefined;
-  if (!source || !local(source)) return [];
-  const names = await columns(source.table!);
-  if (names.some(name => name.toLowerCase() === sqlName(token))) return [];
-  return similarTo(sqlName(token), names).map(name => ({ start: token.start, end: token.end, text: format(name) }));
+  if (!hint?.location) return [];
+  // ORA-00904 报的是「这个名字不存在」：语句里每一处同名裸标识符都同样错，
+  // 全部给出修复（其余错误码的位置线索只有一处，仍要求唯一出现）。
+  const multi = hint.code === "ORA-00904";
+  if (!multi && hint.location.occurrences !== 1) return [];
+  const targets = tokens.filter(t => (t.kind === "identifier" || t.kind === "quoted") &&
+    (t.kind === "quoted" ? sqlName(t) : t.text).toUpperCase() === hint.location!.ident.toUpperCase());
+  const fixes: SqlQuickFix[] = [];
+  // 候选封顶：每处最多 3 个相似名，长脚本里几十处错列名会把错误框按钮堆爆。
+  // 截断后剩下的 occurrence 重新执行一次会再报再修，不会静默丢失。
+  const MAX_FIXES = 12;
+  for (const token of targets) {
+    if (fixes.length >= MAX_FIXES) break;
+    const at = tokens.indexOf(token);
+    const role = analysis.roles.get(analysis.tokens.indexOf(token));
+    if (role && role !== "column" || tokens[at + 1]?.text === ".") continue;
+    const sources = sqlSourcesAt(analysis, token.start);
+    const qualifier = tokens[at - 2];
+    const source = tokens[at - 1]?.text === "." && qualifier
+      ? resolveSqlQualifier(analysis, token.start, sqlName(qualifier), qualifier.text)
+      : sources.length === 1 ? sources[0] : undefined;
+    if (!source || !local(source)) continue;
+    const names = await columns(source.table!);
+    if (names.some(name => name.toLowerCase() === sqlName(token))) continue;
+    fixes.push(...similarTo(sqlName(token), names).map(name => ({ start: token.start, end: token.end, text: format(name) })));
+    if (!multi) break;
+  }
+  return fixes;
 }

@@ -336,14 +336,32 @@ describe("SQL 编辑器习惯与辅助操作", () => {
     const first = fakeEditor("SELECT * FROM bd_material"), second = fakeEditor("SELECT * FROM bd_material");
     const a = await wire(first), b = await wire(second); first.focus(false);
     expect(h.commands.has("ncforge.sql.accept")).toBe(true);
+    expect(h.commands.has("ncforge.sql.acceptStat")).toBe(true);
     expect(h.commands.has("ncforge.sql.quickFix")).toBe(true);
     // 补全列表里的单值动作（展开 * / INSERT 模板）走这条，落到同一个 editor action。
     expect(h.commands.has("ncforge.sql.runAction")).toBe(true);
     expect([...h.commands.keys()].filter(id => id.startsWith("ncforge.sql.chooseSummary."))).toHaveLength(2);
     const { u, scope, key } = await accept();
-    // 共用命令（accept / quickFix / runAction）留到最后一个编辑器注销；每个编辑器自己的选择命令先走。
-    expect(u.usageSnapshot(scope)[key].accept).toBe(1); a.dispose(); expect(h.commands.size).toBe(4);
+    // 共用命令（accept / acceptStat / quickFix / runAction）留到最后一个编辑器注销；每个编辑器自己的选择命令先走。
+    expect(u.usageSnapshot(scope)[key].accept).toBe(1); a.dispose(); expect(h.commands.size).toBe(5);
     b.dispose(); expect(h.commands.size).toBe(0);
+  });
+
+  it("补全质量统计：纯统计命令记接受，使用记忆关闭时 accept 带 source 仍计数", async () => {
+    const fake = fakeEditor("SELECT * FROM bd_material"); await wire(fake);
+    const s = await import("./sqlAssistStats"), u = await import("./sqlUsage"), l = await import("./sqlAssistLearning");
+    s.recordAssistOffers([{ ncforgeSource: "template" }, { ncforgeSource: "table" }]);
+    h.commands.get("ncforge.sql.acceptStat")!(null, { source: "template" });
+    expect(s.assistStatsSnapshot().sources.template).toEqual({ offers: 1, accepts: 1 });
+    // 反例：没有曝光的源不接受；坏参数不炸。
+    h.commands.get("ncforge.sql.acceptStat")!(null, { source: "keyword" });
+    h.commands.get("ncforge.sql.acceptStat")!(null, null);
+    expect(s.assistStatsSnapshot().sources.keyword).toBeUndefined();
+    // 学习关闭后接受仍然计入质量统计（统计与学习是两个开关）。
+    u.setSqlUsageEnabled(false);
+    h.commands.get("ncforge.sql.accept")!(null, { scope: l.sqlAssistScope("conn")!, key: u.sqlUsageKey("bd_material"), source: "table" });
+    expect(s.assistStatsSnapshot().sources.table).toEqual({ offers: 1, accepts: 1 });
+    expect(u.usageSnapshot(l.sqlAssistScope("conn")!)).toEqual({});
   });
 
   it("保存为 SQL 片段：无选区存光标所在语句，有选区存选区，空内容只提示不存", async () => {

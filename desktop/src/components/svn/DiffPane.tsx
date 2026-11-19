@@ -9,11 +9,7 @@ import { useBlockStrips } from "../../hooks/useBlockStrips";
 import { useSvnView } from "../../lib/svnSession";
 import { useSvnListPrefs } from "../../lib/svnListPrefs";
 import { useSvnDiffPrefs } from "../../lib/svnDiffPrefs";
-
-export function svnDiffLanguage(path: string): string {
-  const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
-  return ({ java: "java", xml: "xml", sql: "sql", js: "javascript", ts: "typescript", tsx: "typescript", html: "html", css: "css", md: "markdown", ini: "ini", properties: "ini" } as Record<string, string>)[ext] ?? "plaintext";
-}
+import { svnDiffLanguage } from "../../lib/svnDiffLanguage";
 
 export function DiffPane({ file, data, reviewed, onToggleReviewed, onOpenInEditor, onShowLog,
   onShowBlame, onMarkAndNext, onFocus, focused = false, disabled = false }: {
@@ -42,7 +38,7 @@ export function DiffPane({ file, data, reviewed, onToggleReviewed, onOpenInEdito
   const name = file.rel.slice(file.rel.lastIndexOf("/") + 1);
   const dir = file.rel.includes("/") ? file.rel.slice(0, file.rel.lastIndexOf("/")) : "";
   return <section className="vc-main vc-local-diff">
-    <SvnDiffEditor original={strip.original} modified={data.workingText} language={svnDiffLanguage(file.path)} root={root}
+    <SvnDiffEditor original={strip.original} modified={data.workingText} language={svnDiffLanguage(file.path, data.workingText || strip.original)} root={root}
       sourceKey={`local:${file.path.toLowerCase()}:r${file.revision}`} disabled={disabled} strips={strip.strips}
       originalLabel={diffPrefs.onlyNew ? "BASE + 已审的改动 · 只看新改动" : data.baseEmpty ? "无 BASE · 新文件" : `BASE r${file.revision > 0 ? file.revision : "?"}`}
       modifiedLabel={file.letter === "D" ? "工作副本 · 已删除" : "工作副本 · 只读"}

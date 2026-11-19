@@ -24,3 +24,15 @@ it("NC XML 跳转使用真实行列并跳过注释、CDATA 和 DTD 声明", () =
   expect(localDocumentOutline("example.upm", '<module><component id="orderService"/></module>').map(row => row.name))
     .toEqual(["module", "orderService"]);
 });
+
+it("大纲覆盖全部 XML 族（2026-11-19 扩展）：xml/bmf/长尾设计模型都有标签导航", () => {
+  const xml = '<beans>\n  <bean id="svc" class="a.B"/>\n</beans>';
+  for (const path of ["config.xml", "model.bmf", "flow.bpf", "templet.btf", "query.qtf", "reg.menu", "rule.bcf", "ui.umf", "view.fxml", "schema.xsd"]) {
+    expect(localDocumentOutline(path, xml).map(row => row.name), path).toEqual(["beans", "svc"]);
+  }
+  // 反例：非 XML 族不走标签大纲；嗅探格式的非 XML 正文不出幻影行
+  expect(localDocumentOutline("page.html", xml)).toEqual([]);
+  expect(localDocumentOutline("page.jsp", xml)).toEqual([]);
+  expect(localDocumentOutline("x.rest", "GET /orders")).toEqual([]);
+  expect(localDocumentOutline("x.btf", "不是 XML")).toEqual([]);
+});

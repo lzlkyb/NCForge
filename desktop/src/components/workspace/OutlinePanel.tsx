@@ -3,7 +3,7 @@ import { JavaSymbolIcon } from "./JavaSymbolIcon";
 import { Icon } from "../ui/icon";
 import { WorkspaceGlyph } from "./WorkspaceGlyph";
 import { useCursor } from "../../lib/cursorStore";
-import { isNcDeclaration, ncDeclarationLabel } from "../../lib/ncDeclarationOutline";
+import { isXmlFamily, ncDeclarationLabel } from "../../lib/ncDeclarationOutline";
 import { useLocalOutline } from "../../hooks/useLocalOutline";
 import { usePresence } from "../../hooks/usePresence";
 import { inLangModule, useLangView } from "../../lib/lang";
@@ -42,7 +42,7 @@ export function OutlinePanel({ open, onClose, path, mtimeMs, onJump, pinned = fa
   live.current = { onClose };
 
   const javaPath = path && path.toLowerCase().endsWith(".java") ? path : null;
-  const ncPath = path && isNcDeclaration(path) ? path : null;
+  const ncPath = path && isXmlFamily(path) ? path : null;
   const canAsk = !dirty && javaPath !== null && lang.state === "ready" && inLangModule(javaPath);
   const local = useLocalOutline(open ? javaPath || ncPath : null, mtimeMs);
 

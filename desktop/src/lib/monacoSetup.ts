@@ -11,6 +11,7 @@ import "monaco-editor/esm/vs/basic-languages/html/html.contribution";
 import "monaco-editor/esm/vs/basic-languages/css/css.contribution";
 import "monaco-editor/esm/vs/basic-languages/ini/ini.contribution";
 import "monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution";
+import { registerJsonLanguage } from "./monacoJson";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import { javaPalette, javaTokenRules } from "./javaColors";
 import { getStoredTheme, type Theme } from "./theme";
@@ -178,6 +179,7 @@ function wireTableHover(): void {
 /** 首次使用前调用：建主题并跟随壳子的 `themechange` 事件。幂等。 */
 export function initMonaco(): typeof monaco {
   registerSqlLanguages(monaco);
+  registerJsonLanguage(monaco);
   if (!themeWired) {
     themeWired = true;
     subscribeFonts(() => monaco.editor.remeasureFonts());

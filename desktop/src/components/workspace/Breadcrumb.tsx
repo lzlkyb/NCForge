@@ -4,7 +4,7 @@ import { WorkspaceGlyph } from "./WorkspaceGlyph";
 import { WorkspaceFileName } from "./WorkspaceFileName";
 import { EditorTabTypeIcon } from "./EditorTabTypeIcon";
 import { useLocalOutline } from "../../hooks/useLocalOutline";
-import { isNcDeclaration, ncDeclarationLabel } from "../../lib/ncDeclarationOutline";
+import { isXmlFamily, ncDeclarationLabel } from "../../lib/ncDeclarationOutline";
 import { useCursor } from "../../lib/cursorStore";
 import { inLangModule, navigate, useLangView } from "../../lib/lang";
 import { jdtDisplayName } from "../../lib/langConvert";
@@ -28,7 +28,7 @@ export function Breadcrumb({ root, active, showSymbols = true }: { root: string;
 
   // 非焦点组只显示文件路径，不能借用焦点组的光标显示另一个文件的符号位置。
   const javaPath = showSymbols && !active.virtual && active.path.toLowerCase().endsWith(".java") ? active.path : null;
-  const nc = showSymbols && !active.virtual && isNcDeclaration(active.path);
+  const nc = showSymbols && !active.virtual && isXmlFamily(active.path);
   const local = useLocalOutline(nc || javaPath ? active.path : null, active.mtimeMs);
   const canAsk = !active.dirty && javaPath !== null && lang.state === "ready" && inLangModule(javaPath);
   // 保存后 mtime 变了再取一次；边打字边取太费，符号链的最后一段在保存之前可能略旧，这是有意的

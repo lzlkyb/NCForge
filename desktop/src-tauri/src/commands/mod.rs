@@ -179,6 +179,7 @@ macro_rules! nc_forge_commands {
         $crate::commands::nc_manifest_audit,
         $crate::commands::nc_upm_index,
         $crate::commands::nc_upm_lookup,
+        $crate::commands::nc_upm_file,
         $crate::commands::fs_read_file,
         $crate::commands::fs_write_file,
         $crate::commands::fs_create,

@@ -564,22 +564,28 @@ impl Builder {
     }
 }
 
-/// 读一个工程里的 upm 文件（测试与其他调用方用）。
-pub fn read_file(path: &Path) -> Result<UpmFile, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("读取失败 {}: {e}", path.display()))?;
-    let (declared, components) = parse(&decode(&bytes));
+/// 用已解码的文本组装文件级结果。前端传编辑器当前内容（含未保存修改）时走这里，
+/// 与 `read_file` 共用同一套解析与模块名推导，口径不会分叉。
+pub fn from_text(path: &Path, text: &str) -> UpmFile {
+    let (declared, components) = parse(text);
     let module = path
         .parent()
         .and_then(|p| p.parent())
         .and_then(dir_name)
         .unwrap_or_default();
-    Ok(UpmFile {
+    UpmFile {
         declared_module: declared.unwrap_or_default(),
         module,
         path: path.to_string_lossy().to_string(),
         origin: UpmOrigin::Project,
         components,
-    })
+    }
+}
+
+/// 读一个工程里的 upm 文件（测试与其他调用方用）。
+pub fn read_file(path: &Path) -> Result<UpmFile, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("读取失败 {}: {e}", path.display()))?;
+    Ok(from_text(path, &decode(&bytes)))
 }
 
 fn dir_name(p: &Path) -> Option<String> {
@@ -998,6 +1004,22 @@ mod tests {
         );
         assert_eq!(f.components.len(), 1);
         assert_eq!(f.declared_module, "ic");
+    }
+
+    /// 前端大纲传编辑器文本走 from_text：与磁盘读取共用同一套解析与模块名推导。
+    #[test]
+    fn from_text_与磁盘读取同口径() {
+        let dir = tmpdir("fromtext");
+        let meta = dir.join("META-INF");
+        std::fs::create_dir_all(&meta).unwrap();
+        let text = r#"<module name="ic"><public><component tx="CMT"><interface>A</interface><implementation>B</implementation></component></public></module>"#;
+        std::fs::write(meta.join("a.upm"), text).unwrap();
+        let disk = read_file(&meta.join("a.upm")).unwrap();
+        let mem = from_text(&meta.join("a.upm"), text);
+        assert_eq!(mem.module, disk.module);
+        assert_eq!(mem.declared_module, disk.declared_module);
+        assert_eq!(mem.components, disk.components);
+        assert_eq!(mem.path, disk.path);
     }
 
     /// 扫描只认 `META-INF/*.upm`，同目录的 `.aop`/`.rest` 与更深层都不算。

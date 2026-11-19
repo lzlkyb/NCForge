@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Icon } from "../ui/icon";
 import { SvnDiffEditor } from "./SvnDiffEditor";
-import { svnDiffLanguage } from "./DiffPane";
+import { svnDiffLanguage } from "../../lib/svnDiffLanguage";
 import { isMarkable, letterTone, svnDiff, svnStatusLabel, type ChangeItem } from "../../lib/svn";
 import { readFile } from "../../lib/workspace";
 import { workspaceEpoch } from "../../lib/workspaceEpoch";
@@ -41,7 +41,7 @@ function DiffWithStrips({ it, root, ctxReq, disabled, onFileReviewed, original, 
   const stripPx = strip.strips.reduce((sum, s) => sum + s.height, 0);
   const height = `min(70vh, ${Math.max(200, (lines + 4) * LINE_PX + stripPx)}px)`;
   return <div className="vc-rq-diff" style={{ height }}>
-    <SvnDiffEditor original={strip.original} modified={modified} language={svnDiffLanguage(it.path)} root={root} strips={strip.strips}
+    <SvnDiffEditor original={strip.original} modified={modified} language={svnDiffLanguage(it.path, modified || strip.original)} root={root} strips={strip.strips}
       sourceKey={`req:${it.path.toLowerCase()}:r${it.revision}`} originalLabel={onlyNew ? "BASE + 已审的改动 · 只看新改动" : isNew ? "无 BASE · 新文件" : `BASE r${it.revision > 0 ? it.revision : "?"}`} modifiedLabel="工作副本 · 只读" />
   </div>;
 }

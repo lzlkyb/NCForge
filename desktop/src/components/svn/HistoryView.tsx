@@ -6,7 +6,7 @@ import { filterHistory, svnHistory, svnRevisionDiff, type HistoryEntry } from ".
 import { friendlySvnError, formatRevTime } from "../../lib/svn";
 import { Icon } from "../ui/icon";
 import { SvnDiffEditor } from "./SvnDiffEditor";
-import { svnDiffLanguage } from "./DiffPane";
+import { svnDiffLanguage } from "../../lib/svnDiffLanguage";
 import { toast } from "../ui/toast";
 import { Menu } from "../ui/Menu";
 import "../../svn-history.css";
@@ -75,7 +75,7 @@ export function HistoryView({ path, title, modulePath, initialRevision, backLabe
           </Menu></div>
           {diff.isFetching && <div className="vc-empty"><Icon name="spinner" className="animate-spin" />正在读取指定版本正文…</div>}
           {!diff.isFetching && diff.error && <div className="vc-alert" data-tone="warn"><span>{friendlySvnError(diff.error)}</span><button className="vc-btn" onClick={() => void diff.refetch()}>重试</button></div>}
-          {!diff.isFetching && diff.data && <SvnDiffEditor original={diff.data.beforeText} modified={diff.data.afterText} sourceKey={`history:${root}:${epoch}:${revision}:${selectedPath}`} root={root} language={svnDiffLanguage(diff.data.path)} originalLabel={diff.data.beforeEmpty ? "新增前：不存在" : `${diff.data.beforePath} @ r${diff.data.beforeRevision}`} modifiedLabel={diff.data.afterEmpty ? `r${revision}：已删除` : `${diff.data.path} @ r${revision}`} />}
+          {!diff.isFetching && diff.data && <SvnDiffEditor original={diff.data.beforeText} modified={diff.data.afterText} sourceKey={`history:${root}:${epoch}:${revision}:${selectedPath}`} root={root} language={svnDiffLanguage(diff.data.path, diff.data.afterText || diff.data.beforeText)} originalLabel={diff.data.beforeEmpty ? "新增前：不存在" : `${diff.data.beforePath} @ r${diff.data.beforeRevision}`} modifiedLabel={diff.data.afterEmpty ? `r${revision}：已删除` : `${diff.data.path} @ r${revision}`} />}
         </>}
       </div>
     </div>

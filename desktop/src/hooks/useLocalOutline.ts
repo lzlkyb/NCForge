@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { getModel } from "../lib/editorStore";
 import { currentDocumentOutline } from "../lib/documentOutlineModel";
+import { upmFile } from "../lib/upm";
+import { upmSymbols } from "../lib/upmOutline";
 import type { FlatSymbol } from "../lib/symbols";
 
 const empty: FlatSymbol[] = [];
@@ -15,6 +17,20 @@ export function useLocalOutline(path: string | null, mtimeMs?: number): FlatSymb
       worker?.terminate();
       worker = undefined;
       const model = getModel(path);
+      if (/\.upm$/i.test(path)) {
+        // upm 走后端结构化解析（真源 nc_upm::parse），传当前模型文本含未保存修改。
+        // 异步回包同样要过陈旧守卫：编辑后的旧结果不能盖掉新内容。
+        const version = model?.getVersionId();
+        const text = model?.getValue();
+        void upmFile(path, text).then(file => {
+          if (!disposed && getModel(path) === model && (model == null || model.getVersionId() === version)) {
+            setData({ path, symbols: upmSymbols(file, text ?? "") });
+          }
+        }).catch(() => {
+          if (!disposed && getModel(path) === model) setData({ path, symbols: [] });
+        });
+        return;
+      }
       if (!model || model.getValueLength() < 32 * 1024 || typeof Worker === "undefined") {
         setData({ path, symbols: currentDocumentOutline(path) });
         return;

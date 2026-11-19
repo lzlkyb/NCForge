@@ -27,7 +27,9 @@ export function stripLeading(sql: string): string {
   let s = sql;
   for (;;) {
     const t = s.replace(/^\s+/, "");
-    if (t.startsWith("--")) {
+    if (t.startsWith("--") || t.startsWith("#")) {
+      // `#` 是 MySQL/MariaDB 行注释（与 scanSql 同口径）。Oracle 语句不以 `#` 开头，
+      // 多认这一种不会改变合法 Oracle 语句的判定；不认则 MySQL 脚本的类别全错。
       const nl = t.indexOf("\n");
       s = nl < 0 ? "" : t.slice(nl + 1);
     } else if (t.startsWith("/*")) {
@@ -158,6 +160,15 @@ export function splitStatements(text: string): Stmt[] {
       }
     }
     if (c === "-" && text[i + 1] === "-") {
+      const nl = text.indexOf("\n", i);
+      i = nl < 0 ? n : nl;
+      continue;
+    }
+    if (c === "#" && (i === 0 || !/[A-Za-z_$#]/.test(text[i - 1]))) {
+      // MySQL/MariaDB 行注释：里面的分号不是语句结束（与 scanSql/tokenize 同口径）。
+      // 逐字符扫描没有词边界，守卫只排除「标识符还在继续」的情形：前一字符是
+      // 字母/_/$/# 时 `#` 是 Oracle 标识符的一部分（`a#`）；数字后的 `#` 算注释
+      // （`1#`，数字不含 `#`），`;#` `,#` 等紧贴写法同样算注释。
       const nl = text.indexOf("\n", i);
       i = nl < 0 ? n : nl;
       continue;

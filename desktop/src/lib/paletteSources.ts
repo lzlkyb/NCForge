@@ -9,7 +9,7 @@ import { failureText } from "./friendlyError";
 import type { PaletteMode } from "./keymap";
 import { getRecent } from "./recentFiles";
 import { fetchSymbols, kindLetter, type FlatSymbol } from "./symbols";
-import { isNcDeclaration, ncDeclarationLabel } from "./ncDeclarationOutline";
+import { isXmlFamily, ncDeclarationLabel } from "./ncDeclarationOutline";
 import { jarTypeUri, searchSymbols, searchTypes, type SymbolHit, type SymbolSearchResult, type TypeHit } from "./typeSearch";
 import { libraryUri, searchLibraryFiles, type LibraryHit, type LibraryOutcome } from "./libraryFiles";
 
@@ -355,18 +355,24 @@ async function typesMode(query: string, ctx: PaletteCtx): Promise<PaletteResult>
 
 async function symbolsMode(query: string, ctx: PaletteCtx): Promise<PaletteResult> {
   const path = ctx.activePath;
-  if (!path || path.includes("://") || (!/\.java$/i.test(path) && !isNcDeclaration(path))) {
-    return { items: [], note: "先打开一个 Java 或 NC 声明文件" };
+  if (!path || path.includes("://") || (!/\.java$/i.test(path) && !isXmlFamily(path))) {
+    return { items: [], note: "先打开一个 Java 或 XML 文件" };
   }
   let symbols = ctx.documentSymbols;
   if (!symbols) {
-  const { langReady } = await import("./lang");
-  if (!langReady()) return { items: [], note: "代码智能未就绪，暂时列不出符号" };
-  try {
-    symbols = await fetchSymbols(path);
-  } catch (e) {
-    return { items: [], note: failureText("取符号", e) };
-  }
+    if (isXmlFamily(path)) {
+      // XML 族没有语言服务，退回本地大纲（编辑模型）。动态引入：避免把 Monaco 拉进纯逻辑测试。
+      const { currentDocumentOutline } = await import("./documentOutlineModel");
+      symbols = currentDocumentOutline(path);
+    } else {
+      const { langReady } = await import("./lang");
+      if (!langReady()) return { items: [], note: "代码智能未就绪，暂时列不出符号" };
+      try {
+        symbols = await fetchSymbols(path);
+      } catch (e) {
+        return { items: [], note: failureText("取符号", e) };
+      }
+    }
   }
   const q = query.trim();
   const items: PaletteItem[] = [];
@@ -379,7 +385,7 @@ async function symbolsMode(query: string, ctx: PaletteCtx): Promise<PaletteResul
       title: s.name,
       ranges: hit.ranges,
       detail: `${s.container ? `${s.container} · ` : ""}第 ${s.line} 行`,
-      kind: isNcDeclaration(path) ? ncDeclarationLabel(s.kind) : kindLetter(s.kind),
+      kind: isXmlFamily(path) ? ncDeclarationLabel(s.kind) : kindLetter(s.kind),
       run: () => ctx.run.file(path, s.line, s.column),
     });
   });

@@ -29,10 +29,20 @@ it("持久化失败保留会话设置，可在恢复存储后重试同一值", (
   expect(JSON.parse(localStorage.getItem("ncforge-sql-usage")!).enabled).toBe(false);
 });
 it("模板开关立即生效并保存到本机", () => {
-  expect(host.querySelectorAll('[role="switch"]')).toHaveLength(2);
+  expect(host.querySelectorAll('[role="switch"]')).toHaveLength(3);
   act(() => host.querySelectorAll<HTMLButtonElement>('[role="switch"]')[1].click());
   expect(getSqlTemplatesEnabled()).toBe(false);
   expect(localStorage.getItem("ncforge-sql-templates")).toBe("off");
   act(() => host.querySelectorAll<HTMLButtonElement>('[role="switch"]')[1].click());
   expect(getSqlTemplatesEnabled()).toBe(true);
+});
+it("质量统计开关独立于学习开关，关闭后停止记录", async () => {
+  const stats = await import("../../lib/sqlAssistStats");
+  act(() => stats.recordAssistCall("auto"));
+  act(() => host.querySelectorAll<HTMLButtonElement>('[role="switch"]')[2].click());
+  expect(stats.getAssistStatsEnabled()).toBe(false);
+  expect(JSON.parse(localStorage.getItem("ncforge-sql-assist-stats")!).enabled).toBe(false);
+  expect(getSqlUsageEnabled()).toBe(true);
+  act(() => stats.recordAssistCall("auto"));
+  expect(stats.assistStatsSnapshot().calls.auto).toBe(1);
 });

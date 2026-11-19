@@ -277,9 +277,16 @@ describe("类型模式", () => {
 });
 
 describe("符号模式", () => {
-  it("非 Java 文件 / 未就绪都给原因", async () => {
-    expect((await buildItems("symbol", "", ctx({ activePath: "C:\\w\\a.xml" }))).note).toContain("Java");
+  it("不支持的文件 / 未就绪都给原因", async () => {
+    expect((await buildItems("symbol", "", ctx({ activePath: "C:\\w\\a.txt" }))).note).toContain("Java");
     expect((await buildItems("symbol", "", ctx())).note).toContain("未就绪");
+  });
+
+  it("XML 族（含长尾 bmf）也进符号模式，标签按声明类型", async () => {
+    const r = await buildItems("symbol", "", ctx({ activePath: "C:\\w\\a.bmf", documentSymbols: [localSymbol("beans", 203), localSymbol("svc", 202)] }));
+    expect(r.items.map((i) => i.title)).toEqual(["beans", "svc"]);
+    expect(r.items.map((i) => i.kind)).toEqual(["节点", "组件"]);
+    expect(lang.symbols).not.toHaveBeenCalled();
   });
 
   it("列出当前文件的符号并按查询过滤，回车跳到该行", async () => {

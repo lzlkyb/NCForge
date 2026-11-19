@@ -24,7 +24,8 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
-use crate::nc_upm::{self, Presence, UpmEntry, UpmIndex, UpmIssue};
+use crate::app_error::AppError;
+use crate::nc_upm::{self, Presence, UpmEntry, UpmFile, UpmIndex, UpmIssue};
 use crate::state::AppState;
 
 /// 一次索引的统计。
@@ -260,4 +261,22 @@ pub async fn nc_upm_lookup(
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// 单个 upm 文件的装配清单（代码页大纲用）。
+///
+/// `text` 传编辑器当前内容（含未保存修改）；不传则读磁盘。解析复用 `nc_upm::parse`，
+/// 与装配索引同一套口径。不查类存在性、不走缓存——单文件解析是微秒级，
+/// 大纲每次编辑都要重算，引缓存反而带来失效问题。
+#[tauri::command]
+pub async fn nc_upm_file(path: String, text: Option<String>) -> Result<UpmFile, AppError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        match text {
+            Some(t) => Ok(nc_upm::from_text(&p, &t)),
+            None => nc_upm::read_file(&p).map_err(|e| AppError::env("upm.readFailed", e)),
+        }
+    })
+    .await
+    .map_err(|e| AppError::internal("upm.taskFailed", format!("后台任务失败: {e}")))?
 }

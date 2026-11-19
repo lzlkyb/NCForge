@@ -209,6 +209,7 @@ export const TAURI_COMMANDS = [
   "nc_md_tables",
   "nc_port_apply",
   "nc_port_preview",
+  "nc_upm_file",
   "nc_upm_index",
   "nc_upm_lookup",
   "nc_vo_tables",

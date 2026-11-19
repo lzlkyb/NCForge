@@ -42,6 +42,13 @@ export function tokenize(sql: string): Token[] {
       i = end < 0 ? sql.length : end + 1;
       continue;
     }
+    if (c === "#") {
+      // MySQL/MariaDB 行注释（与 scanSql/splitStatements 同口径）。这里无需守卫：
+      // 词扫描已把标识符里的 `#`（`a#`）整体吃进 word，走到这一行的 `#` 必是词首。
+      const end = sql.indexOf("\n", i + 1);
+      i = end < 0 ? sql.length : end + 1;
+      continue;
+    }
     if (c === "/" && sql[i + 1] === "*") {
       const end = sql.indexOf("*/", i + 2);
       i = end < 0 ? sql.length : end + 2;
