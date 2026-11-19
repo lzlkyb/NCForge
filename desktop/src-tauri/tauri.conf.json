@@ -34,20 +34,18 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://lzlkyb.github.io/NCForge/updater.json",
-        "https://github.com/lzlkyb/NCForge/releases/latest/download/updater.json",
-        "https://gitee.com/lzul/NCForge/raw/releases/latest/updater-gitee.json"
+        "https://gitee.com/lzul/NCForge/raw/releases/latest/updater-gitee.json",
+        "https://github.com/lzlkyb/NCForge/releases/latest/download/updater.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRDRkM3MjgzMzdEQjQwNTUKUldSVlFOczNnM0w4VEJYTHZtWnhITy9hcVRsMi9iKzRyQWVtRWxoQjcrM1A3eE40bXJOUHNWcEIK",
       "windows": {},
       "active": true
     },
     "resourcePacks": {
-      "_comment": "顺序即故障转移顺序：Release 资产优先，Gitee raw 镜像次之（国内直连 GitHub 慢），gh-pages 垫底（站点当前未启用，404 只是多耗一轮；updater 侧同款端点也是这个状态）。资源 zip 的实际下载 URL 在各自清单里（GitHub 侧走 gh-proxy 镜像，Gitee 侧是 raw 直链）。",
+      "_comment": "顺序即故障转移顺序：Gitee raw 镜像优先（国内直连快，实测 ~1.76MB/s），GitHub Release 资产回退（其下载 URL 走 gh-proxy 公共代理，实测 ~0.25MB/s 慢约 7 倍）。gh-pages 站点未启用、实测 404，已删除（白耗一轮）。资源 zip 的实际下载 URL 在各自清单里（Gitee 侧 raw 直链，GitHub 侧 gh-proxy 镜像）。前提：每次发版必须先同步 Gitee 镜像，否则 Gitee 优先会拿到旧清单报「无更新」。",
       "endpoints": [
-        "https://github.com/lzlkyb/NCForge/releases/latest/download/resources.json",
         "https://gitee.com/lzul/NCForge/raw/releases/latest/resources-gitee.json",
-        "https://lzlkyb.github.io/NCForge/resources.json"
+        "https://github.com/lzlkyb/NCForge/releases/latest/download/resources.json"
       ]
     }
   },

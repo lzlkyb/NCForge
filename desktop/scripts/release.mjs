@@ -496,8 +496,9 @@ async function main() {
 }
 
 // ── 第 9 步：等 Release 出来，自动跑 Gitee 镜像 ──────────────────────────────
-// 背景：更新器三个端点里 Gitee 是国内用户的兜底源（gh-pages 404、github.com 常超时），
-// 镜像没补的话老版本用户永远收不到更新提示（v0.2.0 实测）。所以默认自动跑。
+// 背景：更新器端点 Gitee 是国内用户的首选源（2026-11-19 实测 gh-proxy ~0.25MB/s 比 Gitee
+// ~1.76MB/s 慢约 7 倍，故 Gitee 提为第一顺位、删 gh-pages 404 死端点、GitHub 回退）。
+// 镜像没补的话 Gitee 优先会拿到旧清单报「无更新」（比旧 GitHub 优先更隐蔽），所以默认自动跑。
 
 function resolveGithubRepo() {
   const url = execSync("git remote get-url origin", { cwd: ROOT, stdio: "pipe" }).toString().trim();

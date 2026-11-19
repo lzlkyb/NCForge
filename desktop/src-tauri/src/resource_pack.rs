@@ -10,10 +10,9 @@
 //!
 //! # 信任模型（与 updater 对齐，不更强也不更弱）
 //!
-//! - 清单 `resources.json` 与安装包都走 HTTPS，多源故障转移（Release 资产优先，
-//!   Gitee raw 镜像次之，gh-pages 垫底——该站点当前未启用、实测 404，保留只为
-//!   哪天启用了 Pages 就自动活；env `APP_RESOURCES_ENDPOINT` 可覆盖，语义是
-//!   「只信 env 组」）。
+//! - 清单 `resources.json` 与安装包都走 HTTPS，多源故障转移（Gitee raw 镜像优先——
+//!   国内直连快，GitHub Release 资产回退；gh-pages 站点未启用、实测 404 已删除。
+//!   env `APP_RESOURCES_ENDPOINT` 可覆盖，语义是「只信 env 组」）。
 //! - 完整性：清单里的 SHA-256 与解压前逐字节校验。**清单自身不签名**——这与
 //!   updater.json 的现状一致（它靠 HTTPS + 多源，artifact 才做 minisign 验签）。
 //!   若要给清单也加 minisign 签名，复用 updater 同一把 key 即可，属后续加固项。
@@ -1626,21 +1625,23 @@ mod tests {
         // 直接解析内嵌的 tauri.conf.json：配置写错字节这里就红。
         let eps = endpoints_from_conf();
         assert!(
-            eps.len() >= 3,
-            "tauri.conf.json 的 plugins.resourcePacks.endpoints 应有至少 3 个源（Release / Gitee / gh-pages），实得 {}",
+            eps.len() >= 2,
+            "tauri.conf.json 的 plugins.resourcePacks.endpoints 应有至少 2 个源（Gitee / GitHub Release），实得 {}",
             eps.len()
         );
         assert!(eps.iter().all(|u| u.scheme() == "https"));
-        // 顺序即优先级：Release 首选、Gitee 次之（国内加速），删一个这里就红——
-        // 2026-10-29 审查发现过「Gitee 镜像推了但客户端读不到」的事故。
+        // 顺序即优先级：Gitee 首选（国内直连快）、GitHub Release 回退，删一个这里就红——
+        // 2026-10-29 审查发现过「Gitee 镜像推了但客户端读不到」的事故；2026-11-19 实测
+        // 默认 GitHub 优先时下载走 gh-proxy（~0.25MB/s）比 Gitee（~1.76MB/s）慢约 7 倍，
+        // 故把 Gitee 提为第一顺位，并删掉实测 404 的 gh-pages 死端点。
         assert!(
-            eps[0].host_str() == Some("github.com"),
-            "第一源应为 GitHub Release: {}",
+            eps[0].host_str() == Some("gitee.com"),
+            "第一源应为 Gitee 镜像（国内加速）: {}",
             eps[0]
         );
         assert!(
-            eps.iter().any(|u| u.host_str() == Some("gitee.com")),
-            "endpoints 里应含 Gitee 镜像源（客户端唯一能读到 resources-gitee.json 的地方）: {:?}",
+            eps.iter().any(|u| u.host_str() == Some("github.com")),
+            "endpoints 里应含 GitHub Release 回退源: {:?}",
             eps
         );
     }
