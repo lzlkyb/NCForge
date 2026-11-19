@@ -146,7 +146,7 @@ function EntryView({ tab, entry, tables, onLocate, fixes }: { tab: SqlTab; entry
   const epoch = useTxEpoch(tab.connId, tab.slot);
   // 取消执行也要把错误码、相似表建议和「重新连接」入口留在页面上；
   // 只在摘要上标注「已停止」，不能整个吞掉 DbErrorBox（P1-3）。
-  if (entry.kind === "error") return <div style={{ overflow: "auto" }}><DbErrorBox error={entry.error ?? ""} errorCode={entry.errorCode} sql={entry.sql} knownTables={tables} connId={tab.connId} tabId={tab.id} slot={tab.slot} cancelled={entry.cancelled}
+  if (entry.kind === "error") return <div style={{ overflow: "auto" }}><DbErrorBox error={entry.error ?? ""} errorCode={entry.errorCode} sql={entry.sql} knownTables={tables} connId={tab.connId} tabId={tab.id} slot={tab.slot} cancelled={entry.cancelled} contextSchema={entry.context?.schema}
     onFixes={fixes && entry.context?.target?.editorSql !== undefined ? () => fixes.find(entry) : undefined}
     onApply={fixes ? fix => fixes.apply(entry, fix) : undefined}
     // 传进来的是**语句内**行号；编辑器要的是整个脚本的行号，按语句首行换算。

@@ -11,6 +11,8 @@ public class NcDbBridgeContractTest {
     static int statQueries=0;
     static int fetchSize=0;
     static String executed="";
+    /** 按顺序记下每条 prepareStatement 的 SQL（locate 要钉两条字典查询的先后）。 */
+    static java.util.List<String> prepared=new java.util.ArrayList<String>();
     /** 最近一次 `alter session set current_schema = …` 的原文（默认 schema 契约用）。 */
     static String schemaSql="";
     static Map<Integer,Object> bound=new HashMap<Integer,Object>();
@@ -31,7 +33,7 @@ public class NcDbBridgeContractTest {
                 if (n.equals("getUserName")) return "AIER633";
                 if (n.equals("getDatabaseProductName")) return "Oracle";
                 if (n.equals("getDatabaseProductVersion")) return "19.0.0";
-                if (n.equals("prepareStatement")) {executed=(String)a[0];return proxy(PreparedStatement.class);}
+                if (n.equals("prepareStatement")) {executed=(String)a[0];prepared.add(executed);return proxy(PreparedStatement.class);}
                 if (n.equals("prepareCall")) return proxy(CallableStatement.class);
                 if (n.equals("executeQuery")) {
                     if (a != null && a.length > 0 && String.valueOf(a[0]).contains("v$mystat")) statQueries++;
@@ -373,6 +375,20 @@ public class NcDbBridgeContractTest {
         ddl.invoke(s,"idx_t","INDEX");
         check(executed.contains("get_ddl('INDEX', ?)"),"index DDL uses the INDEX type, not the TABLE fallback");
         check("IDX_T".equals(bound.get(1)),"index name remains a bound value");
+        // locate（ORA-00942 修复探查）：先 all_objects 后 all_synonyms，名字大写走绑定不拼串，
+        // 空结果 JSON 形状与纯 Rust 引擎一致。命令还要进 CMDS，否则协议解析认不出。
+        Field cmds=Class.forName("NcDbBridge").getDeclaredField("CMDS");cmds.setAccessible(true);
+        check(((Set<?>)cmds.get(null)).contains("locate"),"locate is recognized by protocol parser");
+        prepared.clear();
+        Method locate=c.getDeclaredMethod("locate",String.class);locate.setAccessible(true);
+        String located=(String)locate.invoke(s,"ic_aierbackapply_h");
+        check(prepared.size()==2 && prepared.get(0).contains("all_objects") && prepared.get(1).contains("all_synonyms"),
+                "locate probes objects then synonyms");
+        check(!prepared.get(0).contains("IC_AIERBACKAPPLY_H") && !prepared.get(1).contains("IC_AIERBACKAPPLY_H"),
+                "locate never concatenates the name into SQL");
+        check("IC_AIERBACKAPPLY_H".equals(bound.get(1)),"locate binds the upper-cased name");
+        check(located.contains("\"name\":\"IC_AIERBACKAPPLY_H\"") && located.contains("\"objects\":[]") && located.contains("\"synonyms\":[]"),
+                "locate JSON shape matches the Rust engine");
         independentCursorContracts();
         System.out.println("JDBC contracts passed: parameters, precision, NULL, read-only, schema, independent result cursors, paging failure, cursor limits and cleanup.");
     }

@@ -146,7 +146,7 @@ public class NcDbBridge {
     private static final Set<String> CMDS = new HashSet<String>(Arrays.asList(
             "hello", "propList", "propCred", "connect", "connectProp", "exec", "execBound", "execBoundResult", "readOnly", "more", "closeResult", "commit",
             "rollback", "autocommit", "tables", "ncNames", "query", "columns", "indexes", "ddl",
-            "explain", "sessions", "objects", "source", "schema", "schemas", "setSchema", "ping", "probe",
+            "explain", "sessions", "objects", "locate", "source", "schema", "schemas", "setSchema", "ping", "probe",
             "disconnect", "quit", "cancel"));
 
     /**
@@ -479,6 +479,8 @@ public class NcDbBridge {
                 ok(id, ddl(a.get(0), a.size() > 1 ? a.get(1) : null));
             } else if ("objects".equals(cmd)) {
                 ok(id, objects());
+            } else if ("locate".equals(cmd)) {
+                ok(id, locate(a.get(0)));
             } else if ("source".equals(cmd)) {
                 ok(id, source(a.get(0)));
             } else if ("explain".equals(cmd)) {
@@ -692,6 +694,57 @@ public class NcDbBridge {
             applySchema(name);
             String now = currentSchema();
             return "{\"schema\":\"" + esc(now == null ? name : now) + "\"}";
+        }
+
+        /**
+         * ORA-00942 修复探查：这个名字在哪些 schema 下是表/视图、同义词指向谁。
+         * 刻意不按 current_schema 过滤——要找的正是「当前 schema 解析不到」的表。
+         * 与纯 Rust 引擎的 locate 同协议：{name, objects:[{owner,type}], synonyms:[{owner,tableOwner,tableName}]}。
+         */
+        private String locate(String name) throws SQLException {
+            requireConn();
+            String n = name == null ? "" : name.toUpperCase();
+            StringBuilder objs = new StringBuilder("[");
+            PreparedStatement ps = conn.prepareStatement(
+                    "select owner, object_type from all_objects where object_name = ? and object_type in ('TABLE','VIEW') order by owner");
+            try {
+                ps.setString(1, n);
+                ResultSet rs = ps.executeQuery();
+                try {
+                    int k = 0;
+                    while (rs.next() && k < 50) {
+                        if (k++ > 0) objs.append(',');
+                        objs.append("{\"owner\":\"").append(esc(rs.getString(1)))
+                                .append("\",\"type\":\"").append(esc(rs.getString(2))).append("\"}");
+                    }
+                } finally {
+                    rs.close();
+                }
+            } finally {
+                ps.close();
+            }
+            StringBuilder syns = new StringBuilder("[");
+            ps = conn.prepareStatement(
+                    "select owner, table_owner, table_name from all_synonyms where synonym_name = ? order by owner");
+            try {
+                ps.setString(1, n);
+                ResultSet rs = ps.executeQuery();
+                try {
+                    int k = 0;
+                    while (rs.next() && k < 50) {
+                        if (k++ > 0) syns.append(',');
+                        syns.append("{\"owner\":\"").append(esc(rs.getString(1)))
+                                .append("\",\"tableOwner\":\"").append(esc(rs.getString(2)))
+                                .append("\",\"tableName\":\"").append(esc(rs.getString(3))).append("\"}");
+                    }
+                } finally {
+                    rs.close();
+                }
+            } finally {
+                ps.close();
+            }
+            return "{\"name\":\"" + esc(n) + "\",\"objects\":" + objs.append(']')
+                    + ",\"synonyms\":" + syns.append(']') + "}";
         }
 
         private void resetTx() {

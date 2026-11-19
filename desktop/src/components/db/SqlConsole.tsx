@@ -22,7 +22,7 @@ import { bindQuery, canParameterizeQuery, queryParameters } from "../../lib/sqlQ
 import { SqlParameterDialog } from "./SqlParameterDialog";
 import { friendlyDbError } from "../../lib/db";
 import { guessTable } from "../../lib/resultExport";
-import { closeSessionPanel, columnsOf, connOf, isRunning, openSessionPanel, rtOf, sqlTabOf, useDbSelector, type ResultEntry, type SqlTab } from "../../lib/dbStore";
+import { changeSchema, closeSessionPanel, columnsOf, connOf, isRunning, openSessionPanel, rtOf, sqlTabOf, useDbSelector, type ResultEntry, type SqlTab } from "../../lib/dbStore";
 import { useSqlConsoleSplit, type SqlConsoleFocus } from "../../hooks/useSqlConsoleSplit";
 import { useSqlRunConfirm } from "../../hooks/useSqlRunConfirm";
 import { useViewActive } from "../../lib/viewActivity";
@@ -246,14 +246,19 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
             find: async entry => {
               const current = repairContext(entry);
               return current ? sqlQuickFixes(entry.error ?? "", entry.sql, current.tables,
-                async table => (await columnsOf(current.connId, table)).map(column => column.name)) : [];
+                async table => (await columnsOf(current.connId, table)).map(column => column.name),
+                async name => dbApi.locate(current.connId, name)) : [];
             },
             apply: (entry, fix) => {
               const current = repairContext(entry);
-              if (split.focus === "results") split.setFocus("split");
-              if (!current || !api.current?.fix?.({ editorSql: current.editorSql, start: current.offset + fix.start, end: current.offset + fix.end, text: fix.text })) {
-                toast("SQL 或连接已变化，请重新执行后再修复。", "warning");
+              const stale = () => toast("SQL 或连接已变化，请重新执行后再修复。", "warning");
+              if (!current) { stale(); return; }
+              if (fix.schema !== undefined) {
+                void changeSchema(current.connId, fix.schema).then(s => toast(`默认 schema 已切到 ${s || "登录账号"} · 请重新执行`, "success"), e => toast(friendlyDbError(e), "error"));
+                return;
               }
+              if (split.focus === "results") split.setFocus("split");
+              if (!api.current?.fix?.({ editorSql: current.editorSql, start: current.offset + fix.start, end: current.offset + fix.end, text: fix.text })) stale();
             },
           }} onLocate={line => {
             if (split.focus === "results") split.setFocus("split");

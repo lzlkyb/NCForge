@@ -463,6 +463,7 @@ impl Session {
                 | "ncNames"
                 | "ddl"
                 | "objects"
+                | "locate"
                 | "source"
                 | "explain"
                 | "sessions"
@@ -612,6 +613,7 @@ impl Session {
                 a.get(1).copied(),
             ),
             "objects" => self.objects(),
+            "locate" => self.locate(a.first().copied().unwrap_or("")),
             "source" => self.source(a.first().copied().unwrap_or("")),
             "explain" => self.explain(a.first().copied().unwrap_or("")),
             "sessions" => self.sessions(),
@@ -1699,6 +1701,52 @@ impl Session {
         }
         let n = list.len();
         Ok(json!({ "objects": list, "count": n }))
+    }
+
+    /// ORA-00942 修复探查：这个名字在**哪些 schema** 下是表/视图、同义词指向谁。
+    /// 刻意不按 current_schema 过滤——要找的正是「当前 schema 解析不到」的表。
+    /// 只读字典查询；`all_objects` 只含本账号可见的对象，查不到 = 无权限或真没有。
+    fn locate(&self, name: &str) -> Result<Value, BridgeError> {
+        let conn = self.conn_ref()?;
+        let n = name.to_uppercase();
+        let mut objects = Vec::new();
+        let cur = conn
+            .query(
+                "select owner, object_type from all_objects \
+             where object_name = :1 and object_type in ('TABLE','VIEW') order by owner",
+                &[&n as &dyn ToDbValue],
+            )
+            .map_err(drv_err)?;
+        for row in cur {
+            let row = row.map_err(drv_err)?;
+            objects.push(json!({
+                "owner": row.get::<Option<String>>(0).ok().flatten().unwrap_or_default(),
+                "type": row.get::<Option<String>>(1).ok().flatten().unwrap_or_default(),
+            }));
+            if objects.len() >= 50 {
+                break;
+            }
+        }
+        let mut synonyms = Vec::new();
+        let cur = conn
+            .query(
+                "select owner, table_owner, table_name from all_synonyms \
+             where synonym_name = :1 order by owner",
+                &[&n as &dyn ToDbValue],
+            )
+            .map_err(drv_err)?;
+        for row in cur {
+            let row = row.map_err(drv_err)?;
+            synonyms.push(json!({
+                "owner": row.get::<Option<String>>(0).ok().flatten().unwrap_or_default(),
+                "tableOwner": row.get::<Option<String>>(1).ok().flatten().unwrap_or_default(),
+                "tableName": row.get::<Option<String>>(2).ok().flatten().unwrap_or_default(),
+            }));
+            if synonyms.len() >= 50 {
+                break;
+            }
+        }
+        Ok(json!({ "name": n, "objects": objects, "synonyms": synonyms }))
     }
 
     /// 库内源码（`all_source`，按当前默认 schema 过滤）。序列、同义词这类没有源码的对象

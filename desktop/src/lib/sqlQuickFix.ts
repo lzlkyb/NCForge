@@ -1,12 +1,15 @@
 import { similarTo } from "./db";
+import type { TableLocation } from "./dbApi";
 import { sqlIdentifier } from "./sqlCompletionContext";
 import { oraHint } from "./oraErrorHint";
 import { analyzeSql, resolveSqlQualifier, sqlSourcesAt } from "./sqlScope";
 import { sqlName } from "./sqlLex";
 
-export interface SqlQuickFix { start: number; end: number; text: string }
+export interface SqlQuickFix { start: number; end: number; text: string;
+  /** 有值 = 这条修复是「切连接的默认 schema」，不是文本替换（start/end/text 无意义）。 */
+  schema?: string }
 
-export async function sqlQuickFixes(error: string, sql: string, tables: string[], columns: (table: string) => Promise<string[]>): Promise<SqlQuickFix[]> {
+export async function sqlQuickFixes(error: string, sql: string, tables: string[], columns: (table: string) => Promise<string[]>, locate?: (table: string) => Promise<TableLocation>): Promise<SqlQuickFix[]> {
   const hint = oraHint(error, sql);
   const analysis = analyzeSql(sql, "plsql");
   const tokens = analysis.tokens.filter(t => !["space", "comment", "hint"].includes(t.kind));
@@ -33,11 +36,31 @@ export async function sqlQuickFixes(error: string, sql: string, tables: string[]
   if (/ORA-00942\b/.test(error)) {
     const unknown = analysis.tokens.filter((t, i) => t.kind === "identifier" && analysis.roles.get(i) === "table" &&
       !tables.some(name => name.toLowerCase() === sqlName(t)));
-    if (unknown.length !== 1) return [];
-    const [token] = unknown;
-    const i = tokens.indexOf(token);
-    if (tokens[i - 1]?.text === "." || tokens[i + 1]?.text === "@") return [];
-    return similarTo(sqlName(token), tables).map(name => ({ start: token.start, end: token.end, text: format(name) }));
+    const bare = unknown.filter(t => {
+      const i = tokens.indexOf(t);
+      return tokens[i - 1]?.text !== "." && tokens[i + 1]?.text !== "@";
+    });
+    if (!bare.length) return [];
+    const fixes: SqlQuickFix[] = [];
+    // 跨 schema 探查：名字在别的 schema 下能找到时，给「加 owner 前缀」；所有缺的名字
+    // 都指向同一个 schema 时再给「一键切过去」——多个候选 schema 不替用户选。
+    const names = [...new Set(bare.map(t => sqlName(t)))];
+    if (locate && names.length <= 16) {
+      const locs = await Promise.all(names.map(name => locate(name)));
+      const ownersOf = (loc: TableLocation) => [...new Set([...loc.objects.map(o => o.owner), ...loc.synonyms.map(s => s.owner)])];
+      const owners = locs.map(ownersOf);
+      const common = owners.reduce((a, b) => a.filter(o => b.includes(o)));
+      if (common.length === 1) fixes.push({ start: 0, end: 0, text: "", schema: common[0] });
+      if (bare.length === 1) {
+        const [token] = bare;
+        fixes.push(...owners[0].slice(0, 3).map(owner => ({ start: token.start, end: token.end, text: `${format(owner)}.${token.text}` })));
+      }
+    }
+    if (bare.length === 1) {
+      const [token] = bare;
+      fixes.push(...similarTo(sqlName(token), tables).map(name => ({ start: token.start, end: token.end, text: format(name) })));
+    }
+    return fixes.slice(0, 8);
   }
   if (!hint?.location) return [];
   // ORA-00904 报的是「这个名字不存在」：语句里每一处同名裸标识符都同样错，

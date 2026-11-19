@@ -537,6 +537,7 @@ impl EngineHandle {
                     | "indexes"
                     | "ddl"
                     | "objects"
+                    | "locate"
                     | "source"
                     | "sessions"
                     | "schema"

@@ -16,9 +16,9 @@ import type { SqlQuickFix } from "../../lib/sqlQuickFix";
  */
 import { openTable } from "../../lib/dbActions";
 import { reconnectSession } from "../../lib/dbConfirm";
-import { openSessionPanel, type ResultEntry } from "../../lib/dbStore";
+import { openSessionPanel, connOf, rtOf, type ResultEntry } from "../../lib/dbStore";
 
-export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot, errorCode, cancelled, onLocate, onFixes, onApply }: {
+export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot, errorCode, cancelled, contextSchema, onLocate, onFixes, onApply }: {
   onFixes?: () => Promise<SqlQuickFix[]>;
   onApply?: (fix: SqlQuickFix) => void;
   error: string;
@@ -28,6 +28,8 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
   errorCode?: ResultEntry["errorCode"];
   /** 用户主动停止：仍显示完整错误框，只在标题上标注「已停止」。 */
   cancelled?: boolean;
+  /** 执行那一刻的 schema（结果上下文里的值）；缺省退回连接当前值。 */
+  contextSchema?: string;
   sql: string;
   knownTables: string[];
   /** 脚本里的第几条。 */
@@ -38,6 +40,11 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
   const [reconnecting, setReconnecting] = useState(false);
   const [fixes, setFixes] = useState<SqlQuickFix[] | null>(null);
   const [checking, setChecking] = useState(false);
+  // 942 最常见的真因不是表名手滑，而是「这条会话以谁的身份解析表名」：
+  // 登录账号 / current_schema 与别的工具不一致。把解析上下文摆出来，省一轮盲猜。
+  const rt = connId ? rtOf(connId) : undefined;
+  const loginUser = rt?.info?.user ?? (connId ? connOf(connId)?.user : undefined);
+  const execSchema = contextSchema ?? rt?.currentSchema ?? rt?.info?.schema;
   const reconnect = async () => {
     if (!connId || lock.current) return;
     lock.current = true;
@@ -67,6 +74,12 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
       {hint?.note && <details><summary>Oracle 错误详情</summary><div>{error}</div></details>}
       {errorCode === "timeout" && <div style={{ marginTop: 4 }}>不是语法错误，是等到上限还没跑完：可以在「查询设置」或表页筛选栏把等待上限调大后重试。</div>}
       {ora === "ORA-01031" && <div style={{ marginTop: 4 }}>当前账号没有这个操作的权限（读写权限由数据库账号决定）。</div>}
+      {ora === "ORA-00942" && loginUser && (
+        <div style={{ marginTop: 4 }}>
+          登录账号 <code>{loginUser}</code> · 执行时 schema <code>{execSchema || "登录账号自身"}</code>。
+          同一条语句在别的工具能执行，多半是登录账号或 current_schema 不同：核对连接与 schema 下拉，或用「检查可用修复」找表在哪个 schema。
+        </div>
+      )}
       {hint?.location && (
         <div style={{ marginTop: 4 }}>
           语句里 <code>{hint.location.ident.toUpperCase()}</code> 出现在第 {hint.location.line} 行第 {hint.location.column} 列
@@ -98,7 +111,7 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
           const twins = fixes.filter(other => other.text === fix.text);
           const at = twins.length > 1 ? (() => { const before = sql.slice(0, fix.start); return `（第 ${before.split("\n").length} 行第 ${fix.start - before.lastIndexOf("\n")} 列）`; })() : "";
           return <button type="button" className="dbx-btn" key={`${fix.start}:${fix.text}`}
-            onClick={() => { onApply?.(fix); setFixes(null); }}>替换为 {fix.text}{at}</button>;
+            onClick={() => { onApply?.(fix); setFixes(null); }}>{fix.schema !== undefined ? `切到 schema ${fix.schema}` : `替换为 ${fix.text}${at}`}</button>;
         })}
         {onLocate && <button type="button" className="dbx-btn" onClick={() => onLocate()}>定位 SQL 行</button>}
         {connId && ["ORA-00942","ORA-00904"].includes(ora ?? "") && tableRefs(sql).slice(0,1).map(t=><button key={t} type="button" className="dbx-btn" onClick={()=>void openTable(connId,t,"struct")}>查看 {t} 结构</button>)}

@@ -1744,7 +1744,7 @@ pub async fn db_set_schema(
 }
 
 /// 元数据：`tables` / `ncNames` / `columnsZh` / `columns` / `indexes` / `ddl` / `explain` /
-/// `sessions` / `objects` / `source`。`arg` 是表名或对象名（columnsZh 时是逗号分隔的
+/// `sessions` / `objects` / `locate` / `source`。`arg` 是表名或对象名（columnsZh 时是逗号分隔的
 /// 一批表名；explain 时是 SQL；sessions、objects 不需要参数）；`arg2` 目前只有 `ddl` 用，
 /// 表示对象类型（包/过程/序列…，空 = 按表处理）；`slot` 只有 `explain` 用，
 /// 表示在标签的独立会话上执行（与「停止」按钮的取消目标一致）。
@@ -1783,6 +1783,7 @@ pub async fn db_meta(
         "explain" => "explain",
         "sessions" => "sessions",
         "objects" => "objects",
+        "locate" => "locate",
         "source" => "source",
         "schemas" => "schemas",
         other => return Err(format!("未知元数据类型：{other}")),

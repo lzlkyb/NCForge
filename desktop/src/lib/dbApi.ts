@@ -448,6 +448,13 @@ export interface DbObject {
   created: string | null;
 }
 
+/** ORA-00942 修复探查：名字在哪些 schema 下是表/视图、同义词指向谁（不限 current_schema）。 */
+export interface TableLocation {
+  name: string;
+  objects: { owner: string; type: string }[];
+  synonyms: { owner: string; tableOwner: string; tableName: string }[];
+}
+
 /** 源码的一行。`type` 用来区分 `PACKAGE` 与 `PACKAGE BODY`（同名对象各有一段）。 */
 export interface SourceLine {
   type: string;
@@ -846,6 +853,8 @@ export const dbApi = {
    * 来源是 `user_objects`：只列当前账号能改的东西。
    */
   objects: (id: string) => invoke<{ objects: DbObject[]; count: number }>("db_meta", { id, kind: "objects" }),
+  /** 按名字跨 schema 找表/视图与同义词（`all_objects` / `all_synonyms`），942 修复用。 */
+  locate: (id: string, name: string) => invoke<TableLocation>("db_meta", { id, kind: "locate", arg: name }),
   /**
    * 库内源码（`user_source`）。序列、同义词这类没有源码的对象 `lines` 为空。
    * 只读：不编辑、不编译、不回写。
