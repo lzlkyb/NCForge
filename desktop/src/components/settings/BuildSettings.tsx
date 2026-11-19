@@ -10,10 +10,11 @@ import { useSettingsMutation } from "../../hooks/useSettingsMutation";
 import { getConfig, patchConfig, rememberAutoExternal, rememberAutoIncremental } from "../../lib/appConfig";
 import "./settings-development.css";
 
-interface BuildCfg { auto_compile_incremental: boolean; auto_compile_external: boolean; incremental_stat: boolean; prewarm_index: boolean; persistent_worker: boolean; build_parallel: number }
+interface BuildCfg { auto_compile_incremental: boolean; auto_compile_external: boolean; incremental_stat: boolean; adopt_existing: boolean; prewarm_index: boolean; persistent_worker: boolean; build_parallel: number }
 const pick = (c: Partial<BuildCfg>): BuildCfg => ({
   auto_compile_incremental: c.auto_compile_incremental ?? true, auto_compile_external: c.auto_compile_external ?? true,
   incremental_stat: c.incremental_stat ?? true,
+  adopt_existing: c.adopt_existing ?? true,
   prewarm_index: c.prewarm_index ?? true, persistent_worker: c.persistent_worker ?? true, build_parallel: c.build_parallel ?? 2,
 });
 
@@ -67,6 +68,11 @@ export function BuildSettings() {
         info="关闭后每次编译判定都扫描整个模块（与旧行为一致），用于排查疑似漏编。正确性由全量兜底保障。"
         checked={cfg?.incremental_stat ?? true} disabled={!cfg}
         onChange={v => update({ incremental_stat: v })} {...mutation.feedback("incremental_stat")} />
+      <ToggleRow id="build-adopt-existing" label="首次编译采纳已有产物" keywords={["编译", "首次", "全量", "采纳", "class", "性能"]}
+        sub="首次编译（无清单）时若输出目录已有不低于源码新度的 class，只建清单不重编，大幅缩短首次等待。"
+        info="任一源文件缺对应 class 或 class 比源码旧时，整模块自动回落全量编译，不会拿旧产物顶替。关闭后首次一律实编（与旧行为一致）。"
+        checked={cfg?.adopt_existing ?? true} disabled={!cfg}
+        onChange={v => update({ adopt_existing: v })} {...mutation.feedback("adopt_existing")} />
       <ToggleRow id="build-prewarm" label="打开工程时预热类索引" keywords={["编译", "索引", "预热", "jar"]}
         sub="下次打开工程时后台扫描 jar，减少首次编译等待。"
         checked={cfg?.prewarm_index ?? true} disabled={!cfg} last

@@ -15,6 +15,7 @@ export interface ConfigPatch {
   auto_compile_incremental?: boolean;
   auto_compile_external?: boolean;
   incremental_stat?: boolean;
+  adopt_existing?: boolean;
   prewarm_index?: boolean;
   persistent_worker?: boolean;
   build_parallel?: number;
@@ -50,20 +51,21 @@ export interface AppConfig {
   auto_compile_incremental: boolean;
   auto_compile_external: boolean;
   incremental_stat: boolean;
+  adopt_existing: boolean;
   prewarm_index: boolean;
   persistent_worker: boolean;
   build_parallel: number;
   linked_overrides: LinkedOverrideConfig[];
 }
 
-/** src-tauri/src/config.rs:175 · response */
+/** src-tauri/src/config.rs:180 · response */
 export interface LinkedOverrideConfig {
   action: string;
   target: string;
   dir: string | null;
 }
 
-/** src-tauri/src/config.rs:199 · response */
+/** src-tauri/src/config.rs:204 · response */
 export interface DbConnConfig {
   id: string;
   name: string;

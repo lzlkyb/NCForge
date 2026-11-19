@@ -970,4 +970,79 @@ mod tests {
         );
         shutdown_all();
     }
+
+    /// 并行编译吞吐只读自测探针（真机 `#[ignore]`）：临时合成 8 模块×40 自包含源文件，
+    /// 以 parallel=2 与 =4 并发真 ecj 编译计时，量「提并行对首次全量/大闭包的吞吐收益」。
+    /// 不依赖 AppHandle / 不碰用户工作区（输出全在临时目录）。先预热 4 个 worker 再计时，
+    /// 避免冷启动偏置某一方。
+    ///
+    /// 运行：`node scripts/rust-gate.mjs test --lib -- --ignored 并行编译吞吐探针_live --nocapture`
+    #[test]
+    #[ignore]
+    fn 并行编译吞吐探针_live() {
+        let Some((java, ecj, bridge)) = live_env() else {
+            println!("跳过：本机没有 java / ecj / 桥 jar");
+            return;
+        };
+        // 用 tmp_named（不 canonicalize）：避免 \\?\ verbatim 前缀进 ecj 参数文件（Java File 不认）。
+        let work = crate::test_support::tmp_named("ncf-par-throughput");
+        let _ = std::fs::remove_dir_all(&work);
+        const K: usize = 8;
+        const M: usize = 40;
+        let mut args_files: Vec<PathBuf> = Vec::new();
+        for k in 0..K {
+            let src = work.join(format!("m{k}/src"));
+            let out = work.join(format!("m{k}/out"));
+            std::fs::create_dir_all(&src).unwrap();
+            std::fs::create_dir_all(&out).unwrap();
+            let mut list = String::new();
+            for i in 0..M {
+                let f = src.join(format!("C{k}_{i}.java"));
+                std::fs::write(
+                    &f,
+                    format!("public class C{k}_{i} {{ public int v() {{ return {i}; }} }}\n"),
+                )
+                .unwrap();
+                list.push_str(&format!(
+                    "\"{}\"\n",
+                    f.display().to_string().replace('\\', "/")
+                ));
+            }
+            let af = work.join(format!("m{k}.args"));
+            std::fs::write(
+                &af,
+                format!(
+                    "-1.8 -g -nowarn -proc:none\n-d \"{}\"\n{list}",
+                    out.display().to_string().replace('\\', "/")
+                ),
+            )
+            .unwrap();
+            args_files.push(af);
+        }
+        let run = |par: usize| -> u128 {
+            let t = Instant::now();
+            for chunk in args_files.chunks(par) {
+                std::thread::scope(|s| {
+                    for af in chunk {
+                        let (j, e, b) = (&java, &ecj, &bridge);
+                        s.spawn(move || {
+                            let _ = compile(j, e, b, af, Duration::from_secs(120), None);
+                        });
+                    }
+                });
+            }
+            t.elapsed().as_millis()
+        };
+        // 预热 4 个常驻 worker（不计时），消除冷启动对某一并发档的偏置
+        let _ = run(4);
+        let p2 = run(2);
+        let p4 = run(4);
+        println!(
+            "PERF parallel-throughput modules={K} files={} p2={p2}ms p4={p4}ms speedup={:.2}",
+            K * M,
+            p2 as f64 / p4 as f64
+        );
+        let _ = std::fs::remove_dir_all(&work);
+        shutdown_all();
+    }
 }

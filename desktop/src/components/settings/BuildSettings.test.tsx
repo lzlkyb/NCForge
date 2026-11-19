@@ -27,6 +27,7 @@ const cfg = {
   auto_compile_incremental: true,
   auto_compile_external: true,
   incremental_stat: true,
+  adopt_existing: true,
   prewarm_index: true,
   persistent_worker: true,
   build_parallel: 2,
@@ -119,5 +120,23 @@ describe("增量判定只查改动文件开关", () => {
     await act(async () => { statSwitch().click(); });
     expect(patchConfig).toHaveBeenCalledWith({ incremental_stat: false });
     expect(statRow().textContent).toContain("已关闭");
+  });
+});
+
+describe("首次编译采纳已有产物开关", () => {
+  const adoptRow = () => container.querySelector<HTMLElement>("#build-adopt-existing")!;
+  const adoptSwitch = () => adoptRow().querySelector<HTMLButtonElement>('[role="switch"]')!;
+
+  it("默认开：界面显示已开启", async () => {
+    await render();
+    expect(adoptRow().textContent).toContain("首次编译采纳已有产物");
+    expect(adoptSwitch().getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("关掉时只提交 adopt_existing，界面随之切到已关闭", async () => {
+    await render();
+    await act(async () => { adoptSwitch().click(); });
+    expect(patchConfig).toHaveBeenCalledWith({ adopt_existing: false });
+    expect(adoptRow().textContent).toContain("已关闭");
   });
 });

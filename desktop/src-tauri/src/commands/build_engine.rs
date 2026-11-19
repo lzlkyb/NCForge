@@ -42,6 +42,8 @@ pub(super) struct Ctx {
     pub hotswap_auto: bool,
     /// decide 用监听脏集增量 stat（`incremental_stat`），关掉则每次全扫。
     pub incremental_stat: bool,
+    /// 首次编译采纳已有 class（`adopt_existing`），关掉则首次一律实编。
+    pub adopt_existing: bool,
 }
 
 impl Ctx {
@@ -120,7 +122,16 @@ impl Ctx {
 /// 取上下文。`root` 取配置里的工作区；NC home / ecj / java 与单模块编译同一套解析。
 pub(super) async fn context(app: tauri::AppHandle, state: &Arc<AppState>) -> Result<Ctx, String> {
     let (_root_raw, root) = super::compile_cmds::workspace_roots(state).await?;
-    let (nc_home_cfg, overrides, deploy_on_start, parallel, persistent, hotswap, incremental_stat) = {
+    let (
+        nc_home_cfg,
+        overrides,
+        deploy_on_start,
+        parallel,
+        persistent,
+        hotswap,
+        incremental_stat,
+        adopt_existing,
+    ) = {
         let cfg = state.config.read().await;
         (
             cfg.nc_home.clone(),
@@ -130,6 +141,7 @@ pub(super) async fn context(app: tauri::AppHandle, state: &Arc<AppState>) -> Res
             cfg.persistent_worker,
             (cfg.hotswap_enabled, cfg.hotswap_auto),
             cfg.incremental_stat,
+            cfg.adopt_existing,
         )
     };
     let home = nc_home::resolve(nc_home_cfg.as_deref())?;
@@ -161,6 +173,7 @@ pub(super) async fn context(app: tauri::AppHandle, state: &Arc<AppState>) -> Res
         hotswap_enabled: hotswap.0,
         hotswap_auto: hotswap.1,
         incremental_stat,
+        adopt_existing,
     })
 }
 
@@ -360,6 +373,129 @@ fn removed_referrers(removed: &[build_state::RemovedSource], all: &[PathBuf]) ->
 /// 旧清单基线比对，有结构变化才把引用方拉进第二轮，多轮直到稳定（上限
 /// `MAX_STRUCT_ROUNDS`，超了 / 解析不出 / 影响面超 30% → 整模块全量兜底）。
 /// 只改方法体 → 指纹不变 → 第一轮就结束，不传播。
+/// 分层打点落盘（`config_dir/logs/build-phase.log`）：release 无控制台也能事后读
+/// 「这次慢在哪」。写盘失败吞掉，绝不影响编译。
+fn perf_log(ctx: &Ctx, line: &str) {
+    let dir = ctx.config_dir.join("logs");
+    let _ = std::fs::create_dir_all(&dir);
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("build-phase.log"))
+    {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+/// adopt 守卫：每个源文件的每个声明类型都有「mtime 不早于源码」的主 class 才返回真。
+/// 缺 class / class 比源码旧 / 读不出 stat → 假（整模块回落全量编译）。纯函数，便于反例单测。
+fn adopt_classes_fresh(layout: &ModuleLayout, sources: &[PathBuf]) -> bool {
+    for p in sources {
+        let Some(st) = build_state::source_stamp(layout, p, true) else {
+            return false;
+        };
+        if st.types.is_empty() {
+            return false;
+        }
+        let Some(out) = layout.output_for(p) else {
+            return false;
+        };
+        let pkg_dir = st.package.replace('.', "/");
+        for t in &st.types {
+            let cls = out.join(&pkg_dir).join(format!("{t}.class"));
+            let Ok(md) = std::fs::metadata(&cls) else {
+                return false;
+            };
+            let Ok(mt) = md.modified() else {
+                return false;
+            };
+            let cms = mt
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            if cms < st.mtime_ms {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// 首次编译采纳已有产物：无清单时，若每个源文件的每个声明类型都有「mtime 不早于源码」
+/// 的对应主 class，则用现有 class 建清单（struct 指纹读现有 class），**不重编**。
+/// 把「首次全量编译」变成「首次建索引」。任一源文件缺对应 class / class 比源码旧 /
+/// 读不出指纹 → 返回 None，整模块回落正常全量编译（绝不拿旧 class 顶替新源码）。
+fn try_adopt(
+    ctx: &Ctx,
+    module: &str,
+    layout: &ModuleLayout,
+    cp_fp: &str,
+    cc_fp: &str,
+) -> Result<Option<Built>, String> {
+    let sources = layout.collect_sources();
+    if sources.is_empty() {
+        return Ok(None);
+    }
+    if !adopt_classes_fresh(layout, &sources) {
+        return Ok(None);
+    }
+    // 守卫全过 → 读现有 class 的结构指纹建清单；读不出就回落编译，不报错。
+    let post = match struct_fps_for(ctx, layout, &sources, None) {
+        Ok(p) => p,
+        Err(_) => return Ok(None),
+    };
+    let seed = match ctx.index(module) {
+        Ok((_index, cached_seed)) => cached_seed,
+        Err(_) => return Ok(None),
+    };
+    let next = build_state::updated_manifest(
+        layout, None, &sources, cp_fp, cc_fp, seed, true, &post, false,
+    );
+    if let Err(e) = build_state::write_manifest(&ctx.manifest_file(module), &next) {
+        return Err(format!("采纳已有产物写清单失败: {e}"));
+    }
+    if ctx.incremental_stat {
+        crate::compile_dirty::baseline(&ctx.root, module, &layout.source_roots);
+    }
+    ctx.log_module(
+        module,
+        &format!(
+            "采纳已有产物：{} 个源文件的 class 已存在且不比源码旧，只建清单不重编",
+            sources.len()
+        ),
+    );
+    let mut r = empty_result(module, &format!("{} 个文件（采纳已有产物）", sources.len()));
+    r.source_count = sources.len();
+    r.modules.push(ModuleBuildResult {
+        module: module.to_string(),
+        status: "ok".to_string(),
+        error_count: 0,
+        warning_count: 0,
+        duration_ms: 0,
+        source_count: sources.len(),
+        out_dir: layout
+            .outputs
+            .first()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        cleaned: 0,
+        reason: Some("采纳已有产物（未重编）".to_string()),
+    });
+    let line = format!(
+        "PERF build-phase module={module} skip=0 adopt=1 sources={} total=0",
+        sources.len()
+    );
+    println!("{line}");
+    perf_log(ctx, &line);
+    Ok(Some(Built {
+        result: r,
+        changed_files: sources,
+        struct_changed: true,
+        removed: Vec::new(),
+    }))
+}
+
 pub(super) fn build_one(
     ctx: &Ctx,
     module: &str,
@@ -368,6 +504,11 @@ pub(super) fn build_one(
     cleaned: usize,
 ) -> Result<Built, String> {
     let layout = ModuleLayout::resolve(&ctx.root, module);
+    // 分层打点：fp / decide(含扫描) / compile / struct 各阶段耗时，回答「这次慢在哪」。
+    let t_total = std::time::Instant::now();
+    let mut compile_ms = 0u64;
+    let mut struct_ms = 0u64;
+    let t_fp = std::time::Instant::now();
     let (cp_fp, cc_fp) = build_state::config_fingerprints(
         &layout,
         &ctx.root,
@@ -376,8 +517,16 @@ pub(super) fn build_one(
         &ctx.ecj,
         &ctx.java,
     );
+    let fp_ms = t_fp.elapsed().as_millis() as u64;
     let previous = ctx.manifest(module);
+    // 首次编译（无清单）+ 开关开 + 非强制全量：尝试采纳已有 class，成功则不重编直接返回。
+    if ctx.adopt_existing && previous.is_none() && mode != Mode::Full {
+        if let Some(built) = try_adopt(ctx, module, &layout, &cp_fp, &cc_fp)? {
+            return Ok(built);
+        }
+    }
     // 脏集增量 stat：开关开时取本模块脏集提示喂 decide；不可靠 / 关掉 → decide 全扫。
+    let t_dec = std::time::Instant::now();
     let hint = if ctx.incremental_stat {
         Some(crate::compile_dirty::hint(
             &ctx.root,
@@ -397,6 +546,7 @@ pub(super) fn build_one(
         mode == Mode::Full,
         hint.as_ref(),
     );
+    let decide_ms = t_dec.elapsed().as_millis() as u64;
     // 本轮是否真做了全扫（Full 判定，或 hint 不可靠 / 关掉回落全扫）：全扫成功要建基线。
     let full_scanned = !used_reliable_hint || matches!(decision, Decision::Full { .. });
     if let Decision::Skip = decision {
@@ -412,6 +562,12 @@ pub(super) fn build_one(
             crate::compile_dirty::baseline(&ctx.root, module, &layout.source_roots);
         }
         ctx.log_module(module, "输入未变化，跳过（点「重新编译本模块」可强制全量）");
+        let line = format!(
+            "PERF build-phase module={module} skip=1 fp={fp_ms} decide={decide_ms} compile=0 struct=0 total={}",
+            t_total.elapsed().as_millis()
+        );
+        println!("{line}");
+        perf_log(ctx, &line);
         let mut r = empty_result(module, "0 个文件（未变化，已跳过）");
         r.modules.push(ModuleBuildResult {
             module: module.to_string(),
@@ -500,6 +656,7 @@ pub(super) fn build_one(
         cached_seed
     };
     let env = ctx.env(&index);
+    let t_c1 = std::time::Instant::now();
     let mut result = if files.is_empty() {
         empty_result(module, "0 个文件（仅删除）")
     } else {
@@ -507,6 +664,7 @@ pub(super) fn build_one(
             ctx.log(s)
         })?
     };
+    compile_ms += t_c1.elapsed().as_millis() as u64;
     let mut compiled_all = files.clone();
     let mut fps_map: HashMap<String, Option<String>> = HashMap::new();
     let mut struct_changed = false;
@@ -517,7 +675,9 @@ pub(super) fn build_one(
     let mut struct_seeds: Vec<PathBuf> = Vec::new();
 
     if result.error_count == 0 {
+        let t_s1 = std::time::Instant::now();
         let post = struct_fps_for(ctx, &layout, &files, previous.as_ref())?;
+        struct_ms += t_s1.elapsed().as_millis() as u64;
         let structural = structural_files(&layout, &files, previous.as_ref(), &post);
         fps_map.extend(post);
         struct_changed = !structural.is_empty() || !removed.is_empty();
@@ -580,14 +740,18 @@ pub(super) fn build_one(
                     module,
                     &format!("结构传播第 {prop_rounds} 轮：{} 个引用方", refs.len()),
                 );
+                let t_c2 = std::time::Instant::now();
                 let r2 = compile::compile(&env, &make_job(&layout, module, &refs, &seed), &|s| {
                     ctx.log(s)
                 })?;
+                compile_ms += t_c2.elapsed().as_millis() as u64;
                 merge_into(&mut result, &r2);
                 if r2.error_count > 0 {
                     break;
                 }
+                let t_s2 = std::time::Instant::now();
                 let post2 = struct_fps_for(ctx, &layout, &refs, previous.as_ref())?;
+                struct_ms += t_s2.elapsed().as_millis() as u64;
                 queue = structural_files(&layout, &refs, previous.as_ref(), &post2);
                 struct_seeds.extend(queue.iter().cloned());
                 fps_map.extend(post2);
@@ -601,13 +765,17 @@ pub(super) fn build_one(
             }
             if fell_back_full && result.error_count == 0 {
                 let all_files = layout.collect_sources();
+                let t_c3 = std::time::Instant::now();
                 let rf =
                     compile::compile(&env, &make_job(&layout, module, &all_files, &seed), &|s| {
                         ctx.log(s)
                     })?;
+                compile_ms += t_c3.elapsed().as_millis() as u64;
                 merge_into(&mut result, &rf);
                 if rf.error_count == 0 {
+                    let t_s3 = std::time::Instant::now();
                     let postf = struct_fps_for(ctx, &layout, &all_files, previous.as_ref())?;
+                    struct_ms += t_s3.elapsed().as_millis() as u64;
                     struct_seeds.extend(structural_files(
                         &layout,
                         &all_files,
@@ -729,6 +897,18 @@ pub(super) fn build_one(
         ),
     );
     let ok = result.error_count == 0;
+    let line = format!(
+        "PERF build-phase module={module} skip=0 fp={fp_ms} decide={decide_ms} compile={compile_ms} struct={struct_ms} total={}",
+        t_total.elapsed().as_millis()
+    );
+    println!("{line}");
+    perf_log(ctx, &line);
+    ctx.log_module(
+        module,
+        &format!(
+            "耗时分层：指纹 {fp_ms}ms · 判定 {decide_ms}ms · 编译 {compile_ms}ms · 结构 {struct_ms}ms"
+        ),
+    );
     // 跨模块传播种子 = 源码变的 ∪ 结构变的（含传播里常量被连带更新的引用方）
     let mut seeds_out = changed;
     if ok {
@@ -1427,6 +1607,13 @@ pub(super) fn build_all_impl(
         .any(|l| l.status == "failed" || l.status == "blocked");
     total_result.ok = total_result.error_count == 0 && !has_bad;
     total_result.modules = led;
+    let line = format!(
+        "PERF build-all modules={total} sources={} ms={}",
+        total_result.source_count,
+        started.elapsed().as_millis()
+    );
+    println!("{line}");
+    perf_log(ctx, &line);
     ctx.progress(
         "done",
         total,
@@ -3876,40 +4063,64 @@ mod tests {
             println!("跳过：没有源模块");
             return;
         }
-        let Some(types) = crate::workspace_types::shared_opt(root, &config_dir) else {
-            println!("跳过：类型索引未建");
-            return;
-        };
+        // 用阻塞版 shared：无缓存就同步建索引（只读源树），保证探针真跑而不是跳过。
+        let types = crate::workspace_types::shared(root, &config_dir);
         let maps = crate::module_graph::type_maps(&types);
         let known: HashSet<String> = modules.iter().map(|m| m.to_ascii_lowercase()).collect();
-        let mut deps = module_deps(root, &modules);
+        let base = module_deps(root, &modules);
         let mut src_count: HashMap<String, usize> = HashMap::new();
+        let mut exts: HashMap<String, build_state::ExtRefs> = HashMap::new();
         for m in &modules {
             let layout = ModuleLayout::resolve(root, m);
             src_count.insert(m.to_ascii_lowercase(), layout.collect_sources().len());
-            let ext = build_state::module_ext_refs(&layout);
-            let entry = deps.entry(m.clone()).or_default();
-            for d in crate::module_graph::join_ext(&ext, &maps) {
-                if d.eq_ignore_ascii_case(m) || !known.contains(&d.to_ascii_lowercase()) {
-                    continue;
-                }
-                if !entry.iter().any(|x| x.eq_ignore_ascii_case(&d)) {
-                    entry.push(d);
+            exts.insert(
+                m.to_ascii_lowercase(),
+                build_state::module_ext_refs(&layout),
+            );
+        }
+        // 边类型消融：置空 ExtRefs 其它字段隔离 fq / wild / 同包 三类边，各建一张依赖图。
+        let build_deps = |pick: fn(&build_state::ExtRefs) -> build_state::ExtRefs| {
+            let mut d = base.clone();
+            for m in &modules {
+                let ext = pick(exts.get(&m.to_ascii_lowercase()).unwrap());
+                let entry = d.entry(m.clone()).or_default();
+                for x in crate::module_graph::join_ext(&ext, &maps) {
+                    if x.eq_ignore_ascii_case(m) || !known.contains(&x.to_ascii_lowercase()) {
+                        continue;
+                    }
+                    if !entry.iter().any(|y| y.eq_ignore_ascii_case(&x)) {
+                        entry.push(x);
+                    }
                 }
             }
-        }
-        let total_mods = modules.len();
-        let mut closure_sizes: Vec<usize> = Vec::new();
-        let mut big = 0usize;
-        for m in &modules {
+            d
+        };
+        let deps_full = build_deps(|e| e.clone());
+        let deps_fq = build_deps(|e| build_state::ExtRefs {
+            fq: e.fq.clone(),
+            wild: vec![],
+            packages: vec![],
+            simple: e.simple.clone(),
+        });
+        let deps_wild = build_deps(|e| build_state::ExtRefs {
+            fq: vec![],
+            wild: e.wild.clone(),
+            packages: vec![],
+            simple: e.simple.clone(),
+        });
+        let deps_pkg = build_deps(|e| build_state::ExtRefs {
+            fq: vec![],
+            wild: vec![],
+            packages: e.packages.clone(),
+            simple: e.simple.clone(),
+        });
+        let closure_mods_of = |deps: &HashMap<String, Vec<String>>, m: &str| -> usize {
             let mut seen: HashSet<String> = HashSet::new();
             let mut queue = vec![m.to_ascii_lowercase()];
             seen.insert(m.to_ascii_lowercase());
-            let mut closure_mods = 0usize;
-            let mut closure_srcs = 0usize;
+            let mut n = 0usize;
             while let Some(cur) = queue.pop() {
-                closure_mods += 1;
-                closure_srcs += src_count.get(&cur).copied().unwrap_or(0);
+                n += 1;
                 if let Some(ds) = deps.get(&cur) {
                     for d in ds {
                         if seen.insert(d.to_ascii_lowercase()) {
@@ -3918,13 +4129,37 @@ mod tests {
                     }
                 }
             }
-            closure_sizes.push(closure_mods);
-            if closure_mods * 2 > total_mods {
+            n
+        };
+        let total_mods = modules.len();
+        let mut closure_sizes: Vec<usize> = Vec::new();
+        let mut big = 0usize;
+        for m in &modules {
+            let cm = closure_mods_of(&deps_full, m);
+            let cs: usize = {
+                let mut seen: HashSet<String> = HashSet::new();
+                let mut queue = vec![m.to_ascii_lowercase()];
+                seen.insert(m.to_ascii_lowercase());
+                let mut s = 0usize;
+                while let Some(cur) = queue.pop() {
+                    s += src_count.get(&cur).copied().unwrap_or(0);
+                    if let Some(ds) = deps_full.get(&cur) {
+                        for d in ds {
+                            if seen.insert(d.to_ascii_lowercase()) {
+                                queue.push(d.to_ascii_lowercase());
+                            }
+                        }
+                    }
+                }
+                s
+            };
+            closure_sizes.push(cm);
+            if cm * 2 > total_mods {
                 big += 1;
             }
             println!(
-                "PERF closure module={m} direct={} closure-modules={closure_mods}/{total_mods} closure-sources={closure_srcs}",
-                deps.get(m).map(|d| d.len()).unwrap_or(0)
+                "PERF closure module={m} direct={} closure-modules={cm}/{total_mods} closure-sources={cs}",
+                deps_full.get(m).map(|d| d.len()).unwrap_or(0)
             );
         }
         closure_sizes.sort_unstable();
@@ -3934,5 +4169,41 @@ mod tests {
             closure_sizes[n / 2],
             closure_sizes[n - 1]
         );
+        let median_of = |deps: &HashMap<String, Vec<String>>| -> usize {
+            let mut v: Vec<usize> = modules.iter().map(|m| closure_mods_of(deps, m)).collect();
+            v.sort_unstable();
+            v[v.len() / 2]
+        };
+        println!(
+            "PERF closure-ablation median fq={} wild={} pkg={} full={}",
+            median_of(&deps_fq),
+            median_of(&deps_wild),
+            median_of(&deps_pkg),
+            median_of(&deps_full)
+        );
+    }
+
+    #[test]
+    fn adopt_guard_fresh_stale_missing() {
+        let base = crate::test_support::tmp("adopt");
+        let root = base.join("ws");
+        let m = root.join("gl");
+        let src = m.join("src/public/p/A.java");
+        let cls = m.join("classes/p/A.class");
+        std::fs::create_dir_all(src.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(cls.parent().unwrap()).unwrap();
+        let layout = ModuleLayout::resolve(&root, "gl");
+        // 缺 class → 假（回落编译）
+        std::fs::write(&src, "package p; public class A {}").unwrap();
+        assert!(!adopt_classes_fresh(&layout, std::slice::from_ref(&src)));
+        // class 不比源码旧 → 真（可采纳）
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::fs::write(&cls, "x").unwrap();
+        assert!(adopt_classes_fresh(&layout, std::slice::from_ref(&src)));
+        // 源码后来改得比 class 新 → 假（stale class 绝不顶替新源码）
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::fs::write(&src, "package p; public class A { int x; }").unwrap();
+        assert!(!adopt_classes_fresh(&layout, std::slice::from_ref(&src)));
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

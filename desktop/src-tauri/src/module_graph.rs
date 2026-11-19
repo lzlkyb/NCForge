@@ -49,8 +49,14 @@ pub fn join_ext(ext: &ExtRefs, maps: &TypeMaps) -> Vec<String> {
     }
     for w in &ext.wild {
         if let Some(entries) = maps.pkg.get(&w.to_ascii_lowercase()) {
-            for (_, m) in entries {
-                out.insert(m.clone());
+            // 通配 import 也只连「正文点名了简单类名」的模块（与同包分支、文件级
+            // referrers_of_names 同款）。真通配引用必在正文点名该类型，故不会漏依赖；
+            // 不过滤会把整包所有模块连进来，传递闭包爆炸→「编译本模块」实编大半个
+            // 工作区（2026-11-19 实测中位闭包 35/59 模块、~98% 源文件）。
+            for (simple, m) in entries {
+                if ext.simple.binary_search(simple).is_ok() {
+                    out.insert(m.clone());
+                }
             }
         }
     }
@@ -135,13 +141,40 @@ mod tests {
             fq: vec!["p.A".into()],
             wild: vec!["q".into()],
             packages: vec!["r".into()],
-            simple: vec!["d".into(), "unrelated".into()],
+            // 通配 q 需正文点名 c 才连 mb；同包 r 需点名 d 才连 mc
+            simple: vec!["c".into(), "d".into(), "unrelated".into()],
         };
         let deps = join_ext(&ext, &maps);
         assert_eq!(
             deps,
             vec!["ma".to_string(), "mb".to_string(), "mc".to_string()]
         );
+    }
+
+    #[test]
+    fn wildcard_needs_mention_not_whole_package() {
+        // 反例守卫：通配 import q.* 不得把整包所有模块连进来（闭包爆炸根因）。
+        let maps = maps_of(vec![hit("q.C", "q", "C", "mb"), hit("q.E", "q", "E", "md")]);
+        // 正文只点名 C → 只连 mb，不连 md
+        let ext = ExtRefs {
+            fq: vec![],
+            wild: vec!["q".into()],
+            packages: vec![],
+            simple: vec!["c".into()],
+        };
+        assert_eq!(join_ext(&ext, &maps), vec!["mb".to_string()]);
+        // 点名 E → 连 md
+        let ext_e = ExtRefs {
+            simple: vec!["e".into()],
+            ..ext.clone()
+        };
+        assert_eq!(join_ext(&ext_e, &maps), vec!["md".to_string()]);
+        // 一个都没点名 → 通配不连任何模块（旧语义会连 mb+md，正是要修的过连）
+        let ext_none = ExtRefs {
+            simple: vec!["unrelated".into()],
+            ..ext.clone()
+        };
+        assert_eq!(join_ext(&ext_none, &maps), Vec::<String>::new());
     }
 
     #[test]

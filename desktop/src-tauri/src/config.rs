@@ -139,6 +139,11 @@ pub struct AppConfig {
     /// 关掉 = 每次 decide 都全扫（与加这个字段之前完全一致），用于排查脏集疑似漏编。
     #[serde(default = "default_true")]
     pub incremental_stat: bool,
+    /// 首次编译（无清单）时，若输出目录已有「比源码新」的 class，采纳已有产物只建清单、
+    /// 不重编（默认开）。任一源文件缺对应新 class 即整模块回落全量编译，绝不拿旧 class 顶替。
+    /// 关掉 = 首次一律实编（与加这个字段之前完全一致）。
+    #[serde(default = "default_true")]
+    pub adopt_existing: bool,
     /// 打开工作区后在后台预热类索引（首次冷扫 10~100 秒，预热后第一次保存就能编上）。
     #[serde(default = "default_true")]
     pub prewarm_index: bool,
@@ -347,6 +352,7 @@ impl Default for AppConfig {
             auto_compile_incremental: true,
             auto_compile_external: true,
             incremental_stat: true,
+            adopt_existing: true,
             prewarm_index: true,
             persistent_worker: true,
             build_parallel: 2,

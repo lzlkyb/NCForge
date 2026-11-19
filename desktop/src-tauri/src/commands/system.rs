@@ -76,6 +76,9 @@ pub struct ConfigPatch {
     /// decide 用监听脏集增量 stat（关掉 = 每次全模块扫描）。
     #[serde(default)]
     pub incremental_stat: Option<bool>,
+    /// 首次编译采纳已有 class（关掉 = 首次一律实编）。
+    #[serde(default)]
+    pub adopt_existing: Option<bool>,
     /// 打开工作区后后台预热类索引。
     #[serde(default)]
     pub prewarm_index: Option<bool>,
@@ -120,6 +123,9 @@ pub async fn patch_config(
             }
             if let Some(v) = patch.incremental_stat {
                 cfg.incremental_stat = v;
+            }
+            if let Some(v) = patch.adopt_existing {
+                cfg.adopt_existing = v;
             }
             if let Some(v) = patch.prewarm_index {
                 cfg.prewarm_index = v;
