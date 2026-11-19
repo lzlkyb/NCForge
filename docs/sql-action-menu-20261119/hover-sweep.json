@@ -1,0 +1,138 @@
+{
+  "steps": [
+    {
+      "label": "suggest open",
+      "uniq": [
+        "[149,694,275,430]"
+      ]
+    },
+    {
+      "label": "suggest row0",
+      "uniq": [
+        "[149,694,275,430]"
+      ]
+    },
+    {
+      "label": "suggest row2",
+      "uniq": [
+        "[149,694,275,430]"
+      ]
+    },
+    {
+      "label": "suggest row4",
+      "uniq": [
+        "[149,694,275,430]"
+      ]
+    },
+    {
+      "label": "suggest row5",
+      "uniq": [
+        "[149,694,275,430]"
+      ]
+    },
+    {
+      "label": "suggest row1",
+      "uniq": [
+        "[149,694,275,430]"
+      ]
+    },
+    {
+      "label": "suggest docs open",
+      "uniq": [
+        "[149,694,275,430]"
+      ]
+    },
+    {
+      "label": "suggest docs row0",
+      "uniq": [
+        "[149,694,275,430]"
+      ]
+    },
+    {
+      "label": "suggest docs row4",
+      "uniq": [
+        "[149,694,275,430]"
+      ]
+    },
+    {
+      "label": "suggest docs row5",
+      "uniq": [
+        "[149,694,275,430]"
+      ]
+    },
+    {
+      "label": "suggest docs row2",
+      "uniq": [
+        "[149,694,275,430]"
+      ]
+    },
+    {
+      "label": "ctxmenu immediate",
+      "uniq": [
+        "[140,889,524,318]"
+      ]
+    },
+    {
+      "label": "ctxmenu open",
+      "uniq": [
+        "[140,889,524,318]"
+      ]
+    },
+    {
+      "label": "ctxmenu row0",
+      "uniq": [
+        "[140,889,524,318]"
+      ]
+    },
+    {
+      "label": "ctxmenu row2",
+      "uniq": [
+        "[140,889,524,318]"
+      ]
+    },
+    {
+      "label": "ctxmenu row4",
+      "uniq": [
+        "[140,889,524,318]"
+      ]
+    },
+    {
+      "label": "ctxmenu row6",
+      "uniq": [
+        "[140,889,524,318]"
+      ]
+    },
+    {
+      "label": "ctxmenu row1",
+      "uniq": [
+        "[140,889,524,318]"
+      ]
+    },
+    {
+      "label": "chip open",
+      "uniq": [
+        "[128,618,18,71]"
+      ]
+    },
+    {
+      "label": "chip hover",
+      "uniq": [
+        "[128,618,18,71]"
+      ]
+    }
+  ],
+  "ctxDiag": {
+    "wrapped": true,
+    "hides": [],
+    "layouts": [],
+    "shows": [
+      "    at cv.show (eval at evaluate (:370:30), <anonymous>:9:51) |     at StandaloneContextViewService2.showContextView (http://localhost:1420/node_modules/.vite/deps/chunk-F7AFFBUM.js?v=3d4e8aff:6554:22) |     at StandaloneContextViewService2.showContextView (http://localhost:1420/node_modules/.vite/deps/chunk-F7AFFBUM.js?v=3d4e8aff:17790:18) |     at ContextMenuHandler.showContextMenu (http://localhost:1420/node_modules/.vite/deps/chunk-F7AFFBUM.js?v=3d4e8aff:10073:29) |     at StandaloneContextMenuService2.showContextMenu (http://localhost:1420/node_modules/.vite/deps/chunk-F7AFFBUM.js?v=3d4e8aff:10200:29)"
+    ],
+    "removes": [],
+    "present": false,
+    "viewConnected": true,
+    "menuInView": true,
+    "rootShadow": true
+  },
+  "errors": []
+}
