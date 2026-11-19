@@ -82,10 +82,13 @@ describe("workbench docking", () => {
     editor.value = "unsaved source";
     await act(async () => render("logs"));
     expect(host.querySelector<HTMLElement>(".wb-code-surface")?.hidden).toBe(true);
+    expect(host.querySelector<HTMLElement>(".wb-code-surface")?.inert).toBe(true);
+    expect(host.querySelector<HTMLElement>(".wb-document-surface")?.inert).toBe(false);
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="关闭日志排查"]')!.click());
     expect(requested).toBe("files");
     expect(host.querySelector('[aria-label="关闭日志排查"]')).toBeNull();
     expect(host.querySelector<HTMLElement>(".wb-code-surface")?.hidden).toBe(false);
+    expect(host.querySelector<HTMLElement>(".wb-code-surface")?.inert).toBe(false);
     expect(host.querySelector("textarea")).toBe(editor);
     expect(editor.value).toBe("unsaved source");
   });

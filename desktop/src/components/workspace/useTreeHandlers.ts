@@ -1,5 +1,6 @@
 import { useMemo, useRef } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
+import type { JavaTreeMember } from "../../lib/javaTreeMembers";
 
 /**
  * 行组件的回调外壳。
@@ -14,8 +15,9 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 export function useTreeHandlers(impl: {
   toggleRow: (path: string, parent: string | null) => void;
   toggle: (path: string) => void;
-  onOpen: (path: string) => void;
+  onOpen: (path: string, pos?: { line: number; column: number }) => void;
   onPin?: (path: string) => void;
+  toggleMembers?: (path: string) => void;
   openMenu: (e: ReactMouseEvent, path: string, isDir: boolean) => void;
   commitEdit: (value: string) => Promise<void>;
   cancelEdit: () => void;
@@ -41,6 +43,14 @@ export function useTreeHandlers(impl: {
       onActivate: (path: string) => {
         latest.current.setSelected({ path, isDir: false });
         latest.current.onOpen(path);
+      },
+      onToggleMembers: (path: string) => {
+        select(path, false);
+        latest.current.toggleMembers?.(path);
+      },
+      onOpenMember: (path: string, member: JavaTreeMember) => {
+        latest.current.setSelected({ path: member.id, isDir: false });
+        latest.current.onOpen(path, { line: member.line, column: member.column });
       },
       // 双击固定预览只对当前工程的文件有意义：别的工程还没打开，点了会先切工作区
       onPin: (path: string) => {

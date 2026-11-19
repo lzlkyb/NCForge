@@ -1,0 +1,417 @@
+{
+  "phase": "after",
+  "entry": "/assets/index-CVplZmzN.js",
+  "cold": [
+    {
+      "key": "files",
+      "skeleton": {
+        "x": 308,
+        "y": 91,
+        "width": 1121,
+        "height": 743
+      },
+      "document": {
+        "x": 308,
+        "y": 91,
+        "width": 1121,
+        "height": 743
+      },
+      "inside": true,
+      "outside": 0,
+      "toolbar": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14,
+      "actual": {
+        "x": 308,
+        "y": 44,
+        "width": 1121,
+        "height": 790
+      }
+    },
+    {
+      "key": "db",
+      "skeleton": {
+        "x": 304,
+        "y": 80,
+        "width": 1125,
+        "height": 790
+      },
+      "document": {
+        "x": 304,
+        "y": 80,
+        "width": 1125,
+        "height": 790
+      },
+      "inside": true,
+      "outside": 0,
+      "toolbar": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14,
+      "actual": {
+        "x": 304,
+        "y": 80,
+        "width": 1125,
+        "height": 790
+      }
+    },
+    {
+      "key": "svn",
+      "skeleton": {
+        "x": 348,
+        "y": 80,
+        "width": 1081,
+        "height": 790
+      },
+      "document": {
+        "x": 348,
+        "y": 80,
+        "width": 1081,
+        "height": 790
+      },
+      "inside": true,
+      "outside": 0,
+      "toolbar": {
+        "x": 64,
+        "y": 44,
+        "width": 1365,
+        "height": 36
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14,
+      "actual": {
+        "x": 348,
+        "y": 80,
+        "width": 1081,
+        "height": 790
+      }
+    },
+    {
+      "key": "meta",
+      "skeleton": {
+        "x": 64,
+        "y": 80,
+        "width": 1365,
+        "height": 790
+      },
+      "document": {
+        "x": 64,
+        "y": 80,
+        "width": 1365,
+        "height": 790
+      },
+      "inside": true,
+      "outside": 0,
+      "toolbar": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14,
+      "actual": {
+        "x": 64,
+        "y": 80,
+        "width": 1365,
+        "height": 790
+      }
+    },
+    {
+      "key": "logs",
+      "skeleton": {
+        "x": 64,
+        "y": 44,
+        "width": 1365,
+        "height": 826
+      },
+      "document": {
+        "x": 64,
+        "y": 44,
+        "width": 1365,
+        "height": 826
+      },
+      "inside": true,
+      "outside": 0,
+      "toolbar": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14,
+      "actual": {
+        "x": 64,
+        "y": 44,
+        "width": 1365,
+        "height": 826
+      }
+    },
+    {
+      "key": "settings",
+      "skeleton": {
+        "x": 308,
+        "y": 44,
+        "width": 1121,
+        "height": 826
+      },
+      "document": {
+        "x": 308,
+        "y": 44,
+        "width": 1121,
+        "height": 826
+      },
+      "inside": true,
+      "outside": 0,
+      "toolbar": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14,
+      "actual": {
+        "x": 308,
+        "y": 44,
+        "width": 1121,
+        "height": 826
+      }
+    }
+  ],
+  "warm": [
+    {
+      "round": 0,
+      "key": "files",
+      "commitMs": 77,
+      "p95": 20.099999999998545,
+      "max": 69.86199998807933,
+      "longTasks": 1,
+      "longTaskMs": 77
+    },
+    {
+      "round": 0,
+      "key": "db",
+      "commitMs": 44.8,
+      "p95": 10.200000000000728,
+      "max": 38.49799997615992,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 0,
+      "key": "svn",
+      "commitMs": 23,
+      "p95": 10.100000000002183,
+      "max": 18.531999999999243,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 0,
+      "key": "meta",
+      "commitMs": 5.6,
+      "p95": 10.100000000002183,
+      "max": 20,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 0,
+      "key": "logs",
+      "commitMs": 6.6,
+      "p95": 10.200000000000728,
+      "max": 19.799999999999272,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 0,
+      "key": "settings",
+      "commitMs": 5.8,
+      "p95": 13.53399999999965,
+      "max": 20.100000000002183,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 1,
+      "key": "files",
+      "commitMs": 50.7,
+      "p95": 20.002000000000407,
+      "max": 36.397999976157735,
+      "longTasks": 1,
+      "longTaskMs": 50
+    },
+    {
+      "round": 1,
+      "key": "db",
+      "commitMs": 31.1,
+      "p95": 10.100000000002183,
+      "max": 20.33199997615884,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 1,
+      "key": "svn",
+      "commitMs": 14.9,
+      "p95": 10.100000000002183,
+      "max": 10.100000000002183,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 1,
+      "key": "meta",
+      "commitMs": 4.8,
+      "p95": 10.100000000002183,
+      "max": 10.200000000000728,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 1,
+      "key": "logs",
+      "commitMs": 5.5,
+      "p95": 10.100000000002183,
+      "max": 19.900000000001455,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 1,
+      "key": "settings",
+      "commitMs": 6.7,
+      "p95": 10.200000000000728,
+      "max": 19.899999999997817,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 2,
+      "key": "files",
+      "commitMs": 49.6,
+      "p95": 19.900000000001455,
+      "max": 38.297999988080846,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 2,
+      "key": "db",
+      "commitMs": 33,
+      "p95": 10.5,
+      "max": 20.331999952315527,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 2,
+      "key": "svn",
+      "commitMs": 14.5,
+      "p95": 10.200000000000728,
+      "max": 10.200000000000728,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 2,
+      "key": "meta",
+      "commitMs": 5,
+      "p95": 10.100000000002183,
+      "max": 19.799999999999272,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 2,
+      "key": "logs",
+      "commitMs": 5.6,
+      "p95": 13.434000000001106,
+      "max": 19.900000000001455,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 2,
+      "key": "settings",
+      "commitMs": 5.6,
+      "p95": 10.100000000002183,
+      "max": 13.434000000001106,
+      "longTasks": 0,
+      "longTaskMs": 0
+    }
+  ],
+  "transitions": [],
+  "retention": [
+    {
+      "treeBefore": {
+        "top": 6000,
+        "width": 240,
+        "height": 81013
+      },
+      "treeAfter": {
+        "identity": "retained",
+        "top": 6000,
+        "width": 240,
+        "height": 81013
+      },
+      "end": {
+        "selected": "true",
+        "visible": true,
+        "top": 80280
+      }
+    },
+    {
+      "sqlDraft": true,
+      "latestClick": "settings",
+      "reducedMotion": true
+    },
+    {
+      "narrowMetadata": true,
+      "narrowLogs": true
+    }
+  ],
+  "errors": []
+}

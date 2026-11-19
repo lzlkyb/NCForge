@@ -9,7 +9,7 @@
  *    被拦下），否则 CodeAction 找不到当前编辑器。
  *
  * 2. LEFT JOIN 后写在 WHERE 里的关联条件，行尾补一句人话
- *    （「排除无匹配主表行 · Ctrl+.」）。只在**光标所在那一行**出现：
+ *    （「排除无匹配主表行 · Alt+Enter」）。只在**光标所在那一行**出现：
  *    整篇都挂行尾说明会盖住代码，而这个提示本来就是「现在这一条有问题」。
  *
  * 🔴 两个前提都是「同步快照有才说话」：没读到业务关系就不显示 chip，
@@ -88,7 +88,7 @@ export function wireSqlAssistGhost(editor: Editor): monaco.IDisposable {
       const selected = sqlEditorSelectionActions(editor);
       if (!selected?.actions.length) return hideChip();
       const line = model.getPositionAt(selected.end).lineNumber;
-      return showChip(model, model.getOffsetAt({ lineNumber: line, column: model.getLineMaxColumn(line) }), "选区操作 · Ctrl+.",
+      return showChip(model, model.getOffsetAt({ lineNumber: line, column: model.getLineMaxColumn(line) }), "选区操作 · Alt+Enter",
         selected.actions.map(action => action.title).join("\n"), () => editor.trigger("sql-ghost", "editor.action.quickFix", {}), true);
     }
     if (dialectOfSqlModel(model) !== "plsql") return hideChip();
@@ -126,7 +126,7 @@ export function wireSqlAssistGhost(editor: Editor): monaco.IDisposable {
       return hideChip();
     }
     // 语句内点它实际是「在表名后追加 LEFT JOIN」，裸表名才是整条替换；文案统一叫联查。
-    showChip(model, analysis.tokens[index].end, "主子表联查", `${hint} · 点击或 Ctrl+. 打开`,
+    showChip(model, analysis.tokens[index].end, "主子表联查", `${hint} · Alt+Enter 或点击打开`,
       () => editor.trigger("sql-ghost", "editor.action.quickFix", {}));
   };
 
@@ -145,7 +145,7 @@ export function wireSqlAssistGhost(editor: Editor): monaco.IDisposable {
     lens.set([{
       range: new monaco.Range(from.lineNumber, from.column, to.lineNumber, to.column),
       options: {
-        after: { content: `  ${hit.move ? "排除无匹配主表行 · Ctrl+." : "仅保留匹配行 · Ctrl+."}`, inlineClassName: "ncforge-sql-lens" },
+        after: { content: `  ${hit.move ? "排除无匹配主表行 · Alt+Enter" : "仅保留匹配行 · Alt+Enter"}`, inlineClassName: "ncforge-sql-lens" },
         hoverMessage: { value: hit.message },
       },
     }]);

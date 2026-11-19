@@ -14,7 +14,7 @@ let host: HTMLDivElement;
 let root: Root;
 function Page({ page }: { page: string }) {
   const target = useRef<HTMLDivElement>(null);
-  return <><div ref={target}><textarea defaultValue="draft" /></div><WorkspacePageMotion page={page} target={target} /></>;
+  return <><div ref={target}><div className="wb-code-surface"><span className="wb-tab" data-active>Source.java</span><textarea defaultValue="draft" /></div></div><WorkspacePageMotion page={page} target={target} /></>;
 }
 beforeEach(() => {
   vi.clearAllMocks();
@@ -59,6 +59,7 @@ describe("真实内容框的页面淡入", () => {
     expect(animate).not.toHaveBeenCalled();
     act(() => root.render(<Page page="logs" />));
     expect(animate).toHaveBeenCalledWith([{ opacity: .85 }, { opacity: 1 }], { duration: 100, easing: "ease-out" });
+    expect(animate.mock.contexts[0]).toBe(host.querySelector(".wb-tab"));
     act(() => root.render(<Page page="db" />));
     expect(animation.cancel).toHaveBeenCalledTimes(1);
     expect(animate).toHaveBeenCalledTimes(2);

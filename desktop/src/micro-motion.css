@@ -1,0 +1,42 @@
+/* Operate surfaces acknowledge input without delaying content or animating layout dimensions. */
+.app-shell .app-side, .app-shell .wb-tabs-scroll { position:relative;isolation:isolate; }
+.app-shell .app-side { transition:none; }
+.app-shell .app-side-item { position:relative;z-index:1; }
+.app-shell .app-side[data-motion-selection-ready] .app-side-item[data-active] { background:transparent; }
+.ui-selection-indicator { position:absolute;pointer-events:none;z-index:0;transform-origin:top left; }
+.ui-selection-rail { border-radius:var(--r-control);background:hsl(var(--selection-bg)); }
+.ui-selection-tab { border-radius:var(--r-control);background:hsl(var(--selection-marker));z-index:2; }
+.app-shell .wb-editor-group-slot[data-focused] [data-motion-selection-ready] > .wb-tab[data-active] { box-shadow:none; }
+html .app-shell [data-motion-selection-ready] > .wb-tab[data-active] { box-shadow:none; }
+.meta-document-tabs { position:relative;isolation:isolate; }
+html .app-shell .meta-document-tabs[data-motion-selection-ready] .meta-document-tab.is-active { box-shadow:none; }
+.wb-editor-group-slot:not([data-focused]) .ui-selection-tab { visibility:hidden; }
+.app-shell .wb-tabs-scroll > .wb-tab { animation:ui-tab-arrive var(--dur-fast) var(--ease); }
+@keyframes ui-tab-arrive { from { opacity:.8;transform:translateY(2px); } to { opacity:1;transform:none; } }
+.wb-row-disclosure, .wb-file-disclosure > svg { transition:transform var(--dur-fast) var(--ease);transform-origin:center; }
+.wb-row[aria-expanded="true"] > .wb-row-disclosure, .wb-row[aria-expanded="true"] > .wb-file-disclosure > svg { transform:rotate(90deg); }
+.wb-tree-branch[data-enter] { animation:ui-feedback-in var(--dur-fast) var(--ease); }
+.wb-row[data-located]::after { content:"";position:absolute;inset:0;border:1px solid hsl(var(--primary));border-radius:inherit;pointer-events:none;animation:ui-locate-confirm var(--dur-enter) var(--ease) forwards; }
+@keyframes ui-locate-confirm { from { opacity:.8; } to { opacity:0; } }
+.app-shell .wb-dirty-dot { animation:ui-feedback-in var(--dur-fast) var(--ease); }
+.saved-hint > svg { animation:ui-confirm var(--dur-fast) var(--ease); }
+@keyframes ui-confirm { from { opacity:.7;transform:scale(.9); } to { opacity:1;transform:none; } }
+/* Existing custom context menus and tooltips share the entry language of the menu primitive. */
+.wb-ctx, [role="tooltip"] { animation:ui-tab-arrive var(--dur-fast) var(--ease); }
+:root :is(.meta-btn,.lg-ibtn,.wb-task-btn,.wb-outline-btn,.dbx-header-menu,.wb-tab-x) { transition:opacity var(--dur-fast) var(--ease),transform var(--dur-fast) var(--ease); }
+:root :is(.meta-btn,.lg-ibtn,.wb-task-btn,.wb-outline-btn,.dbx-header-menu,.wb-tab-x):active:not(:disabled):not([aria-disabled="true"]) { transform:translateY(1px);transition-duration:var(--dur-press); }
+/* All visual loops stop in retained inactive pages, including query and transfer progress. */
+:is(:root[data-app-hidden],[data-view-inactive],[hidden]) :is(.dbx-execution-track i,.dbx-transfer-progress span,.dbx-query-field,.dbx-transfer-job-icon svg) { animation-play-state:paused!important; }
+@media(prefers-reduced-motion:reduce) {
+  .ui-selection-indicator,.app-shell .wb-tabs-scroll > .wb-tab,.wb-tree-branch[data-enter],.wb-row[data-located]::after,.saved-hint > svg,.wb-ctx,[role="tooltip"] { animation:none!important; }
+  .wb-row-disclosure,.wb-file-disclosure > svg { transition:none!important; }
+  :root :is(.meta-btn,.lg-ibtn,.wb-task-btn,.wb-outline-btn,.dbx-header-menu,.wb-tab-x):active { transform:none!important; }
+  .wb-row[data-located]::after { display:none; }
+}
+:root[data-motion="reduce"] .wb-row[data-located]::after { display:none; }
+:root[data-motion="reduce"] :is(.meta-btn,.lg-ibtn,.wb-task-btn,.wb-outline-btn,.dbx-header-menu,.wb-tab-x):active { transform:none!important; }
+@media(forced-colors:active) {
+  .ui-selection-indicator { display:none; }
+  html .app-shell .app-side[data-motion-selection-ready] .app-side-item[data-active] { background:Highlight;color:HighlightText; }
+  html .app-shell [data-motion-selection-ready] > .wb-tab[data-active] { border-bottom:2px solid Highlight; }
+}

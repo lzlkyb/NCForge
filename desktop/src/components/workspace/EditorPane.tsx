@@ -69,6 +69,7 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
   const focusRef = useRef({ focused, onFocus, groupId }); focusRef.current = { focused, onFocus, groupId };
   // 视图现场的上报器要跨 effect 用（切文件那个 effect 里也要落一次）
   const reporterRef = useRef<ReturnType<typeof createViewReporter> | null>(null);
+  const appliedOptions = useRef("");
 
   // 创建一次
   useEffect(() => {
@@ -226,7 +227,7 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
   // 只读状态随标签变化
   useEffect(() => {
     editorRef.current?.updateOptions({ readOnly });
-  }, [readOnly, activePath]);
+  }, [readOnly]);
 
   // 设置变化与大文件降级共用一次计算，切换文件时保留用户的小地图偏好。
   //
@@ -237,7 +238,13 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     const editor = editorRef.current;
     if (!editor) return;
     const java = editor.getModel()?.getLanguageId() === "java";
-    const apply = () => editor.updateOptions(monacoOptionsOf(getEditorPrefs(), heavy, java));
+    const apply = () => {
+      const options = monacoOptionsOf(getEditorPrefs(), heavy, java);
+      const signature = JSON.stringify(options);
+      if (signature === appliedOptions.current) return;
+      appliedOptions.current = signature;
+      editor.updateOptions(options);
+    };
     apply();
     const detach = java && activePath && !heavy ? attachJavaStickyScope(editor, activePath) : undefined;
     window.addEventListener(PREFS_EVENT, apply);

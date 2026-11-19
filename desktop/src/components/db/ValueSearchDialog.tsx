@@ -118,7 +118,7 @@ export function ValueSearchDialog({ connId, onClose,tabId }: { connId: string; t
               </button>
             </div>
             <div className="dbx-vs-bar" aria-hidden>
-              <i style={{ width: `${pct}%` }} />
+              <i style={{ transform: `scaleX(${pct / 100})` }} />
             </div>
           </div>
         )}

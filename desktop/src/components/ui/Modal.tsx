@@ -37,7 +37,7 @@ interface ModalProps {
   closeOnOverlay?: boolean;
   /** 执行会话在工具页切后台时保留子组件，弹层隐藏且释放焦点；关闭后仍正常卸载。 */
   keepMountedWhenInactive?: boolean;
-  /** 进出场动画：scale（弹簧缩放，默认）| fade（纯淡入） */
+  /** scale 保留历史调用值，现使用轻位移；fade 只淡入，避免文字缩放。 */
   animation?: "scale" | "fade";
   /** 层级，默认 1000（原 UpdateNotesDialog/VersionHistoryModal 用 1000，Dialog 用 50） */
   zIndex?: number;
@@ -48,8 +48,8 @@ interface ModalProps {
  * 统一弹窗原语（动画质感升级 · 方案 C）。
  *
  * 解决「弹窗只有进场、关闭硬消失」的质感缺口：
- *  - 进场：遮罩淡入 + 内容 scale/opacity 弹入（mount transition 延迟卸载实现退场）
- *  - 退场：遮罩淡出 + 内容 scale-out，再卸载（不再「啪」地消失）
+ *  - 进场：遮罩淡入 + 内容轻位移，文字保持原尺寸
+ *  - 退场：视觉结束后卸载，交互与焦点在关闭时即释放
  *  - Esc / 点遮罩 / 关闭按钮统一关闭（调用方只需接 onClose）
  *  - 通过 createPortal 挂到 document.body，避免祖先层叠上下文影响 fixed 定位
  *  - 用户开启「减弱动效」时：退场延时归零、过渡即时（与全局守卫一致）
@@ -74,7 +74,7 @@ export function Modal({
   const retained = open && !active && keepMountedWhenInactive;
   const { mounted, entered } = usePresence(visible);
   // 焦点陷阱（a11y）：Tab 环绕在弹窗内、关闭后焦点归还触发元素。
-  // enabled 跟 mounted 走：内容延迟挂载/退场延迟卸载，陷阱只在内容真正存在时生效。
+  // 视觉退场继续播放，焦点与交互随 visible 立即释放。
   // Esc 在内容节点处理并停止冒泡，嵌套弹窗优先关闭自己。
   const surfaceRef = useRef<HTMLDivElement>(null);
   /**
@@ -87,7 +87,7 @@ export function Modal({
    */
   const downOnOverlay = useRef(false);
   const upOnOverlay = useRef(false);
-  useFocusTrap(surfaceRef, { enabled: mounted && !retained, onEscape: visible ? onClose : undefined });
+  useFocusTrap(surfaceRef, { enabled: visible, onEscape: visible ? onClose : undefined });
 
   if (!mounted && !retained) return null;
 
@@ -97,9 +97,10 @@ export function Modal({
       data-state={entered ? "open" : "closed"}
       data-exiting={!visible || undefined}
       style={{ zIndex, display: retained ? "none" : undefined }}
-      aria-hidden={retained || undefined}
+      aria-hidden={!visible || undefined}
+      data-view-inactive={!visible || undefined}
       // 页面切后台保留的弹层：display:none 之外再置 inert，确保它不接收焦点、不进读屏。
-      ref={(node) => { if (node) node.inert = retained; }}
+      ref={(node) => { if (node) node.inert = !visible; }}
       onMouseDown={(e) => {
         downOnOverlay.current = e.target === e.currentTarget;
         upOnOverlay.current = false;

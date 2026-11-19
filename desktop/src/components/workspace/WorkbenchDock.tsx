@@ -26,6 +26,7 @@ export interface DockToolTab {
 }
 
 export interface DockSlots {
+  activeTool?: string;
   hosts: Record<DockRegionName, HTMLElement | null>;
   /** 文件页槽位（tree/tabs/editor/status/output）：由 FilesTab 用 portal 注入。 */
   fileHosts: Record<FileSlotName, HTMLElement | null>;

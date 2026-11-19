@@ -14,7 +14,7 @@ import { useDebugSnapshot } from "../../lib/debugSession";
 import { openCallHierarchy } from "../../lib/callHierarchy";
 import { type CompileResult, type Problem } from "../../lib/compile";
 import { setSession, useWorkspaceSelector } from "../../lib/workspaceSession";
-import type { CodeDiag } from "../../lib/diagStore";
+import { useCodeDiags, type CodeDiag } from "../../lib/diagStore";
 import type { BuildMaintenance } from "../../hooks/useBuildMaintenance";
 import { countErrors, mergeProblems } from "../../lib/problemList";
 import { DevelopmentFlowControl } from "../services/DevelopmentFlowControl";
@@ -51,7 +51,7 @@ interface Props {
   /** 点日志里的报错行直接跳到那个文件的那一行。 */
   onOpenAt: (path: string, line: number, push?: boolean, column?: number) => void;
   /** jdt.ls 的代码检查（波浪线那批），与编译问题一起显示。 */
-  inspect: CodeDiag[];
+  inspect?: CodeDiag[];
   onNextProblem: () => void;
   onPrevProblem: () => void;
   /** 取消正在跑的编译（一轮最坏 30 分钟，没有这个按钮用户只能杀进程）。 */
@@ -70,6 +70,7 @@ interface Props {
  * 搜索结果留在侧栏、SQL 结果留在 SQL 标签页——它们和各自的输入表单是一体的，拆出来反而来回跳。
  */
 export function BottomPanel({ root, tab, onTab, running, result, log: logProp, onOpenProblem, onOpenAt, inspect, onNextProblem, onPrevProblem, onCancel, onClose, activePath = null, build, compileAll, onRestored }: Props) {
+  const codeDiags = useCodeDiags();
   const queryClient = useQueryClient();
   const serviceExpanded = useWorkspaceSelector(s => !!s.serviceExpanded);
   const layout = useWorkbenchLayout();
@@ -89,7 +90,8 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
   const diags = result?.diagnostics ?? [];
   // 徽章与「上/下一处」用合并后的口径：编译问题与代码检查经常指的是同一处，
   // 分开数会让数字和列表长度对不上
-  const merged = useMemo(() => mergeProblems(result?.problems, inspect), [result?.problems, inspect]);
+  const diagnostics = inspect ?? codeDiags;
+  const merged = useMemo(() => mergeProblems(result?.problems, diagnostics), [result?.problems, diagnostics]);
   const errors = countErrors(merged);
 
   const expanded = layout.expanded === tab || tab === "svc" && serviceExpanded;

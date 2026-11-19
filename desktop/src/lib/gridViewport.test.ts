@@ -1,6 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { columnViewport, selectionBounds } from "./gridViewport";
+import { columnViewport, retainColumnViewport, selectionBounds } from "./gridViewport";
 describe("wide result viewport", () => {
+  it("keeps column identity until scrolling changes the window, width or frozen geometry", () => {
+    const columns = Array.from({ length: 100 }, (_, i) => i), widths = columns.map(() => 100);
+    const before = columnViewport(columns, widths, new Set([0]), 0, 600, 40);
+    expect(retainColumnViewport(before, columnViewport(columns, widths, new Set([0]), 10, 600, 40))).toBe(before);
+    expect(retainColumnViewport(before, columnViewport(columns, widths, new Set([0]), 500, 600, 40))).not.toBe(before);
+    expect(retainColumnViewport(before, columnViewport(columns, widths, new Set([0, 1]), 0, 600, 40))).not.toBe(before);
+    widths[0] = 120;
+    expect(retainColumnViewport(before, columnViewport(columns, widths, new Set([0]), 0, 600, 40))).not.toBe(before);
+  });
   it("renders only intersecting columns and retains frozen columns with stable logical indices", () => {
     const visible=Array.from({length:200},(_,i)=>i), widths=visible.map(()=>100);
     const result=columnViewport(visible,widths,new Set([0,1]),5000,600,40);

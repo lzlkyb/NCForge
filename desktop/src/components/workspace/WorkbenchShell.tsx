@@ -1,4 +1,4 @@
-import { lazy, Suspense, useRef, type ReactNode } from "react";
+import { lazy, Suspense, useMemo, useRef, type ReactNode } from "react";
 import { WorkbenchFrame } from "./WorkbenchFrame";
 import { ViewActivityContext } from "../../lib/viewActivity";
 import { WorkspaceSkeleton } from "./WorkspaceSkeleton";
@@ -25,6 +25,8 @@ const FilesTab = lazy(() => import("../tabs/FilesTab").then((m) => ({ default: m
  * 这里把「活动」明确绑定成 activeTab === "files"（P1-17）。
  */
 export function WorkbenchShell({ activeTab, tool }: { activeTab: string; tool: ReactNode }) {
+  // Tool identity belongs to the dock/status regions; it must not rebuild the retained file session.
+  const files = useMemo(() => <Suspense fallback={<WorkspaceSkeleton page="files" />}><FilesTab /></Suspense>, []);
   // 渲染期写 ref 在这里是幂等的（StrictMode 双渲染也不会产生副作用），
   // 用它避免「记住访问过」再触发一轮渲染。
   const seenFiles = useRef(activeTab === "files");
@@ -37,9 +39,7 @@ export function WorkbenchShell({ activeTab, tool }: { activeTab: string; tool: R
         <>
           {seenFiles.current && (
             <ViewActivityContext.Provider value={activeTab === "files"}>
-              <Suspense fallback={<WorkspaceSkeleton page="files" />}>
-                <FilesTab activeTool={activeTab} />
-              </Suspense>
+              {files}
             </ViewActivityContext.Provider>
           )}
           {tool}

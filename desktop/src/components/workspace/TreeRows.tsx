@@ -7,13 +7,14 @@
 import { useJavaTreeKinds } from "../../hooks/useJavaTreeKinds";
 import type { ProblemMark } from "../../lib/problemMarks";
 import { diagnosticPathKey } from "../../lib/diagnosticScope";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import { memo, type MouseEvent as ReactMouseEvent } from "react";
 import { javaKindOfSymbol } from "../../lib/treeFileKind";
 import { hasJavaMembers, type TreeMembers, type JavaTreeMember } from "../../lib/javaTreeMembers";
 import { JavaMemberRows } from "./JavaMemberRows";
 import { TreeEditRow } from "./TreeEditRow";
 import { treeRowInset } from "./treeRowInset";
-import { TreeDirRow, TreeFileRow, TreeRowNote } from "./TreeRow";
+import { TreeDirRow, TreeRowNote } from "./TreeRow";
+import { ActiveTreeFileRow } from "./TreeActivePath";
 import { treeRowChunks } from "./TreeRowChunks";
 import { TreeCommitAuthors } from "./TreeCommitAuthors";
 import { filePathKey, joinPath, type EncodingMark } from "../../lib/workspace";
@@ -28,7 +29,6 @@ import type { EditState } from "./useTreeEdit";
 export interface TreeRowsCtx {
   dirs: Record<string, TreeDirState>;
   expanded: Set<string>;
-  activePath: string | null;
   selectedPath: string | null;
   marks: Record<string, EncodingMark>;
   /** 文件 → 书签条数，键已归一（`bookmarkPathKey`）。 */
@@ -95,7 +95,7 @@ function EditRow({ ctx, depth }: { ctx: TreeRowsCtx; depth: number }) {
 }
 
 /** 渲染 `dir` 这一层；目录展开时递归渲染下一层。 */
-export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx: TreeRowsCtx }) {
+export const TreeRows = memo(function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx: TreeRowsCtx }) {
   const state = ctx.dirs[dir];
   const javaKinds = useJavaTreeKinds(dir, state);
   const rows: JSX.Element[] = [];
@@ -136,7 +136,6 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
     );
   }
 
-  const activeKey = ctx.activePath ? filePathKey(ctx.activePath) : null;
   const renameTarget = ctx.editing?.mode === "rename" ? ctx.editing.target : undefined;
   for (const { dir: from, item, label, kind } of kids) {
     const full = joinPath(from, item.name);
@@ -177,13 +176,12 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
       const types = members?.status === "ready" ? members.rows.filter(row => row.depth === 0) : undefined;
       const javaKind = types ? (types.length === 1 ? javaKindOfSymbol(types[0].kind) : undefined) : javaKinds[item.name];
       rows.push(
-        <TreeFileRow
+        <ActiveTreeFileRow
           key={full}
           name={item.name}
           path={full}
           id={rowId(full)}
           level={depth + 1}
-          active={activeKey !== null && activeKey === filePathKey(full)}
           selected={ctx.selectedPath === full}
           mark={ctx.marks[full]}
           javaKind={javaKind}
@@ -203,5 +201,5 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
     }
   }
   const fileDirs = ctx.showCommitAuthors ? new Set(kids.filter(({ item }) => !item.isDir).map(({ dir: from }) => from)) : undefined;
-  return <TreeCommitAuthors dirs={fileDirs}>{treeRowChunks(rows)}</TreeCommitAuthors>;
-}
+  return <TreeCommitAuthors dirs={fileDirs}><div role="presentation" className="wb-tree-branch" data-enter={depth > 0 && rows.length <= 40 || undefined}>{treeRowChunks(rows)}</div></TreeCommitAuthors>;
+});

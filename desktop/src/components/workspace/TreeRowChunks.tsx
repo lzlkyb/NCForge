@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactElement } from "react";
 import { TreeDirRow, TreeFileRow } from "./TreeRow";
+import { ActiveTreeFileRow } from "./TreeActivePath";
 
 /** Batch fixed-height siblings so a large directory needs only a few rendering boundaries. */
 export function treeRowChunks(rows: ReactElement[]) {
@@ -14,7 +15,7 @@ export function treeRowChunks(rows: ReactElement[]) {
   };
   for (const row of rows) {
     // Nested branches and inline editors retain their natural, variable height.
-    if (row.type !== TreeDirRow && row.type !== TreeFileRow) { flush(); result.push(row); continue; }
+    if (row.type !== TreeDirRow && row.type !== TreeFileRow && row.type !== ActiveTreeFileRow) { flush(); result.push(row); continue; }
     chunk.push(row);
     if (chunk.length === 50) flush();
   }

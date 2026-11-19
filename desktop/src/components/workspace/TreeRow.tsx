@@ -77,7 +77,7 @@ export const TreeProjectRow = memo(function TreeProjectRow({
           : `${path}\n关联工程：只读浏览，写操作请先切换工作区`
       }
     >
-      <WorkspaceGlyph name={open ? "down" : "right"} size={14} className="wb-row-icon wb-row-disclosure" />
+      <WorkspaceGlyph name="right" size={14} className="wb-row-icon wb-row-disclosure" />
       <WorkspaceGlyph name="project" tone="slate" />
       <span className="wb-row-name">{name}</span>
       <span className="wb-project-badge" data-current={current || undefined}>
@@ -146,7 +146,7 @@ export const TreeDirRow = memo(function TreeDirRow({
       aria-description={[testRoot && "测试源码根", problemDescription(problem)].filter(Boolean).join(" · ") || undefined}
       title={sourceRoot ? path : name}
     >
-      <WorkspaceGlyph name={open ? "down" : "right"} size={14} className="wb-row-icon wb-row-disclosure" />
+      <WorkspaceGlyph name="right" size={14} className="wb-row-icon wb-row-disclosure" />
       <WorkspaceGlyph name={sourceRoot ? "source" : packageDir ? "package" : "folder"} tone={sourceRoot ? "teal" : "slate"} />
       <span className="wb-row-name" data-split={split > 0 || undefined}>
         {split > 0 ? <><span className="wb-row-prefix">{name.slice(0, split)}</span><span className="wb-row-tail">{name.slice(split)}</span></> : name}
@@ -241,7 +241,7 @@ export const TreeFileRow = memo(function TreeFileRow({
     >
       {onToggleMembers && <span className="wb-file-disclosure" title={memberExpanded ? "收起 Java 成员" : "展开 Java 成员"}
         onClick={e => { e.stopPropagation(); onToggleMembers(path); }} onDoubleClick={e => e.stopPropagation()}>
-        <WorkspaceGlyph name={memberExpanded ? "down" : "right"} size={12} />
+        <WorkspaceGlyph name="right" size={12} />
       </span>}
       <span className="wb-tree-file-label">
         <TreeTypeMarker kind={kind} compact={compactType}

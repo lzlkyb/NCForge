@@ -20,6 +20,10 @@ export interface CodeDiag {
 }
 
 let items: CodeDiag[] = [];
+const EMPTY_DIAGS: CodeDiag[] = [];
+let byPath = new Map<string, CodeDiag[]>();
+const pathKey = (path: string) => path.replace(/\\/g, "/").toLowerCase();
+const signatureOf = (list: CodeDiag[]) => list.map(d => `${pathKey(d.path)}|${d.line}|${d.column}|${d.severity}|${d.message}`).join("\n");
 /** 上次发布的内容签名。诊断每存一次盘就可能重发一遍，没变时不能换引用。 */
 let signature = "";
 const listeners = new Set<() => void>();
@@ -38,15 +42,31 @@ const subscribe = (cb: () => void): (() => void) => {
  * 订阅方会无限重渲染（这个坑在 SQL 片段库那边踩过一次）。
  */
 export function setCodeDiags(next: CodeDiag[]): void {
-  const sig = next.map((d) => `${d.path.toLowerCase()}|${d.line}|${d.column}|${d.severity}|${d.message}`).join("\n");
+  const sig = signatureOf(next);
   if (sig === signature) return;
   signature = sig;
   items = next;
+  const grouped = new Map<string, CodeDiag[]>();
+  for (const item of next) {
+    const key = pathKey(item.path);
+    const list = grouped.get(key) ?? [];
+    list.push(item); grouped.set(key, list);
+  }
+  // Unrelated diagnostics must not rebuild decorations in retained editors.
+  for (const [key, list] of grouped) {
+    const previous = byPath.get(key);
+    if (previous && signatureOf(previous) === signatureOf(list)) grouped.set(key, previous);
+  }
+  byPath = grouped;
   listeners.forEach((l) => l());
 }
 
 export function getCodeDiags(): CodeDiag[] {
   return items;
+}
+
+export function getCodeDiagsForPath(path: string): CodeDiag[] {
+  return byPath.get(pathKey(path)) ?? EMPTY_DIAGS;
 }
 
 export function useCodeDiags(): CodeDiag[] {

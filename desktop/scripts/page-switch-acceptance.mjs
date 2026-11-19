@@ -10,7 +10,7 @@ import { chromium } from 'playwright';
 const phase=process.argv[2] || 'after', dist=new URL('../dist/',import.meta.url);
 const tracing=process.argv.includes('--trace');
 assert.ok(['before','after'].includes(phase));
-const artifacts=new URL('../../docs/切页与骨架屏验收-2026-11-14/',import.meta.url);
+const artifacts=new URL(process.env.NCFORGE_PERF_ARTIFACTS ?? '../../docs/切页与骨架屏验收-2026-11-14/',import.meta.url);
 await mkdir(artifacts,{recursive:true});
 const html=await readFile(new URL('index.html',dist),'utf8'), entry=html.match(/<script type="module"[^>]*src="([^"]+)"/)?.[1];
 const db=await readFile(new URL('db-workbench-acceptance.test.mjs',import.meta.url),'utf8');
@@ -49,7 +49,7 @@ const server=createServer(async(req,res)=>{
   }catch{res.writeHead(404);res.end();}
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-const definitions=[['files','代码','.wb-code-context'],['db','数据库','.dbx-page'],['svn','版本控制','.vc-review-document'],['meta','元数据','.meta-workbench'],['logs','日志排查','.lg-page'],['settings','设置','.wb-settings-page']];
+const definitions=[['files','代码','.wb-editor-groups'],['db','数据库','.dbx-page'],['svn','版本控制','.vc-review-document'],['meta','元数据','.meta-workbench'],['logs','日志排查','.lg-page'],['settings','设置','.wb-settings-page']];
 let browser,page;const errors=[],cold=[],warm=[],retention=[];
 try{
   browser=await chromium.launch({headless:true,channel:'msedge'});
@@ -76,7 +76,7 @@ try{
     });cold.find(item=>item.key===key).actual=bounds;
     await page.screenshot({path:fileURLToPath(new URL('after-'+key+'-ready.png',artifacts)),animations:'disabled'});
   };
-  await page.locator('.wb-root').waitFor();await snapshot('files');await page.locator('.wb-code-context').waitFor();await actual('files');
+  await page.locator('.wb-root').waitFor();await snapshot('files');await page.locator('.wb-editor-groups').waitFor();await actual('files');
   for(const [key,label,selector] of definitions.slice(1)){
     await page.locator('.app-side').getByRole('button',{name:new RegExp('^'+label)}).click();
     await page.locator('.wb-root[data-tool="'+key+'"]').waitFor();await snapshot(key);
@@ -125,7 +125,7 @@ try{
     try{
       await narrow.route(/\/(MetaTab|LogTab)-[^/]+\.js$/,async route=>{await new Promise(resolve=>setTimeout(resolve,2500));await route.continue();});
       await narrow.goto('http://127.0.0.1:'+server.address().port+'/',{waitUntil:'domcontentloaded'});
-      await narrow.locator('.wb-code-context').waitFor();
+      await narrow.locator('.wb-editor-groups').waitFor();
       for(const [key,label,selector] of definitions.filter(item=>['meta','logs'].includes(item[0]))){
         await narrow.locator('.app-side').getByRole('button',{name:new RegExp('^'+label)}).click();
         await narrow.locator('[data-workspace-skeleton="'+key+'"][data-visible]').first().waitFor();

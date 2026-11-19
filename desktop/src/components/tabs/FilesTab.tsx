@@ -27,7 +27,7 @@ import { useProblemJump } from "../../hooks/useProblemJump";
 import { useBreakpointsRoot } from "../../hooks/useBreakpointsRoot";
 import { setRenameRequest, setGenerateRequest } from "../../lib/editorActions";
 import { invalidateFileIndex } from "../../lib/fileIndex";
-import { getCodeDiags, useCodeDiags } from "../../lib/diagStore";
+import { getCodeDiags } from "../../lib/diagStore";
 import { mergeProblems } from "../../lib/problemList";
 import { useNav } from "../../lib/navHistory";
 import { isHeavyFile } from "../../lib/largeFile";
@@ -73,7 +73,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
   const panelTab = useWorkspaceSelector((s) => s.panelTab);
   const compiling = useWorkspaceSelector((s) => s.compiling);
   const compileResult = useWorkspaceSelector((s) => s.compileResult);
-  const tree = useWorkspaceSelector((s) => s.tree);
+  const marks = useWorkspaceSelector((s) => s.tree.marks);
   const largeHintDismissed = useWorkspaceSelector((s) => s.largeHintDismissed);
   const encodingIssue = useWorkspaceSelector((s) => s.encodingIssue);
   const setRoot = (v: Updater<string | null | undefined>) => setSession({ root: v });
@@ -107,7 +107,6 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
   // 本地历史的兜底归档：切文件时抓上一文件 + 每 5 分钟抓一次当前文件
   // （保存前的那一版在 lib/fileSave.saveOne 里抓，那里才拿得到「改动前」）
   useLocalHistorySweep(activePath);
-  const codeDiags = useCodeDiags();
   const nav = useNav();
   const { compileActive, compileAll, compilePath, compileActiveFile, rebuildModule, rebuildAll } = useModuleCompile();
   const build = useBuildMaintenance({ rebuildModule, rebuildAll });
@@ -173,7 +172,6 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
     <BottomPanel root={root ?? ""} tab={panelTab} onTab={setPanelTab}
       running={compiling} result={compileResult} onOpenProblem={session.openProblem}
       onOpenAt={openAt}
-      inspect={codeDiags}
       onNextProblem={() => jumpToProblem(1)}
       onPrevProblem={() => jumpToProblem(-1)}
       onCancel={() => void compileCancel()} onClose={() => setPanelOpen(false)}
@@ -228,8 +226,8 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
           activePath,
           active,
           splitPath,
-          marks: tree.marks,
-          activeMark: active ? tree.marks[active.path] : undefined,
+          marks,
+          activeMark: active ? marks[active.path] : undefined,
           showLargeHint,
           // 大文件降级：提示条可以关掉，但编辑器里的降级一直有效
           heavyFile: active !== null && isHeavyFile(active),

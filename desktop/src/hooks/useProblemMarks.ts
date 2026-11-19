@@ -1,8 +1,8 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { diagnosticPathKey } from "../lib/diagnosticScope";
 import { useCodeDiags } from "../lib/diagStore";
 import { mergeProblems } from "../lib/problemList";
-import { buildProblemMarks } from "../lib/problemMarks";
+import { buildProblemMarks, retainProblemMarks } from "../lib/problemMarks";
 import { useWorkspaceSelector } from "../lib/workspaceSession";
 
 export function useProblemMarks() {
@@ -10,7 +10,8 @@ export function useProblemMarks() {
   const result = useWorkspaceSelector(s => s.compileResult);
   const tabs = useWorkspaceSelector(s => s.tabs);
   const diags = useCodeDiags();
-  return useMemo(() => buildProblemMarks(mergeProblems(result?.problems, diags), root ?? null, result, tabs),
+  const previous = useRef<ReturnType<typeof buildProblemMarks>>();
+  return useMemo(() => previous.current = retainProblemMarks(previous.current, buildProblemMarks(mergeProblems(result?.problems, diags), root ?? null, result, tabs)),
     [root, result, diags, tabs]);
 }
 

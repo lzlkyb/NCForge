@@ -63,6 +63,8 @@ const subscribe = (cb: () => void) => { listeners.add(cb); return () => { listen
 export const getWorkbenchLayout = () => snapshot;
 export const useWorkbenchLayout = () => useSyncExternalStore(subscribe, getWorkbenchLayout, getWorkbenchLayout);
 export function updateWorkbenchLayout(patch: Partial<WorkbenchLayout>): void {
+  // Navigation often resets an already collapsed panel; do not wake every retained page for that.
+  if ((Object.keys(patch) as (keyof WorkbenchLayout)[]).every(key => Object.is(snapshot[key], patch[key]))) return;
   snapshot = { ...snapshot, ...patch };
   listeners.forEach(cb => cb());
   clearTimeout(persistTimer);

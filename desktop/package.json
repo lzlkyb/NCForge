@@ -25,6 +25,7 @@
     "test:material-workbench": "node scripts/material-workbench-acceptance.mjs",
     "test:page-switch": "node scripts/page-switch-acceptance.mjs",
     "test:scroll-workbench": "node scripts/scroll-workbench-acceptance.mjs",
+    "test:smoothness": "node scripts/smoothness-acceptance.mjs",
     "pretest": "npm run test:scripts",
     "motion:check": "node --test scripts/check-motion.mjs",
     "test:scripts": "node --test scripts/lib/*.test.mjs",

@@ -1,0 +1,1305 @@
+{
+  "phase": "before",
+  "entry": "/assets/index-CMFoCUY3.js",
+  "environment": {
+    "browser": "157.0.4341.60",
+    "platform": "win32",
+    "node": "v24.13.0"
+  },
+  "fixture": {
+    "files": 3000,
+    "tabs": 30,
+    "lines": 1602
+  },
+  "summary": {
+    "file": {
+      "n": 90,
+      "p50": 55.80000001192093,
+      "p95": 61.19999998807907,
+      "max": 76.90000003576279,
+      "longTasks": 0
+    },
+    "page": {
+      "n": 60,
+      "p50": 26,
+      "p95": 107.80000001192093,
+      "max": 124.30000001192093,
+      "longTasks": 2
+    },
+    "typing": {
+      "n": 29,
+      "p50": 27,
+      "p95": 34.80000001192093,
+      "max": 52.30000001192093
+    },
+    "menu": {
+      "n": 10,
+      "p50": 15.300000011920929,
+      "p95": 36.60000002384186,
+      "max": 36.60000002384186
+    }
+  },
+  "samples": [
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 54.40000003576279,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 55.10000002384186,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 58.19999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 57.30000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 57.10000002384186,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 57.09999996423721,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 56.09999996423721,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 56.39999997615814,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 58.19999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 54.39999997615814,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 46.799999952316284,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 56.30000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 57.09999996423721,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 52.09999996423721,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 58.30000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 49.39999997615814,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 55,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 58.39999997615814,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 56.80000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 57.80000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 59.90000003576279,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 72.70000004768372,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 64.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 76.90000003576279,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 61.19999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 58.89999997615814,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 59.30000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 61.89999997615814,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 57.299999952316284,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 50.299999952316284,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 49.09999996423721,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 52.40000003576279,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 56.30000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 47,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 45.40000003576279,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 56.60000002384186,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 57,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 52.60000002384186,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 55.700000047683716,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 59.90000003576279,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 48.60000002384186,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 50.10000002384186,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 55.69999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 55.19999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 59.60000002384186,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 46.30000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 46,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 47.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 54.59999996423721,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 56.10000002384186,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 56.19999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 53.39999997615814,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 48.39999997615814,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 58.80000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 55,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 56.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 55.89999997615814,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 56,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 57.10000002384186,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 53.799999952316284,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 56.59999996423721,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 50.40000003576279,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 46.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 45.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 54.69999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 56.40000003576279,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 53.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 46.19999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 57.30000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 55.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 60.30000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 55.30000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 57.09999996423721,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 56.59999996423721,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 48.69999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 46.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 51.69999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 57.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 55.60000002384186,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 54,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 55.69999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 55.89999997615814,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 55.80000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 54.80000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 47.200000047683716,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 59.19999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 55.59999996423721,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File00.java",
+      "ms": 58.30000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "File01.java",
+      "ms": 46.10000002384186,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "file",
+      "name": "Demo.java",
+      "ms": 57.39999997615814,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "db",
+      "ms": 57.60000002384186,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "svn",
+      "ms": 34.19999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "meta",
+      "ms": 20.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "logs",
+      "ms": 25.100000023841858,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "settings",
+      "ms": 26.80000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "files",
+      "ms": 124.30000001192093,
+      "committed": true,
+      "longTasks": 1,
+      "maxTask": 66
+    },
+    {
+      "kind": "page",
+      "name": "db",
+      "ms": 50.69999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "svn",
+      "ms": 27.900000035762787,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "meta",
+      "ms": 23.80000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "logs",
+      "ms": 23.69999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "settings",
+      "ms": 29,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "files",
+      "ms": 96,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "db",
+      "ms": 44.69999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "svn",
+      "ms": 24.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "meta",
+      "ms": 18.400000035762787,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "logs",
+      "ms": 22.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "settings",
+      "ms": 27.399999976158142,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "files",
+      "ms": 90.80000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "db",
+      "ms": 51.19999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "svn",
+      "ms": 25.80000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "meta",
+      "ms": 20.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "logs",
+      "ms": 31.400000035762787,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "settings",
+      "ms": 26,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "files",
+      "ms": 96.89999997615814,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "db",
+      "ms": 41.30000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "svn",
+      "ms": 22,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "meta",
+      "ms": 20.80000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "logs",
+      "ms": 20,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "settings",
+      "ms": 24.200000047683716,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "files",
+      "ms": 89.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "db",
+      "ms": 50.799999952316284,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "svn",
+      "ms": 25.30000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "meta",
+      "ms": 25.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "logs",
+      "ms": 19.899999976158142,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "settings",
+      "ms": 28.30000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "files",
+      "ms": 110.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "db",
+      "ms": 50,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "svn",
+      "ms": 27,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "meta",
+      "ms": 21.69999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "logs",
+      "ms": 21.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "settings",
+      "ms": 29.599999964237213,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "files",
+      "ms": 107.80000001192093,
+      "committed": true,
+      "longTasks": 1,
+      "maxTask": 52
+    },
+    {
+      "kind": "page",
+      "name": "db",
+      "ms": 43.69999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "svn",
+      "ms": 22.69999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "meta",
+      "ms": 21.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "logs",
+      "ms": 21.69999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "settings",
+      "ms": 22,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "files",
+      "ms": 100,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "db",
+      "ms": 54.90000003576279,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "svn",
+      "ms": 28.19999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "meta",
+      "ms": 21.099999964237213,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "logs",
+      "ms": 21.399999976158142,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "settings",
+      "ms": 21.900000035762787,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "files",
+      "ms": 110.90000003576279,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "db",
+      "ms": 41.19999998807907,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "svn",
+      "ms": 21.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "meta",
+      "ms": 19.80000001192093,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "logs",
+      "ms": 18.5,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "settings",
+      "ms": 23.399999976158142,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    },
+    {
+      "kind": "page",
+      "name": "files",
+      "ms": 88.90000003576279,
+      "committed": true,
+      "longTasks": 0,
+      "maxTask": 0
+    }
+  ],
+  "retention": {
+    "tabs": 30,
+    "editor": true,
+    "sqlDraft": true,
+    "codeDraftAndView": true,
+    "undo": true,
+    "undoToSaved": true
+  },
+  "memorySamples": [
+    {
+      "documents": 2,
+      "nodes": 34905,
+      "jsEventListeners": 5437,
+      "heapUsedBytes": 50932032
+    },
+    {
+      "documents": 2,
+      "nodes": 34905,
+      "jsEventListeners": 5437,
+      "heapUsedBytes": 52375096
+    }
+  ],
+  "ipc": {
+    "boot_report": 1,
+    "server_status": 2,
+    "plugin:window|is_maximized": 1,
+    "debug_status": 3,
+    "review_blocks_marks": 1,
+    "db_cached_tables": 1,
+    "get_app_info": 1,
+    "check_update": 1,
+    "resources_status": 2,
+    "client_status": 1,
+    "get_workspace": 1,
+    "nc_manifest": 1,
+    "fs_list_dir": 1,
+    "crash_summary": 1,
+    "svn_info": 1,
+    "svn_status": 2,
+    "tree_projects": 1,
+    "fs_read_file": 13,
+    "boot_stage": 1,
+    "local_history_list": 1,
+    "fs_encoding_marks": 14,
+    "fs_java_kinds": 47,
+    "svn_diff": 13,
+    "lang_status": 1,
+    "get_config": 5,
+    "local_history_capture": 105,
+    "db_conn_list": 1,
+    "req_state": 2,
+    "bmf_index_scan": 1,
+    "nc_log_sources": 1,
+    "nc_log_query": 2,
+    "get_autostart": 1,
+    "nc_home_probe": 1,
+    "build_cache_info": 1,
+    "build_history": 1,
+    "hotswap_status": 1
+  },
+  "errors": []
+}

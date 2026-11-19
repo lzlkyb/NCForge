@@ -45,6 +45,7 @@ test("CSS and JS timing agree; loading never changes button or neighbor geometry
   });
   assert.deepEqual(tokens, [MOTION.feedback, MOTION.enter, MOTION.exit]);
   const button = page.getByTestId("save"), neighbor = page.getByTestId("neighbor");
+  await button.scrollIntoViewIfNeeded();
   const before = [await button.boundingBox(), await neighbor.boundingBox()];
   await button.click();
   assert.equal(await button.getAttribute("aria-busy"), "true");
@@ -52,6 +53,36 @@ test("CSS and JS timing agree; loading never changes button or neighbor geometry
   assert.deepEqual([await button.boundingBox(), await neighbor.boundingBox()], before);
   await page.getByRole("status").filter({ hasText: "已保存" }).waitFor();
   assert.deepEqual([await button.boundingBox(), await neighbor.boundingBox()], before);
+});
+
+test("workbench markers, close reflow and reduced motion preserve the editable document", async () => {
+  const demo = page.getByTestId("micro-workbench-preview");
+  await demo.scrollIntoViewIfNeeded();
+  const input = page.getByRole("textbox", { name: "示例源码草稿" });
+  await input.fill("unsaved preview draft");
+  await demo.getByRole("tab", { name: /StockService.java/ }).click();
+  await demo.getByRole("tab", { name: /Account.java/ }).click();
+  assert.equal(await input.inputValue(), "unsaved preview draft");
+  const rail = demo.getByRole("navigation", { name: "示例页面" });
+  await rail.getByRole("button", { name: "数据库" }).click();
+  await page.waitForTimeout(140);
+  const target = await rail.getByRole("button", { name: "数据库" }).boundingBox();
+  const marker = await demo.locator(".ui-selection-rail").boundingBox();
+  assert.ok(Math.abs(marker.y - target.y) < 1 && Math.abs(marker.height - target.height) < 1);
+  const close = await demo.getByRole("button", { name: "关闭示例 StockService.java", exact: true }).elementHandle();
+  const reflow = await demo.evaluate(async (host, close) => {
+    const node = host.querySelector('[role="tab"][data-path="CustomerVO.java"]');
+    close.click();
+    await new Promise(requestAnimationFrame);
+    return node.getAnimations().some(animation => animation.effect.getKeyframes().some(frame => frame.transform?.includes("translateX")));
+  }, close);
+  assert.equal(reflow, true);
+  assert.equal(await input.inputValue(), "unsaved preview draft");
+  assert.equal(await input.evaluate(node => node.getAnimations().length), 0);
+  await page.getByTestId("reduce-motion").check();
+  await rail.getByRole("button", { name: "设置", exact: true }).click();
+  assert.equal(await demo.locator(".ui-selection-rail").evaluate(node => node.getAnimations().filter(animation => animation.playState === "running").length), 0);
+  assert.equal(await input.inputValue(), "unsaved preview draft");
 });
 
 test("modal really enters, exits, restores focus, and survives rapid reversal", async () => {

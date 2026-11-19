@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, memo } from "react";
 import { TreeProjectRow } from "./TreeRow";
 import { TreeRows, type TreeRowsCtx } from "./TreeRows";
 import { originLabel, type LinkedProject } from "../../lib/linkedProjects";
@@ -20,7 +20,7 @@ function badgeOf(p: LinkedProject, root: string): string {
  * 从 `FileTree` 抽出来是为了守住 300 行门禁；这里只有「工程行 + 递归子树」，
  * 菜单、键盘、自动定位仍归 `FileTree`。
  */
-export function TreeProjectRows({
+export const TreeProjectRows = memo(function TreeProjectRows({
   projects,
   root,
   ctx,
@@ -54,4 +54,4 @@ export function TreeProjectRows({
       ))}
     </>
   );
-}
+});

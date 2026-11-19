@@ -14,6 +14,7 @@ import { TreeRows, type TreeRowsCtx } from "./TreeRows";
 import { TreeSvnContext } from "./TreeSvnContext";
 import { PackageDependencies } from "./PackageDependencies";
 import { TreeProjectRows } from "./TreeProjectRows";
+import { TreeActivePath } from "./TreeActivePath";
 import { useTreeViewFilter } from "./useTreeViewFilter";
 import { TreeQuickFilter } from "./TreeQuickFilter";
 import { useTreeFilterState } from "../../lib/treeFilter";
@@ -199,13 +200,12 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   });
 
   const handlers = useTreeHandlers({
-    toggleRow: toggleVisibleRow, toggle, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected, isEditable,
+    toggleRow: toggleVisibleRow, toggle, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected, isEditable, toggleMembers,
   });
 
-  const ctx: TreeRowsCtx = {
+  const ctx: TreeRowsCtx = useMemo(() => ({
     dirs,
     expanded,
-    activePath,
     selectedPath: selected?.path ?? null,
     marks,
     bookmarkCounts,
@@ -215,24 +215,20 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     compact, packageRoots, packageIndexes,
     hoist,
     members: packageView ? members : undefined,
-    onToggleMembers: toggleFileMembers,
-    onOpenMember: (path, member) => {
-      setSelected({ path: member.id, isDir: false });
-      onOpen(path, { line: member.line, column: member.column });
-    },
     isBcModule,
     bcNames,
     editing,
     editError,
     busy,
     ...handlers,
-  };
+  }), [dirs, expanded, selected?.path, marks, bookmarkCounts, filterFn, problemMarks.paths, problemMarks.packages,
+    packageView, showCommitAuthors, compact, packageRoots, packageIndexes, hoist, members, isBcModule, bcNames, editing, editError, busy, handlers]);
 
   return (
     <>
       <TreeViewFilters mode={mode} onToggle={toggleMode} />
       <TreeQuickFilter root={root} onNavigate={keys.navigate} />
-      <div
+      <TreeActivePath path={activePath}><div
         ref={treeList}
         className="wb-tree-list"
         data-package-view={packageView || undefined}
@@ -255,7 +251,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
         ) : (
           <TreeRows dir={root} depth={0} ctx={ctx} />
         )}
-      </div>
+      </div></TreeActivePath>
 
       {packageView && !mode && <PackageDependencies key={root} root={root} projects={rootRows} />}
 

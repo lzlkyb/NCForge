@@ -42,3 +42,19 @@ export function buildProblemMarks(problems: UnifiedProblem[], root: string | nul
   }
   return { paths, packages };
 }
+
+/** Dirty tabs only affect compiled freshness; unchanged badges must not invalidate a large tree. */
+export function retainProblemMarks(previous: ReturnType<typeof buildProblemMarks> | undefined, next: ReturnType<typeof buildProblemMarks>) {
+  if (!previous) return next;
+  const retain = (before: Map<string, ProblemMark>, after: Map<string, ProblemMark>) => {
+    let same = before.size === after.size;
+    for (const [path, mark] of after) {
+      const old = before.get(path);
+      if (old && old.errors === mark.errors && old.warnings === mark.warnings && old.live === mark.live && old.compiled === mark.compiled && old.stale === mark.stale) after.set(path, old);
+      else same = false;
+    }
+    return same ? before : after;
+  };
+  const paths = retain(previous.paths, next.paths), packages = retain(previous.packages, next.packages);
+  return paths === previous.paths && packages === previous.packages ? previous : { paths, packages };
+}

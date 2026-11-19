@@ -13,7 +13,7 @@ vi.mock("./monacoSetup", () => ({ monaco: { editor: {
   EditorOption: { quickSuggestions: 90 },
   ShowLightbulbIconMode: { Off: "off", OnCode: "onCode", On: "on" },
   registerCommand: (id: string, fn: (...args: unknown[]) => void) => { h.commands.set(id, fn); return { dispose: () => h.commands.delete(id) }; },
-} } }));
+}, KeyMod: { Alt: 512, CtrlCmd: 2048, Shift: 1024 }, KeyCode: { Enter: 3 } } }));
 vi.mock("./dbStore", () => ({ connOf: () => h.conn, rtOf: () => h.rt, sqlColumnEpoch: () => h.epoch, sqlTabOf: (id: string) => ({ id, connId: "conn" }), columnsOf: h.columns }));
 vi.mock("./sqlModels", () => ({ tabIdOfModel: (m: { id: string }) => m.id }));
 vi.mock("./sqlFormat", () => ({ sqlLanguageOf: () => "plsql" }));
@@ -272,6 +272,14 @@ describe("SQL 编辑器习惯与辅助操作", () => {
     await fake.actions.get("ncforge.sql.expandStar")!.run();
     expect(h.columns).toHaveBeenCalledWith("conn", "nc.bd_material");
     expect(fake.executeEdits).toHaveBeenCalledWith("sql-assist", [{ range: { startLineNumber: 1, startColumn: 10, endLineNumber: 1, endColumn: 11 }, text: 'code, m.name' }]);
+  });
+
+  it("Alt+Enter 唤起意图菜单：中文 IME 吞 Ctrl+. 时键盘仍有主键", async () => {
+    const fake = fakeEditor("SELECT * FROM bd_material"); await wire(fake);
+    const action = fake.actions.get("ncforge.sql.intentions") as unknown as { keybindings: number[]; run: () => unknown } | undefined;
+    expect(action?.keybindings).toEqual([512 | 3]);
+    await action!.run();
+    expect(fake.spy.trigger).toHaveBeenLastCalledWith("sql-assist", "editor.action.quickFix", {});
   });
 
   it("字段异步读取过程中编辑内容或移动光标，放弃迟到编辑", async () => {

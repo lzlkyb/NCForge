@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ showDocument: vi.fn(), requestCloseTab: vi.fn(), requestActivateTab: vi.fn(), requestRestoreClosedTab: vi.fn(), newConsole: vi.fn() }));
 vi.mock("../../lib/dbActions", () => ({ requestActivateTab: mocks.requestActivateTab, requestCloseTab: mocks.requestCloseTab, requestRestoreClosedTab: mocks.requestRestoreClosedTab, newConsole: mocks.newConsole }));
-vi.mock("../workspace/WorkbenchDock", () => ({ DockRegion: ({ children }: { children: ReactNode }) => children, useWorkbenchDock: () => ({ documentOpen: true, showDocument: mocks.showDocument }) }));
+vi.mock("../workspace/WorkbenchDock", () => ({ DockRegion: ({ children }: { children: ReactNode }) => children, useWorkbenchDock: () => ({ documentOpen: true, showDocument: mocks.showDocument, hosts: { doctabs: null } }) }));
 import { DbDocTabs } from "./DbDocTabs";
 import { __resetDbForTest, activateTab, closeTab, getDb, openSqlTab, openTableTab, restoreClosedTab, setConns, sqlTabOf } from "../../lib/dbStore";
 import { dbPanelId, dbTabId } from "../../lib/dbPendingSessions";

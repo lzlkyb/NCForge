@@ -87,7 +87,7 @@ it("FROM 后打全表名时预读关系，表名项说明里标出主子表联�
   expect(item?.label).toMatchObject({ description: expect.stringContaining("支持主子表联查") });
   // 光有说明却点不出来等于没做：表名末尾要能直接接上子表。
   expect(h.peek).toHaveBeenCalled();
-  expect(r.suggestions.map(s => s.insertText)).toContain(" LEFT JOIN bd_project ON bd_project.pk_project = bd_material.pk_project");
+  expect(r.suggestions.map(s => s.insertText)).toContain("bd_material LEFT JOIN bd_project ON bd_project.pk_project = bd_material.pk_project");
 });
 // 说明行写着「支持主子表联查」但用户点不动，等于没做：动作本身也要进列表，
 // 按 Ctrl+空格 就能看见「这儿还能做什么」，不必记 Ctrl+. 或去行号旁找灯泡。
@@ -132,10 +132,16 @@ it("裸表名起手时同时给出整条联查与 INSERT 模板", async () => {
   expect(ids).toContain("ncforge.sql.quickFix");
   expect(ids).toContain("ncforge.sql.runAction");
 });
-it("半截前缀不预读关系，也不会把 JOIN 塞进词中间", async () => {
+it("词中光标不预读关系；联查候选整词锚定，JOIN 不塞进词中间", async () => {
+  h.peek.mockReturnValue(billMeta);
   const r = await complete("select * from bd_material", 20);
   expect(h.business).not.toHaveBeenCalled();
+  const join = r.suggestions.find(s => String(s.insertText).startsWith("bd_material LEFT JOIN"));
+  expect(join).toBeTruthy();
+  expect(join!.range).toMatchObject({ startColumn: 15, endColumn: 26 });
   expect(r.suggestions.some(s => String(s.insertText).startsWith(" LEFT JOIN"))).toBe(false);
+  // 词中也有「查看全部关联」动作项：Ctrl+空格 不必记键位就能唤起菜单。
+  expect(r.suggestions.some(s => (s.command as { id?: string } | undefined)?.id === "ncforge.sql.quickFix")).toBe(true);
 });
 it("元数据未完成时返回已有字段快照", async () => {
   h.business.mockImplementation(() => new Promise(() => {}));

@@ -32,6 +32,10 @@
 .wb-main { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
 .wb-main-with-inspector { display:flex; min-width:0; min-height:0; overflow:hidden; grid-column:3; }
 .wb-main-with-inspector > .wb-main { flex:1; }
+.wb-surface-stack { display:grid; grid-template: minmax(0,1fr) / minmax(0,1fr); flex:1; min-width:0; min-height:0; overflow:hidden; }
+.wb-surface-stack > :is(.wb-code-surface,.wb-document-surface) { grid-area:1 / 1; }
+/* Keep editor viewports measurable while a tool covers them; hidden content cannot take focus or paint. */
+.wb-surface-stack > [hidden] { display:flex !important; visibility:hidden; pointer-events:none; content-visibility:hidden; }
 .wb-code-surface,.wb-document-surface { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; overflow:hidden; background:hsl(var(--card)); }
 .wb-document-surface .vc-docked-document { display:flex; flex-direction:column; flex:1; min-height:0; min-width:0; }
 .wb-document-surface .md-page { flex:1; min-height:0; min-width:0; }
@@ -51,7 +55,7 @@
 .wb-main[data-panel-expanded] .wb-bottom { flex:1; height:100% !important; min-height:0; max-height:100%; }
 /* 展开态完全交给 CSS：JS 不再用 `panelExpanded` 给两个面加 hidden（那会让代码面与
    文档面同时隐藏、主区纯白，P1-18）。展开时只剩底部面板，收起后原样恢复。 */
-.wb-main[data-panel-expanded] > :is(.wb-code-surface,.wb-document-surface) { display:none; }
+.wb-main[data-panel-expanded] > .wb-surface-stack { display:none; }
 .wb-panel-tool-option { display:flex; align-items:center; gap:3px; }
 .wb-panel-tool-option > button[role="menuitem"] { flex:1; min-width:0; }
 .wb-panel-tool-option > .wb-icon-btn { flex:none; }

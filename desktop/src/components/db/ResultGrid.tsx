@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref } from "react";
-import { columnViewport, selectionBounds } from "../../lib/gridViewport";
+import { columnViewport, retainColumnViewport, selectionBounds } from "../../lib/gridViewport";
 import { gridCodec } from "../../lib/cellCodec";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import { isNumericType } from "../../lib/resultExport";
@@ -108,7 +108,9 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   const rnW = rowNumberWidth(rows.length);
   const total = rnW + visible.reduce((n,c)=>n+ws[c],0);
   const bounds = useMemo(() => selectionBounds(order,visible,selection), [order,visible,selection]);
-  const viewport = useMemo(() => columnViewport(visible,ws,new Set(visible.filter(c=>frozen.includes(columns[c].name))),scroll.left,scroll.width,rnW), [visible, ws, frozen, columns, scroll.left, scroll.width, rnW]);
+  const columnCache = useRef<ReturnType<typeof columnViewport>>([]);
+  const viewport = useMemo(() => columnCache.current = retainColumnViewport(columnCache.current,
+    columnViewport(visible,ws,new Set(visible.filter(c=>frozen.includes(columns[c].name))),scroll.left,scroll.width,rnW)), [visible, ws, frozen, columns, scroll.left, scroll.width, rnW]);
   const viewportByColumn = new Map(viewport.map(col => [col.column, col]));
   const cellStyle = (c:number) => { const col=viewportByColumn.get(c)!; return {width:col.width,position:col.frozen ? "sticky" as const : "absolute" as const,left:col.frozen ? col.sticky : col.left,...(col.frozen ? {zIndex:2} : {})}; };
   const range = layout.range(scroll.top, scroll.height, OVERSCAN);

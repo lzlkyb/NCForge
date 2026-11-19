@@ -120,7 +120,9 @@ html[data-ui-style] .app-shell :is(.dbx-grid, .dbx-compare-grid, .sc-log-body, .
 html[data-ui-style] .app-shell :is(.dbx-grid, .dbx-compare-grid, .sc-log-body, .dw-build-raw, .meta-tree) { contain: layout paint; }
 /* 正文已有明确宽高，内容测高不应触发旁边文件树和整个工作台的固有尺寸排版。 */
 html[data-ui-style] .app-shell .sc-log-body { contain: strict; }
-html[data-ui-style] .app-shell :is(.dbx-grow, .dbx-compare-row) { contain: layout style paint; }
+/* Clipping each wide row adds a paint boundary per frozen cell during diagonal scrolling. */
+html[data-ui-style] .app-shell .dbx-grow { contain: layout style; }
+html[data-ui-style] .app-shell .dbx-compare-row { contain: layout style paint; }
 html[data-ui-style] .app-shell :is(.input, .dbx-inp, .wb-global-search, .wb-settings-search, .settings-select):not(:focus, :focus-within, [aria-invalid="true"], [data-invalid], [data-error], .error, .bad, [class*="border-destructive"], :invalid, :has([aria-invalid="true"], [data-invalid], :invalid)) {
   border-color: transparent; background: hsl(var(--foreground) / .045); box-shadow: none;
 }

@@ -13,3 +13,12 @@ export function columnViewport(visible: number[], widths: number[], frozen: Set<
     return item;
   }).filter(c => c.frozen || c.left + c.width >= left - 200 && c.left <= left + width + 200);
 }
+
+/** Pixel scrolling inside the same column window must not invalidate every retained row. */
+export function retainColumnViewport(previous: ReturnType<typeof columnViewport>, next: ReturnType<typeof columnViewport>) {
+  return previous.length === next.length && previous.every((a, i) => {
+    const b = next[i];
+    return a.column === b.column && a.index === b.index && a.width === b.width &&
+      a.left === b.left && a.sticky === b.sticky && a.frozen === b.frozen;
+  }) ? previous : next;
+}

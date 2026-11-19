@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { treeRowId } from "../lib/treeNav";
 import { REVEAL_IN_TREE_EVENT } from "../lib/revealInTree";
+import { prefersReducedMotion } from "../lib/motionPreference";
+import { MOTION } from "../lib/motion";
+import { isAppHidden } from "../lib/appVisibility";
 
 /** 自动定位的防抖：连着点标签时不要每个都展开一遍。 */
 const REVEAL_DELAY_MS = 120;
@@ -58,7 +61,14 @@ export function useTreeLocate(
   useEffect(() => {
     // 树行提交且筛选视图恢复滚动位置后，才滚到目标行。
     if (scrollRequest && !scrollRequest.signal.aborted) {
-      document.getElementById(treeRowId(scrollRequest.path))?.scrollIntoView({ block: "nearest" });
+      const row = document.getElementById(treeRowId(scrollRequest.path));
+      row?.scrollIntoView({ block: "nearest" });
+      if (!row || prefersReducedMotion() || isAppHidden()) return;
+      row.dataset.located = "true";
+      const clear = () => { window.clearTimeout(timer); delete row.dataset.located; scrollRequest.signal.removeEventListener("abort", clear); };
+      const timer = window.setTimeout(clear, MOTION.enter);
+      scrollRequest.signal.addEventListener("abort", clear, { once: true });
+      return clear;
     }
   }, [scrollRequest]);
 }

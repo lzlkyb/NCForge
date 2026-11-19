@@ -1,4 +1,5 @@
-import { useLayoutEffect, useState, memo } from "react";
+import { useLayoutEffect, useRef, useState, memo } from "react";
+import { SelectionIndicator } from "../ui/SelectionIndicator";
 import type { StaticStatus } from "../../lib/types";
 import { railAriaKey, railKeyLabel } from "../../lib/keymap";
 import { PAGES } from "../../lib/pages";
@@ -82,6 +83,7 @@ function SideNavImpl({
   /** 异常态状态胶囊：null = 不显示（槽位平滑收起）。 */
   statusPill?: { tone: string; text: string; target?: string | null; title: string } | null;
 }) {
+  const host = useRef<HTMLElement>(null);
   const items = (navItems ?? WORKSPACE_NAV).filter((item) => item.showInRail !== false);
   // 隐藏入口（logs）不再让一个看不见的页面独占 Ctrl+4：在「更多」分组露出（P1-16）。
   const moreItems = PAGES.filter((p) => p.railMore);
@@ -113,7 +115,8 @@ function SideNavImpl({
   }, [pillShown, startupError, pillTone, pillText, pillTarget, pillTitle]);
 
   return (
-    <aside className="app-side" data-collapsed={collapsed || undefined}>
+    <aside ref={host} className="app-side" data-collapsed={collapsed || undefined}>
+      <SelectionIndicator container={host} value={`${activeTab}:${collapsed}:${unreadCount}`} revision={heldPill} selector='.app-side-item[aria-current="page"]' />
       <nav className="app-side-nav" aria-label="主导航">
         {items.map((item) => (
           <button

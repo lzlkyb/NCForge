@@ -1,12 +1,16 @@
 import type { MetaDocument } from "../../hooks/useMetaDocuments";
 import { draftChanged } from "../../lib/metaDraft";
 import { Icon } from "../ui/icon";
+import { useRef } from "react";
+import { SelectionIndicator } from "../ui/SelectionIndicator";
 
 export function MetaDocumentTabs({ documents, active, locked, onSelect, onClose }: {
   documents: MetaDocument[]; active: string; locked: boolean;
   onSelect: (doc: MetaDocument) => void; onClose: (key: string) => void;
 }) {
-  return <nav className="meta-document-tabs" aria-label="打开的元数据文档">
+  const strip = useRef<HTMLElement>(null);
+  return <nav ref={strip} className="meta-document-tabs" aria-label="打开的元数据文档">
+    <SelectionIndicator container={strip} value={`${active}:${documents.map(doc => doc.key).join("|")}`} selector='.meta-document-tab.is-active' variant="tab" />
     {documents.map((doc) => <div key={doc.key} className={`meta-document-tab ${doc.key === active ? "is-active" : ""}`}>
       <button type="button" disabled={locked} onClick={() => onSelect(doc)} aria-current={doc.key === active ? "page" : undefined} title={doc.entry.path}>
         <Icon name="metaFile" size={13} /><span>{doc.entry.displayName || doc.entry.name}</span>

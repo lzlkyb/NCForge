@@ -6,6 +6,13 @@ import { getSideOpen } from "./layoutStore";
 
 afterEach(() => restoreWorkbenchLayout());
 describe("工作台布局偏好", () => {
+  it("切页重置相同布局时保留快照引用，不触发所有常驻面板刷新", () => {
+    const before = getWorkbenchLayout();
+    updateWorkbenchLayout({ expanded: before.expanded, compact: before.compact });
+    expect(getWorkbenchLayout()).toBe(before);
+    updateWorkbenchLayout({ compact: !before.compact });
+    expect(getWorkbenchLayout()).not.toBe(before);
+  });
   it("旧共享高度只迁移到常规输出，服务不会把高度带到其他工具", () => {
     const layout = parseWorkbenchLayout(null, JSON.stringify({ side: 255, bottom: 180 }));
     expect(layout.side).toBe(255);

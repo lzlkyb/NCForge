@@ -157,7 +157,7 @@ export function ScriptReplayDialog({ tab, onClose }: { tab: SqlTab; onClose: () 
             </div>
             <code className="dbx-mono dbx-sr-current">{firstLine(prog.text) || "(空)"}</code>
             <div className="dbx-sr-bar" aria-hidden>
-              <i style={{ width: `${pct}%` }} />
+              <i style={{ transform: `scaleX(${pct / 100})` }} />
             </div>
           </div>
         )}

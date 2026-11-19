@@ -110,7 +110,7 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
         : DOCUMENT_TOOLS[activeTool] ?? null,
     [activeTool, showCode],
   );
-  const dock = useMemo(() => ({ hosts, fileHosts, bindHost: (name: DockRegionName) => refs[name], bindFileSlot: (name: FileSlotName) => fileRefs[name], showDocument, showCode, documentOpen, panelExpanded, toolTab }), [hosts, fileHosts, refs, fileRefs, showDocument, showCode, documentOpen, panelExpanded, toolTab]);
+  const dock = useMemo(() => ({ activeTool, hosts, fileHosts, bindHost: (name: DockRegionName) => refs[name], bindFileSlot: (name: FileSlotName) => fileRefs[name], showDocument, showCode, documentOpen, panelExpanded, toolTab }), [activeTool, hosts, fileHosts, refs, fileRefs, showDocument, showCode, documentOpen, panelExpanded, toolTab]);
   const hasSide = SIDE_TOOLS.includes(activeTool);
   const hasToolbar = TOOLBAR_TOOLS.includes(activeTool);
   // 日志已有列表/详情两栏，不再占用资源树；元数据页自带组件清单，再摆一份文件树
@@ -163,6 +163,7 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
           }} onKeyDown={e => onSeparatorKey(e, "side")} />
         <div className="wb-main-with-inspector" ref={node => { pageRef.current = node; if (node) node.inert = drawerOpen; }}>
         <section className="wb-main" data-service-mode={panelOpen && panelTab === "svc" || undefined} data-service-expanded={panelExpanded || undefined} data-panel-expanded={panelExpanded || undefined}>
+          <div className="wb-surface-stack">
           {/* 代码面自带文件标签条：切到工具页时整块 hidden，文件标签就不可能和
               文档面的工具标签同屏（以前两者挤在顶层 `wb-tabbar` 的同一条 flex 行里）。
               `hidden` 只由 `documentOpen` 决定：把它和 `panelExpanded` 混在一起会让
@@ -173,6 +174,8 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
             role="tabpanel"
             aria-label="编辑器"
             hidden={documentOpen}
+            aria-hidden={documentOpen}
+            ref={node => { if (node) node.inert = documentOpen; }}
           >
             <div ref={fileRefs.context} className="wb-code-context-host" />
             <div ref={fileRefs.tabs} className="wb-code-tools">{tabs}</div>
@@ -180,9 +183,10 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
           </div>
           {/* 文档面同样自带标签条：多文档工具（数据库）停靠进 doctabs，
               单文档工具由 ToolTab 渲染。两个面互斥显示 ⇒ 两套标签永不同屏。 */}
-          <div id="wb-document-surface" className="wb-document-surface" role="tabpanel" aria-label={toolTab?.label} hidden={!documentOpen}>
+          <div id="wb-document-surface" className="wb-document-surface" role="tabpanel" aria-label={toolTab?.label} hidden={!documentOpen} aria-hidden={!documentOpen} ref={node => { if (node) node.inert = !documentOpen; }}>
             <div ref={refs.doctabs} className="wb-doc-tabs"><ToolTab /></div>
             <div ref={refs.document} className="wb-doc-body" />
+          </div>
           </div>
           <div hidden={panelExpanded} className="wb-resize-y" role="separator" aria-label="调整底部面板高度" aria-orientation="horizontal"
             aria-valuemin={BOTTOM_MIN} aria-valuemax={bottomMax} aria-valuenow={Math.round(bottomHeight)}

@@ -7,15 +7,12 @@
 // 觉得吵的人可以关掉行尾（设置 → 编辑器 → 行尾诊断）。
 import { monaco } from "./monacoSetup";
 import { pathOfModel } from "./editorStore";
-import { getCodeDiags, subscribeCodeDiags } from "./diagStore";
+import { getCodeDiagsForPath, subscribeCodeDiags, type CodeDiag } from "./diagStore";
 import { getEditorPrefs, PREFS_EVENT } from "./editorPrefs";
 import { diagnosticSummaries } from "./diagnosticSummary";
 
 /** 一次最多画多少条：超长文件被全量报错时，几千个装饰会把渲染拖住（面板仍有完整清单）。 */
 const MAX_DECORATIONS = 300;
-
-const samePath = (a: string, b: string) =>
-  a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
 
 type Editor = ReturnType<typeof monaco.editor.create>;
 
@@ -28,6 +25,9 @@ type Editor = ReturnType<typeof monaco.editor.create>;
 export function attachErrorLens(editor: Editor): () => void {
   // Monaco 的装饰集合只有 clear / set（没有 dispose）：清空即释放
   let current: { clear(): void } | null = null;
+  let previousModel: ReturnType<Editor["getModel"]> | undefined;
+  let previousDiags: CodeDiag[] | undefined;
+  let previousEnabled: boolean | undefined;
 
   const clear = () => {
     current?.clear();
@@ -35,12 +35,15 @@ export function attachErrorLens(editor: Editor): () => void {
   };
 
   const apply = () => {
-    clear();
     const model = editor.getModel();
-    if (!model || !getEditorPrefs().errorLens) return;
-    const path = pathOfModel(model);
-    if (!path) return;
-    const list = diagnosticSummaries(getCodeDiags().filter((d) => samePath(d.path, path)), MAX_DECORATIONS);
+    const enabled = getEditorPrefs().errorLens;
+    const path = model ? pathOfModel(model) : undefined;
+    const diagnostics = path ? getCodeDiagsForPath(path) : undefined;
+    if (model === previousModel && diagnostics === previousDiags && enabled === previousEnabled) return;
+    previousModel = model; previousDiags = diagnostics; previousEnabled = enabled;
+    clear();
+    if (!model || !path || !enabled || !diagnostics) return;
+    const list = diagnosticSummaries(diagnostics, MAX_DECORATIONS);
     if (list.length === 0) return;
     const decorations = list.map((d) => ({
       range: new monaco.Range(d.line, 1, d.line, 1),

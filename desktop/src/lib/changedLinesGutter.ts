@@ -25,6 +25,7 @@ import {
   setJumpToRoundFirst, subscribeReviewSession,
 } from "./reviewSession";
 import { toast } from "../components/ui/toast";
+import { cachedChanged, computeModelChanged } from "./changedLinesCompute";
 
 type Editor = ReturnType<typeof monaco.editor.create>;
 type Decorations = ReturnType<Editor["createDecorationsCollection"]>;
@@ -144,9 +145,10 @@ export function attachChangedLines(editor: Editor): () => void {
   initChangedLines();
   const collection = editor.createDecorationsCollection();
   let timer: number | undefined;
-  let lastText = "";
+  let lastModel: ReturnType<Editor["getModel"]> = null;
+  let lastVersion = -1;
   let lastBase = "";
-  let lastPath = "";
+  let computation: AbortController | undefined;
 
   const clear = () => { collection.clear(); };
   const refresh = () => {
@@ -159,12 +161,16 @@ export function attachChangedLines(editor: Editor): () => void {
   const apply = () => {
     const model = editor.getModel();
     const path = model ? pathOfModel(model) : undefined;
+    const baseline = getEffectiveBaseline(path);
+    if (model && model === lastModel && model.getVersionId() === lastVersion && baseline?.state === "ok" && baseline.baseText === lastBase) return;
+    computation?.abort();
+    lastModel = model;
+    lastVersion = -1;
     if (!model || !path) {
       clear();
       snapshots.set(editor, EMPTY_CHANGED);
       return;
     }
-    const baseline = getEffectiveBaseline(path);
     if (!baseline) {
       requestBaseline(path);
       clear();
@@ -179,21 +185,27 @@ export function attachChangedLines(editor: Editor): () => void {
       publishSnapshot(path, EMPTY_CHANGED, []);
       return;
     }
-    const text = model.getValue(monaco.editor.EndOfLinePreference.LF);
-    if (text === lastText && baseline.baseText === lastBase && path === lastPath) return;
-    lastText = text;
+    lastVersion = model.getVersionId();
     lastBase = baseline.baseText;
-    lastPath = path;
-    const snap = computeChanged(baseline.baseText, text);
-    // 改动行文本一起交给 store：审查清单据此核对表名，不必静态 import editorStore
-    // （那条链会把 monaco-editor 拖进 BottomPanel 的 jsdom 测试）。
-    const rows = snap.touchedLines.map((line) => ({
-      line,
-      text: model.getLineContent(Math.min(Math.max(1, line), model.getLineCount())),
-    }));
-    snapshots.set(editor, snap);
-    decorate(editor, snap, collection, path);
-    publishSnapshot(path, snap, rows);
+    const controller = new AbortController();
+    const version = lastVersion;
+    computation = controller;
+    const present = (snap: ChangedSnapshot | null) => {
+      if (!snap || controller.signal.aborted || editor.getModel() !== model || model.getVersionId() !== version) return;
+      const rows = snap.touchedLines.map(line => ({ line, text: model.getLineContent(Math.min(Math.max(1, line), model.getLineCount())) }));
+      snapshots.set(editor, snap);
+      decorate(editor, snap, collection, path);
+      publishSnapshot(path, snap, rows);
+    };
+    const cached = cachedChanged(model, baseline.baseText);
+    if (cached) present(cached);
+    else {
+      clear();
+      snapshots.set(editor, EMPTY_CHANGED);
+      publishSnapshot(path, EMPTY_CHANGED, []);
+      // 全文差异不能占住 setModel 的同步调用栈；切走时连同 CPU 工作一起取消。
+      void computeModelChanged(model, baseline.baseText, controller.signal).then(present);
+    }
   };
 
   const schedule = () => {
@@ -202,14 +214,11 @@ export function attachChangedLines(editor: Editor): () => void {
   };
 
   apply();
-  // 基线广播是全局的（任何一个文件取到 BASE 都会通知所有编辑器），这里靠
-  // apply() 自己的去重（文本 + 基线文本 + 路径都没变就 return）挡住无关文件的重算。
-  // 早先额外把 lastText 清空来「强制重算」，等于每次广播都全量 diff 一遍——
-  // 几十个编辑器 × 大文件时能卡住输入，且去重逻辑本就够用。
+  // 基线广播是全局的；先比较模型版本和 BASE，避免无关文件更新时取全文或重新启动 worker。
   const offBase = subscribeBaseline(apply);
   const offReview = subscribeReviewSession(refresh);
   const offContent = editor.onDidChangeModelContent(schedule);
-  const offModel = editor.onDidChangeModel(() => { closeChangedPeek(); lastText = ""; apply(); });
+  const offModel = editor.onDidChangeModel(() => { closeChangedPeek(); apply(); });
   const offFocus = editor.onDidFocusEditorText(() => { activeEditor = editor; });
   const offScroll = editor.onDidScrollChange(() => closeChangedPeek());
   const offMouse = editor.onMouseDown((e) => {
@@ -243,6 +252,7 @@ export function attachChangedLines(editor: Editor): () => void {
   if (document.activeElement && editor.getDomNode()?.contains(document.activeElement)) activeEditor = editor;
 
   return () => {
+    computation?.abort();
     if (timer !== undefined) window.clearTimeout(timer);
     offBase(); offReview(); offContent.dispose(); offModel.dispose(); offFocus.dispose();
     offScroll.dispose(); offMouse.dispose(); offKey.dispose();

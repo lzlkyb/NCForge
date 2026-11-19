@@ -601,7 +601,8 @@ html[data-ui-density="comfortable"] .wb-tree-list .wb-row { height:30px; }
 }
 .wb-split-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-split-head .wb-icon-btn { margin-left: auto; }
-.wb-editor-host { position: absolute; inset: 0; }
+/* Monaco owns this definite-size viewport. Its synchronous measurements must not relayout the workbench. */
+.wb-editor-host { position: absolute; inset: 0; contain: size layout; }
 .wb-editor-empty { position:absolute; inset:0; display:flex; overflow:auto; padding:28px 32px; container-type:inline-size; container-name:empty-editor; }
 
 .wb-status {

@@ -7,7 +7,7 @@
 .ui-overlay { transition-property:opacity; }
 .ui-surface { transform:none; }
 .ui-overlay[data-state="closed"], .ui-surface[data-state="closed"] { opacity:0; }
-.ui-surface[data-state="closed"] { transform:translateY(4px) scale(.985); }
+.ui-surface[data-state="closed"] { transform:translateY(4px); }
 .ui-surface[data-motion="fade"] { transform:none; }
 .ui-overlay[data-exiting], .ui-surface[data-exiting] {
   transition-duration:var(--dur-exit);
@@ -32,12 +32,12 @@
 .toast[data-state="closed"] { opacity:0;transform:translateX(8px); }
 .toast[data-exiting] { transition-duration:var(--dur-exit);transition-timing-function:var(--ease-exit);pointer-events:none; }
 .toast-countdown { width:100%;transform-origin:left;animation:toast-progress linear forwards; }
-.ui-collapse { display:grid; grid-template-rows:0fr; opacity:0; transition:grid-template-rows var(--dur-enter) var(--ease),opacity var(--dur); }
+.ui-collapse { display:grid; grid-template-rows:0fr; opacity:0; transition:opacity var(--dur-fast) var(--ease); }
 .ui-collapse[data-open="true"] { grid-template-rows:1fr; opacity:1; }
 .ui-collapse-inner { min-height:0; overflow:hidden; }
 .log-tab .audit th { position:sticky;top:0;z-index:1;background:hsl(var(--card));font-size:12px; }
 .log-tab .audit td { font-size:12px;font-variant-numeric:tabular-nums; }
-.app-side .app-side-label { opacity:1;max-width:170px;transition:opacity var(--dur-fast),max-width var(--dur-enter); }
+.app-side .app-side-label { opacity:1;max-width:170px;transition:opacity var(--dur-fast); }
 .app-side[data-collapsed] .app-side-item>svg { flex-shrink:0; }
 @media(max-width:700px) {
  .app-topbar .max-w-40 { max-width:100px; }

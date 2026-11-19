@@ -13,6 +13,8 @@ import { useViewActive } from "../../lib/viewActivity";
 import { ENV_LABEL } from "../../lib/dbApi";
 import { dbPanelId, dbTabId, dbTabLabel } from "../../lib/dbPendingSessions";
 import { DbAllTabsMenu, DbClosedTabsMenu } from "./DbTabMenus";
+import { SelectionIndicator } from "../ui/SelectionIndicator";
+import { useTabReflow } from "../../hooks/useTabReflow";
 
 /**
  * 数据库的文档标签（SQL 控制台 / 表页），停靠在**文档面自己的标签条**（`doctabs`）里。
@@ -32,9 +34,11 @@ export function DbDocTabs() {
   const docOpen = dock?.documentOpen ?? true;
   const viewActive = useViewActive();
   // 有未写回改动时标签上加圆点；登记表变了要重画这一条
-  useEditRevision();
+  const editRevision = useEditRevision();
   const refs = useRef(new Map<string, HTMLDivElement>());
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const signature = db.tabs.map(tab => tab.id).join("|");
+  useTabReflow(scrollRef, `${signature}:${!!dock?.hosts.doctabs}`);
   const showDoc = useRef(dock?.showDocument);
   showDoc.current = dock?.showDocument;
   const dragFrom = useRef<string | null>(null);
@@ -133,6 +137,7 @@ export function DbDocTabs() {
         onDrop={dropAtEnd}
       >
         <div className="wb-tabs-scroll" ref={scrollRef}>
+          <SelectionIndicator container={scrollRef} value={`${db.active}:${docOpen}:${signature}`} revision={editRevision} selector='.dbx-doctab[data-active]' variant="tab" />
           {db.tabs.map((t, i) => {
             const c = connOf(t.connId);
             const label = dbTabLabel(t);
@@ -151,6 +156,7 @@ export function DbDocTabs() {
                 aria-selected={on}
                 aria-controls={on ? dbPanelId(t.id) : undefined}
                 className={`wb-tab dbx-doctab${c ? ` e-${c.env}` : ""}`}
+                data-path={t.id}
                 data-active={on || undefined}
                 data-drop-target={dropTarget === t.id || undefined}
                 draggable

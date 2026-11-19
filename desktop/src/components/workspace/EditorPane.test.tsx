@@ -79,6 +79,7 @@ vi.mock("../../lib/navigationExtras", () => ({ registerNavigationExtras: vi.fn()
 vi.mock("../../lib/javaEditing", () => ({ registerJavaEditingProviders: vi.fn(), attachJavaEditing: () => () => {} }));
 // Java 右键的 SQL 动作与它的对话框同理：拉进数据库页整条依赖链
 vi.mock("../../lib/javaSqlActions", () => ({ registerJavaSqlActions: () => [] }));
+vi.mock("../../lib/javaStickyScope", () => ({ attachJavaStickyScope: () => () => {} }));
 
 vi.mock("../../lib/editorStore", () => ({
   onModelLifecycle: (created: (path: string) => void) => { mocks.lifecycle = created; return () => {}; },
@@ -151,9 +152,21 @@ it("后台恢复的标签等到 model 到位后补算编辑器配置", async () 
   ));
   mocks.editor.updateOptions.mockClear();
   // 内容晚一步读到：model 这时才挂上，而 activePath 一直没变
-  mocks.model = { getLanguageId: () => "plaintext" };
+  mocks.model = { getLanguageId: () => "java" };
+  mocks.editor.getModel.mockReturnValue(mocks.model as never);
   await act(async () => mocks.lifecycle!("C:\\w\\A.java"));
   expect(mocks.editor.updateOptions).toHaveBeenCalled();
+  expect(lastOptions()).toMatchObject({ stickyScroll: { enabled: false } });
+});
+
+it("同类文件之间切换时复用配置，偏好真正改变时才更新", async () => {
+  const props = { readOnly: false, heavy: false, onCursor: () => {}, onSave: () => {} };
+  await act(async () => root.render(<EditorPane {...props} activePath="C:\\w\\A.txt" />));
+  mocks.editor.updateOptions.mockClear();
+  await act(async () => root.render(<EditorPane {...props} activePath="C:\\w\\B.txt" />));
+  expect(mocks.editor.updateOptions).not.toHaveBeenCalled();
+  await act(async () => setEditorPrefs({ fontSize: 17 }));
+  expect(mocks.editor.updateOptions).toHaveBeenCalledOnce();
 });
 
 describe("行号槽", () => {

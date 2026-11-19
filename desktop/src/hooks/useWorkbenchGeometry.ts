@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { PanelTab } from "../components/workspace/BottomPanel";
 import { getWorkbenchLayout, panelHeight, panelMaxHeight, updateWorkbenchLayout, useWorkbenchLayout } from "../lib/workbenchLayout";
+import { frameTask } from "../lib/frameTask";
 
 export function useWorkbenchGeometry(panel: PanelTab, sideKey = "files") {
   const layout = useWorkbenchLayout();
@@ -29,13 +30,15 @@ export function useWorkbenchGeometry(panel: PanelTab, sideKey = "files") {
     if (capture) {
       try { captureEl?.setPointerCapture(capture.id); } catch { /* 指针已释放，退回 window 监听 */ }
     }
+    const pending = frameTask<number>(next => setSize(axis, next));
     const move = (event: PointerEvent) => {
       if (capture && event.pointerId !== capture.id) return;
-      setSize(axis, value + (axis === "side" ? event.clientX - start : start - event.clientY));
+      pending.schedule(value + (axis === "side" ? event.clientX - start : start - event.clientY));
     };
     const finish = (event?: Event) => {
       const pe = event instanceof PointerEvent ? event : undefined;
       if (capture && pe && pe.pointerId !== capture.id) return;
+      pending.flush();
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", finish);
@@ -45,7 +48,7 @@ export function useWorkbenchGeometry(panel: PanelTab, sideKey = "files") {
       }
       cleanup.current = null;
     };
-    cleanup.current = () => finish();
+    cleanup.current = () => { pending.cancel(); finish(); };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", finish);
     window.addEventListener("pointercancel", finish);

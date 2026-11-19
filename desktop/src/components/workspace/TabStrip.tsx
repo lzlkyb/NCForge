@@ -10,6 +10,8 @@ import { useWorkbenchDock } from "./WorkbenchDock";
 import { ContextMenu } from "./ContextMenu";
 import { tabMenuItems } from "./tabMenu";
 import { AllEditorTabs } from "./AllEditorTabs";
+import { SelectionIndicator } from "../ui/SelectionIndicator";
+import { useTabReflow } from "../../hooks/useTabReflow";
 import { TaskMenu } from "./TaskMenu";
 import { Button } from "../ui/button";
 import { WorkspaceGlyph } from "./WorkspaceGlyph";
@@ -80,6 +82,9 @@ export function TabStrip({
   const { paths: marks } = useProblemMarks();
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
   const tabRefs = useRef(new Map<string, HTMLDivElement>());
+  const stripRef = useRef<HTMLDivElement>(null);
+  const tabSignature = tabs.map(tab => tab.path).join("|");
+  useTabReflow(stripRef, tabSignature);
   /** 正在被拖的标签路径（HTML5 拖放只在 start 时给，dragover 时读不到）。 */
   const dragFrom = useRef<string | null>(null);
   /** 漫游 tabIndex：整组标签只占一个 Tab 停靠点，组内用方向键移动（WAI-ARIA tabs 模式）。 */
@@ -183,7 +188,8 @@ export function TabStrip({
 
   return (
     <div className="wb-tabs" role="tablist" aria-label={groupId ? `${groupId === 'left' ? '左' : '右'}编辑器组文件` : '打开的文件'}>
-      <div className="wb-tabs-scroll">
+      <div ref={stripRef} className="wb-tabs-scroll">
+        <SelectionIndicator container={stripRef} variant="tab" value={`${activePath}:${tabSignature}`} revision={marks} selector='.wb-tab[data-active]' />
       {tabs.map((t, i) => {
         const svn = t.virtual ? undefined : svnFiles.get(pathKey(t.path));
         const problem = marks.get(diagnosticPathKey(t.path));
@@ -200,6 +206,7 @@ export function TabStrip({
           aria-label={[t.name, pathLabels.get(t.path), svn && svnStatusLabel[svn]].filter(Boolean).join(" · ")}
           aria-description={[t.readOnly && "只读", problemDescription(problem)].filter(Boolean).join(" · ") || undefined}
           className="wb-tab"
+          data-path={t.path}
           data-active={(!dock?.documentOpen && t.path === activePath) || undefined}
           data-preview={t.preview || undefined}
           data-pinned={t.pinned || undefined}

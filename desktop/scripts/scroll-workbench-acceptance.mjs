@@ -9,9 +9,10 @@ import { chromium } from "playwright";
 
 const phase = process.argv[2] || "after";
 const trace = process.argv.includes("--trace-log");
+const traceGrid = process.argv.includes("--trace-grid");
 assert.ok(["before", "after"].includes(phase));
-const dist = new URL("../dist/", import.meta.url);
-const artifacts = new URL("../../docs/工作台滚动优化验收-2026-11-13/", import.meta.url);
+const dist = new URL(process.env.NCFORGE_PERF_DIST ?? "../dist/", import.meta.url);
+const artifacts = new URL(process.env.NCFORGE_PERF_ARTIFACTS ?? "../../docs/工作台滚动优化验收-2026-11-13/", import.meta.url);
 const html = await readFile(new URL("index.html", dist), "utf8");
 const entry = html.match(/<script type="module"[^>]*src="([^"]+)"/)?.[1];
 assert.ok(entry, "A production build is required");
@@ -110,10 +111,20 @@ try {
   await navigate("数据库"); await page.locator("#dbx-conn-c").click();
   await page.getByRole("textbox", { name: "SQL 查询编辑器", exact: true }).focus(); await page.keyboard.press("Control+Enter");
   await page.locator(".dbx-grow [role=gridcell]").first().waitFor();
+  const gridTrace = traceGrid ? await page.context().newCDPSession(page) : null, gridEvents = [];
+  if (gridTrace) {
+    gridTrace.on("Tracing.dataCollected", ({ value }) => gridEvents.push(...value));
+    await gridTrace.send("Tracing.start", { categories: "devtools.timeline", transferMode: "ReportEvents" });
+  }
   if (!trace) {
   await sample("wide-grid-horizontal", ".dbx-grid", "x");
   await sample("wide-grid-vertical", ".dbx-grid", "y");
   await sample("wide-grid-diagonal", ".dbx-grid", "xy");
+  if (gridTrace) {
+    const complete = new Promise(resolve => gridTrace.once("Tracing.tracingComplete", resolve));
+    await gridTrace.send("Tracing.end"); await complete;
+    await writeFile(new URL("grid-trace.json", artifacts), JSON.stringify({ traceEvents: gridEvents }));
+  }
   if (phase === "after") {
     const box = await page.locator(".dbx-grid").boundingBox();
     await page.mouse.move(box.x + box.width / 2, box.y + 100);

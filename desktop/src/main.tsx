@@ -32,6 +32,7 @@ import "./forge-controls.css";
 import "./motion-feedback.css";
 // The approved material layer follows layout and control defaults in dev and packaged builds.
 import "./workbench-material.css";
+import "./micro-motion.css";
 
 // 启动即应用已保存的主题，避免首帧闪烁。
 document.documentElement.classList.toggle("dark", getStoredTheme() === "dark");

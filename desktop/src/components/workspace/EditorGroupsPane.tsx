@@ -12,6 +12,7 @@ import { EditorNavRow, type EditorNavigation } from "./EditorNavRow";
 import type { useFileSession } from "../../hooks/useFileSession";
 import "../../editor-groups.css";
 import { useHistoryRestorePath, isHistoryRestoring } from "../../lib/historyRestoreGuard";
+import { frameTask } from "../../lib/frameTask";
 
 export function EditorGroupsPane({ root, tabs, session, reveal, tools, nav }: {
   root: string; tabs: TabMeta[]; session: ReturnType<typeof useFileSession>;
@@ -49,12 +50,14 @@ export function EditorGroupsPane({ root, tabs, session, reveal, tools, nav }: {
     cleanup.current?.(); const bounds = host.current?.getBoundingClientRect(); if (!bounds?.width) return;
     const handle = event.currentTarget, pointerId = event.pointerId, start = event.clientX;
     const initial = getSession().editorGroups?.ratio ?? .5;
+    const pending = frameTask<number>(ratio => setSession({ editorGroups: old => ({ ...(old ?? emptyEditorGroups()), ratio }) }));
     const move = (e: PointerEvent) => {
       if (e.pointerId !== pointerId) return;
-      setSession({ editorGroups: old => ({ ...(old ?? emptyEditorGroups()), ratio: initial + (e.clientX - start) / bounds.width }) });
+      pending.schedule(initial + (e.clientX - start) / bounds.width);
     };
     const finish = (e?: Event) => {
       if (e && "pointerId" in e && (e as PointerEvent).pointerId !== pointerId) return;
+      pending.flush();
       handle.removeEventListener("pointermove", move);
       handle.removeEventListener("pointerup", finish);
       handle.removeEventListener("pointercancel", finish);
@@ -63,7 +66,7 @@ export function EditorGroupsPane({ root, tabs, session, reveal, tools, nav }: {
       cleanup.current = null;
     };
     try { handle.setPointerCapture?.(pointerId); } catch { /* 捕获失败不影响基本拖拽 */ }
-    cleanup.current = () => finish();
+    cleanup.current = () => { pending.cancel(); finish(); };
     handle.addEventListener("pointermove", move);
     handle.addEventListener("pointerup", finish);
     handle.addEventListener("pointercancel", finish);

@@ -112,10 +112,11 @@ export function FilePaneSlots({
   const documentOpen = dock?.documentOpen ?? false;
   const panelExpanded = dock?.panelExpanded ?? false;
   const {
-    root, projects, activeTool, tabs, activePath, active, splitPath, activeMark,
+    root, projects, tabs, activePath, active, splitPath, activeMark,
     showLargeHint, conflictPath, encodingIssue, saving, reveal,
     panelOpen, panelTab, panels, compiling, canBack, canForward, treeRef,
   } = model;
+  const activeTool = dock?.activeTool ?? model.activeTool;
   const {
     setPanels, setPanelOpen, openPath, compileActive,
     compileModulePath, cleanModulePath, rebuildModulePath,
@@ -242,6 +243,7 @@ export function EmptyProjectSlots({
   servicesPanel: boolean;
 }) {
   const slot = useFileSlot();
+  const activeTool = useWorkbenchDock()?.activeTool;
   return (
     <>
       {slot("tree", <div className="wb-no-project">尚未打开工程</div>)}
@@ -252,7 +254,7 @@ export function EmptyProjectSlots({
           <OperationStatus compact/><span className="wb-status-sp" />
         </footer>
       ))}
-      {slot("output", servicesPanel ? output : null)}
+      {slot("output", servicesPanel && (!activeTool || activeTool === "files") ? output : null)}
     </>
   );
 }
