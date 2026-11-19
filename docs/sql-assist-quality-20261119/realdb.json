@@ -1,0 +1,53 @@
+{
+  "conn": {
+    "name": "aier260824",
+    "url": "jdbc:oracle:thin:@10.200.22.144:1521/aier260824",
+    "user": "aier633",
+    "engine": "rust"
+  },
+  "foreignKeys": {
+    "rows": 0,
+    "pairs": []
+  },
+  "ncRefs": {
+    "rows": 30,
+    "targets": [
+      "so_saleorder",
+      "org_dept_v",
+      "bd_freecustom",
+      "org_salesorg",
+      "bd_billtype",
+      "bd_transporttype",
+      "sm_user",
+      "bd_bankdoc",
+      "bd_channeltype",
+      "bd_customer",
+      "bd_bankaccsub",
+      "org_group",
+      "org_salesorg_v",
+      "bd_psndoc",
+      "bd_busitype",
+      "bd_balatype",
+      "bd_currtype",
+      "bd_custaddress",
+      "bd_incoterm",
+      "bd_income",
+      "org_dept"
+    ],
+    "hasBody": false
+  },
+  "candidates": [
+    "SO_SALEORDER",
+    "SO_SALEORDER_B",
+    "SO_SALEORDER_EXE"
+  ],
+  "rootPk": [
+    "CSALEORDERID"
+  ],
+  "bodyEvidence": {
+    "SO_SALEORDER_B": {
+      "hasAllRootPk": true,
+      "columnCount": 245
+    }
+  }
+}

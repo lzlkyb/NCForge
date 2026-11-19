@@ -41,9 +41,10 @@ export function wireSqlSuggestLayout(editor: Editor): monaco.IDisposable {
   widget.showSuggestions = (model, index, frozen, auto, noFocus) => {
     const explicit = model.items[index]?.completion.ncforgeExplicit === true;
     node.toggleAttribute("data-sql-explicit", explicit);
-    // Monaco dispatches Enter/Tab only when a row has focus. Withhold initial focus for edits
-    // such as JOIN and expanding *, and let the native arrow/mouse controls select them.
-    show.call(widget, model, index, frozen, auto, noFocus || explicit);
+    // 首行焦点必须给：Ctrl+空格 路径上游会 focusSuggestion 补焦点，自动弹出若扣留焦点，
+    // 同一个列表两条路一个 Enter 能接受一个 Enter 是换行，用户读成「补全坏了」。
+    // 生成类编辑（整条查询 / JOIN）靠 preselect 只在唯一精确命中时置顶来降低误接受面。
+    show.call(widget, model, index, frozen, auto, noFocus);
   };
   const geometry = view.virtualDelegate;
   const previousDynamic = view.supportDynamicHeights;

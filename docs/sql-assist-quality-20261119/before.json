@@ -1,0 +1,296 @@
+{
+  "coldDotAt150": {
+    "visible": true,
+    "rows": [
+      {
+        "label": "bflag",
+        "focused": true
+      },
+      {
+        "label": "bflag · 等于",
+        "focused": false
+      },
+      {
+        "label": "creationtime",
+        "focused": false
+      },
+      {
+        "label": "creationtime · 等于",
+        "focused": false
+      },
+      {
+        "label": "dbilldate",
+        "focused": false
+      },
+      {
+        "label": "dbilldate · 等于",
+        "focused": false
+      },
+      {
+        "label": "nmoney",
+        "focused": false
+      },
+      {
+        "label": "nmoney · 等于",
+        "focused": false
+      },
+      {
+        "label": "pk_org",
+        "focused": false
+      },
+      {
+        "label": "pk_org · 等于",
+        "focused": false
+      }
+    ],
+    "docs": false
+  },
+  "coldDotAt700": {
+    "visible": true,
+    "rows": [
+      {
+        "label": "bflag",
+        "focused": true
+      },
+      {
+        "label": "bflag · 等于",
+        "focused": false
+      },
+      {
+        "label": "creationtime",
+        "focused": false
+      },
+      {
+        "label": "creationtime · 等于",
+        "focused": false
+      },
+      {
+        "label": "dbilldate",
+        "focused": false
+      },
+      {
+        "label": "dbilldate · 等于",
+        "focused": false
+      },
+      {
+        "label": "nmoney",
+        "focused": false
+      },
+      {
+        "label": "nmoney · 等于",
+        "focused": false
+      },
+      {
+        "label": "pk_org",
+        "focused": false
+      },
+      {
+        "label": "pk_org · 等于",
+        "focused": false
+      }
+    ],
+    "docs": false
+  },
+  "coldDotInvoke": {
+    "visible": true,
+    "rows": [
+      {
+        "label": "bflag",
+        "focused": true
+      },
+      {
+        "label": "bflag · 等于",
+        "focused": false
+      },
+      {
+        "label": "creationtime",
+        "focused": false
+      },
+      {
+        "label": "creationtime · 等于",
+        "focused": false
+      },
+      {
+        "label": "dbilldate",
+        "focused": false
+      },
+      {
+        "label": "dbilldate · 等于",
+        "focused": false
+      },
+      {
+        "label": "nmoney",
+        "focused": false
+      },
+      {
+        "label": "nmoney · 等于",
+        "focused": false
+      },
+      {
+        "label": "pk_org",
+        "focused": false
+      },
+      {
+        "label": "pk_org · 等于",
+        "focused": false
+      }
+    ],
+    "docs": false
+  },
+  "columnPrefix": {
+    "visible": true,
+    "rows": [
+      {
+        "label": "vbillcode",
+        "focused": true
+      },
+      {
+        "label": "vbillcode · 等于",
+        "focused": false
+      },
+      {
+        "label": "pk_po_arriveord",
+        "focused": false
+      },
+      {
+        "label": "pk_po_arriveord · 等于",
+        "focused": false
+      }
+    ],
+    "docs": false
+  },
+  "pinyinInitials": {
+    "visible": false
+  },
+  "chineseName": {
+    "visible": false
+  },
+  "chineseInvoke": {
+    "visible": true,
+    "rows": [
+      {
+        "label": "SELECT * FROM po_order",
+        "focused": true
+      },
+      {
+        "label": "po_order",
+        "focused": false
+      },
+      {
+        "label": "SELECT COUNT(*) FROM po_order",
+        "focused": false
+      },
+      {
+        "label": "SELECT * FROM po_order FOR UPDATE",
+        "focused": false
+      },
+      {
+        "label": "采购订单 · 主表条件查询",
+        "focused": false
+      },
+      {
+        "label": "采购订单 · 按单号查主表",
+        "focused": false
+      },
+      {
+        "label": "生成 INSERT 模板",
+        "focused": false
+      }
+    ],
+    "docs": false
+  },
+  "bareTable": {
+    "visible": true,
+    "rows": [
+      {
+        "label": "SELECT * FROM po_arriveorder",
+        "focused": false
+      },
+      {
+        "label": "po_arriveorder",
+        "focused": false
+      },
+      {
+        "label": "SELECT COUNT(*) FROM po_arriveorder",
+        "focused": false
+      },
+      {
+        "label": "SELECT * FROM po_arriveorder FOR UPDATE",
+        "focused": false
+      },
+      {
+        "label": "到货单 · 关联查询 采购组织",
+        "focused": false
+      },
+      {
+        "label": "到货单 · 关联查询 人员基本档案",
+        "focused": false
+      },
+      {
+        "label": "到货单 · 主表条件查询",
+        "focused": false
+      },
+      {
+        "label": "到货单 · 按单号关联 采购组织",
+        "focused": false
+      },
+      {
+        "label": "到货单 · 按单号关联 人员基本档案",
+        "focused": false
+      },
+      {
+        "label": "到货单 · 按单号查主表",
+        "focused": false
+      }
+    ],
+    "docs": false
+  },
+  "afterEnter": "po_arriveorder",
+  "dotOrder": {
+    "visible": true,
+    "rows": [
+      {
+        "label": "bflag",
+        "focused": true
+      },
+      {
+        "label": "bflag · 等于",
+        "focused": false
+      },
+      {
+        "label": "creationtime",
+        "focused": false
+      },
+      {
+        "label": "creationtime · 等于",
+        "focused": false
+      },
+      {
+        "label": "dbilldate",
+        "focused": false
+      },
+      {
+        "label": "dbilldate · 等于",
+        "focused": false
+      },
+      {
+        "label": "nmoney",
+        "focused": false
+      },
+      {
+        "label": "nmoney · 等于",
+        "focused": false
+      },
+      {
+        "label": "pk_org",
+        "focused": false
+      },
+      {
+        "label": "pk_org · 等于",
+        "focused": false
+      }
+    ],
+    "docs": false
+  },
+  "errors": []
+}

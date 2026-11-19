@@ -138,9 +138,13 @@ export function wireSqlActionMenu(editor: monaco.editor.IStandaloneCodeEditor, p
         widget.append(help);
       }
       let generation = 0, selected: SqlCodeAction | undefined;
-      let relayout = () => service._contextViewService.layout();
+      // fixed ContextView 重复 layout 的自减坐标坑由 monacoContextViewGuard 统一归零兜底。
+      const reposition = () => service._contextViewService.layout();
+      let relayout = () => reposition();
       if (panel && widget) {
-        panel.hidden = true;
+        // 用 visibility 而非 hidden：焦点扫过标题行/无预览行时面板若退出布局，widget 高度
+        // 变化会触发 relayout，浮层在鼠标下移位又改变悬停行，形成来回跳动的反馈环。
+        panel.style.visibility = "hidden";
         panel.className = "dbx-sql-action-preview";
         const summary = doc.createElement("summary"), code = doc.createElement("pre");
         summary.textContent = "查看 SQL 预览（→）";
@@ -152,27 +156,29 @@ export function wireSqlActionMenu(editor: monaco.editor.IStandaloneCodeEditor, p
           if ("text" in info) { code.textContent = info.text; return; }
           code.textContent = "正在读取字段，生成预览…";
           const current = () => generation === id && panel.isConnected && panel.open;
-          void info.read(current).then(text => { if (current()) { code.textContent = text; service._contextViewService.layout(); } }, error => {
-            if (current()) { code.textContent = error instanceof Error ? error.message : "暂时无法预览，请重试。"; service._contextViewService.layout(); }
+          void info.read(current).then(text => { if (current()) { code.textContent = text; reposition(); } }, error => {
+            if (current()) { code.textContent = error instanceof Error ? error.message : "暂时无法预览，请重试。"; reposition(); }
           });
         };
         showPreview = action => {
-          if (selected === action && !panel.hidden) return;
+          // 标题行被鼠标悬停也会拿焦点（Monaco mouseover 直接 setFocus）：保持上一份预览，别动面板。
+          if (!action) return;
+          if (selected === action && panel.style.visibility !== "hidden") return;
           selected = action;
           const info = previewOf(action);
-          panel.hidden = !info;
+          panel.style.visibility = info ? "" : "hidden";
           if (!info) panel.open = false;
           summary.textContent = info && "description" in info && info.description ? "查看操作说明（→）" : "查看 SQL 预览（→）";
-          update(); service._contextViewService.layout();
+          update(); reposition();
         };
-        relayout = () => { update(); service._contextViewService.layout(); };
+        relayout = () => { update(); reposition(); };
         showPreview(menu[list._list.getFocus()[0]]?.item?.action);
         panel.addEventListener("toggle", relayout);
       }
       const keys = (event: KeyboardEvent) => {
         if (event.isComposing) return;
         const fromList = list.domNode.contains(event.target as Node);
-        const previewable = panel && !panel.hidden;
+        const previewable = panel && panel.style.visibility !== "hidden";
         // The popup lives at window level so the editor's DOM keybinding listener cannot see it.
         if (event.key === "Escape") service.hide(true);
         else if (!fromList) return;

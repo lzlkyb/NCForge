@@ -1,4 +1,5 @@
-import { dbApi, type Cell, type ExecResult } from "./dbApi";
+import { dbApi, type Cell, type ColumnInfo, type ExecResult } from "./dbApi";
+import { columnsOf, rtOf } from "./dbStore";
 import { sqlReferenceKey, sqlWordKind } from "./sqlLex";
 import type { SqlLanguage } from "sql-formatter";
 import { snippetEscape } from "./sqlTemplates";
@@ -6,7 +7,7 @@ import { sqlPredicates } from "./sqlPredicates";
 
 export interface SqlBusinessSource { table: string; alias?: string; aliasRef?: string; name?: string; nameRef?: string; schema?: string; tableRef?: string; quoted?: boolean; declaration?: number }
 export interface SqlBusinessColumn { name: string; type?: string }
-export interface SqlBusinessRelation { id: string; source: string; target: string; from: string[]; to: string[]; kind: "外键" | "NC类引用" }
+export interface SqlBusinessRelation { id: string; source: string; target: string; from: string[]; to: string[]; kind: "外键" | "NC类引用" | "主子表" }
 export interface SqlBusinessEnum { field: string; value: string | number; label: string }
 export interface SqlBusinessMetadata { table: string; schema?: string; relations: SqlBusinessRelation[]; enums: SqlBusinessEnum[]; partial: boolean; sharedSession: boolean }
 export interface BusinessSuggestion { label: string; insertText: string; documentation: string; reason: string; source: string; snippet?: boolean }
@@ -40,7 +41,10 @@ export function readSqlBusinessMetadata(connId: string, scopeKey: string, table:
       if (current && !current()) { finish(null); waiting.shift()?.run(); return; }
       active++;
       // The isolated-only flag prevents completion from consuming the user's result cursor.
-      void Promise.resolve().then(() => current && !current() ? null : dbApi.relations(connId, table, true)).then(value => finish(!value || value.sharedSession || current && !current() ? null : sqlBusinessMetadata(table, value)), () => finish(null)).finally(() => {
+      void Promise.resolve().then(() => current && !current() ? null : dbApi.relations(connId, table, true)).then(async value => {
+        const meta = !value || value.sharedSession || current && !current() ? null : sqlBusinessMetadata(table, value);
+        finish(meta ? await withBodyRelations(connId, meta, (rtOf(connId).tables ?? []).map(t => t.name)) : null);
+      }, () => finish(null)).finally(() => {
         active--; waiting.shift()?.run();
       });
     };
@@ -107,6 +111,31 @@ export function sqlBusinessMetadata(table: string, value: Response): SqlBusiness
     }
   }
   return { table, relations: [...relations(value.foreign, "外键"), ...relations(value.references, "NC类引用")], enums, partial: value.partial === true, sharedSession: value.sharedSession === true };
+}
+/**
+ * 第三类关系证据：主子表约定。NC 的表体（`_b`/`_body`/`_detail`/`_line`）是聚合关系，
+ * 既没有声明外键也不是 md 类引用——只认前两类时真库上「主子表联查」永远空组，
+ * 菜单标题承诺了却给不出。命名本身不是证据（约定可能撞名），**表体含主表全部主键列**
+ * 才是：列名来自库的字段元数据，逐列核对后才合成关系。
+ */
+export async function withBodyRelations(connId: string, meta: SqlBusinessMetadata, available: readonly string[],
+  read: (table: string) => Promise<ColumnInfo[]> = table => columnsOf(connId, table)): Promise<SqlBusinessMetadata> {
+  const root = meta.table.toLowerCase();
+  const candidates = available.map(t => t.toLowerCase())
+    .filter(t => t.startsWith(root + "_") && /^(?:b\d*|body|details?|lines?)$/.test(t.slice(root.length + 1)))
+    .slice(0, 4);
+  if (!candidates.length) return meta;
+  const rootColumns = await read(meta.table).catch(() => [] as ColumnInfo[]);
+  const pk = rootColumns.filter(c => c.pk).map(c => c.name.toLowerCase());
+  if (!pk.length) return meta;
+  const extra: SqlBusinessRelation[] = [];
+  const columnSets = await Promise.all(candidates.map(async t => [t, new Set((await read(t).catch(() => [] as ColumnInfo[])).map(c => c.name.toLowerCase()))] as const));
+  for (const [candidate, names] of columnSets) {
+    if (meta.relations.some(r => (r.source.toLowerCase() === candidate && r.target.toLowerCase() === root) || (r.source.toLowerCase() === root && r.target.toLowerCase() === candidate))) continue;
+    if (!pk.every(p => names.has(p))) continue;
+    extra.push({ id: `主子表:${candidate}`, source: candidate, target: root, from: pk, to: pk, kind: "主子表" });
+  }
+  return extra.length ? { ...meta, relations: [...extra, ...meta.relations] } : meta;
 }
 function ident(value: string, dialect: SqlLanguage): string {
   if (/^[\p{L}_][\p{L}\p{N}_$#]*$/u.test(value) && sqlWordKind(value, dialect) === "identifier") return value;

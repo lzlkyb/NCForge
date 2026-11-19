@@ -12,6 +12,7 @@ import "monaco-editor/esm/vs/basic-languages/css/css.contribution";
 import "monaco-editor/esm/vs/basic-languages/ini/ini.contribution";
 import "monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution";
 import { registerJsonLanguage } from "./monacoJson";
+import { wireFixedContextViewGuard } from "./monacoContextViewGuard";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import { javaPalette, javaTokenRules } from "./javaColors";
 import { getStoredTheme, type Theme } from "./theme";
@@ -180,6 +181,7 @@ function wireTableHover(): void {
 export function initMonaco(): typeof monaco {
   registerSqlLanguages(monaco);
   registerJsonLanguage(monaco);
+  wireFixedContextViewGuard(monaco);
   if (!themeWired) {
     themeWired = true;
     subscribeFonts(() => monaco.editor.remeasureFonts());

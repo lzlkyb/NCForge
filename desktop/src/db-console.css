@@ -104,7 +104,8 @@
 .dbx-sql-action-preview { padding:var(--gap-control); border-top:1px solid var(--color-border); color:var(--color-foreground); }
 .dbx-sql-action-preview > summary { cursor:pointer; color:var(--color-primary); }
 .dbx-sql-action-preview > pre {
-  max-height:24vh; margin:var(--gap-control) 0 0; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere;
+  /* 固定高度：上下键换行时预览文本长短不一，若随内容伸缩会拖着浮层重排跳位。 */
+  height:24vh; margin:var(--gap-control) 0 0; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere;
   font-family:var(--font-mono); line-height:1.5;
 }
 /* Give the name its natural width first. Monaco measures wrapped rows for scrolling. */
@@ -628,7 +629,7 @@
 .dbx-vs-prog { display: flex; flex-direction: column; gap: 6px; }
 .dbx-vs-progtext { display: flex; align-items: center; gap: 8px; font-size: var(--dbx-fs-body); }
 .dbx-vs-bar { height: 4px; border-radius: 2px; background: hsl(var(--secondary)); overflow: hidden; }
-.dbx-vs-bar > i { display: block; height: 100%; background: hsl(var(--primary)); transition: width .18s ease; }
+.dbx-vs-bar > i { display: block; width:100%;height: 100%; background: hsl(var(--primary));transform-origin:left;transition:transform var(--dur-enter) var(--ease); }
 .dbx-vs-alert { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 8px; font-size: var(--dbx-fs-body); line-height: 1.6; margin: 0; }
 .dbx-vs-alert[data-tone="warn"] { background: hsl(var(--warning) / .12); color: hsl(var(--warning-ink)); }
 .dbx-vs-alert[data-tone="bad"] { background: hsl(var(--destructive) / .1); color: hsl(var(--destructive-ink)); word-break: break-all; }
@@ -665,7 +666,7 @@
 .dbx-sr-progtext { display: flex; align-items: center; gap: 8px; font-size: var(--dbx-fs-body); }
 .dbx-sr-current { overflow: hidden; font-size: var(--dbx-fs-meta); color: hsl(var(--muted-foreground)); text-overflow: ellipsis; white-space: nowrap; }
 .dbx-sr-bar { height: 4px; border-radius: 2px; background: hsl(var(--secondary)); overflow: hidden; }
-.dbx-sr-bar > i { display: block; height: 100%; background: hsl(var(--primary)); transition: width .18s ease; }
+.dbx-sr-bar > i { display: block; width:100%;height: 100%; background: hsl(var(--primary));transform-origin:left;transition:transform var(--dur-enter) var(--ease); }
 .dbx-sr-result { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .dbx-sr-sum { display: flex; align-items: center; gap: 8px; font-size: var(--dbx-fs-body); }
 .dbx-sr-fails { border: 1px solid hsl(var(--border)); border-radius: 8px; overflow: auto; max-height: 300px; }
@@ -747,13 +748,10 @@
 .dbx-query-status svg {flex-shrink:0;color:hsl(var(--primary));}
 .dbx-query-status[data-state=failed] svg {color:hsl(var(--destructive-ink));}
 .dbx-query-time {font-variant-numeric:tabular-nums;}
-.dbx-query-surface .dbx-grid {transition:opacity 160ms ease;}
+.dbx-query-surface .dbx-grid {transition:opacity var(--dur-fast) var(--ease);}
 .dbx-query-surface[data-query-field=previous] .dbx-grid {opacity:.62;}
 .dbx-query-surface[data-query-field=previous]:hover .dbx-grid,.dbx-query-surface[data-query-field=previous]:focus-within .dbx-grid {opacity:1;}
-.dbx-query-surface[data-query-outcome=success] .dbx-grid {animation:dbx-result-land 220ms var(--ease);}
-.dbx-query-surface[data-query-outcome=success]::after {content:"";position:absolute;inset:0;pointer-events:none;z-index:3;animation:dbx-result-wash 850ms ease-out both;}
-@keyframes dbx-result-land {from{opacity:.55;transform:translateY(3px)}to{opacity:1;transform:none}}
-@keyframes dbx-result-wash {from{background-color:hsl(var(--primary)/.12)}to{background-color:transparent}}
+.dbx-query-surface[data-query-outcome=success] .dbx-query-status {animation:ui-feedback-in var(--dur-fast) var(--ease);}
 @media(prefers-reduced-motion:reduce){.dbx-query-surface .dbx-grid,.dbx-query-surface::after {animation:none!important;transform:none!important;transition:none!important;}}
 html[data-reduced=true] .dbx-query-surface .dbx-grid,html[data-reduced=true] .dbx-query-surface::after {animation:none!important;transform:none!important;transition:none!important;}
 

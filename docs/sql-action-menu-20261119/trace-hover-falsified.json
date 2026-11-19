@@ -1,0 +1,167 @@
+[
+  {
+    "key": "show",
+    "top": 151,
+    "left": 608,
+    "h": 506,
+    "w": 309,
+    "widgetH": 506,
+    "panelHidden": false,
+    "panelOpen": false,
+    "focused": "PO_ARRIVEORDER_B · po_arriveorder_b"
+  },
+  {
+    "key": "ArrowDown",
+    "top": 151,
+    "left": 608,
+    "h": 506,
+    "w": 309,
+    "widgetH": 506,
+    "panelHidden": false,
+    "panelOpen": false,
+    "focused": "ORG_PURCHASEORG_V · org_purchaseorg_v"
+  },
+  {
+    "key": "ArrowDown",
+    "top": 151,
+    "left": 608,
+    "h": 506,
+    "w": 309,
+    "widgetH": 506,
+    "panelHidden": false,
+    "panelOpen": false,
+    "focused": "ORG_STOCKORG_V · org_stockorg_v"
+  },
+  {
+    "key": "ArrowDown",
+    "top": 151,
+    "left": 608,
+    "h": 506,
+    "w": 309,
+    "widgetH": 506,
+    "panelHidden": false,
+    "panelOpen": false,
+    "focused": "ORG_DEPT_V · org_dept_v"
+  },
+  {
+    "key": "ArrowDown",
+    "top": 151,
+    "left": 608,
+    "h": 506,
+    "w": 309,
+    "widgetH": 506,
+    "panelHidden": false,
+    "panelOpen": false,
+    "focused": "ORG_GROUP · org_group"
+  },
+  {
+    "key": "ArrowDown",
+    "top": 151,
+    "left": 608,
+    "h": 506,
+    "w": 309,
+    "widgetH": 506,
+    "panelHidden": false,
+    "panelOpen": false,
+    "focused": "SM_USER · sm_user"
+  },
+  {
+    "key": "ArrowUp",
+    "top": 151,
+    "left": 608,
+    "h": 506,
+    "w": 309,
+    "widgetH": 506,
+    "panelHidden": false,
+    "panelOpen": false,
+    "focused": "ORG_GROUP · org_group"
+  },
+  {
+    "key": "ArrowUp",
+    "top": 151,
+    "left": 608,
+    "h": 506,
+    "w": 309,
+    "widgetH": 506,
+    "panelHidden": false,
+    "panelOpen": false,
+    "focused": "ORG_DEPT_V · org_dept_v"
+  },
+  {
+    "key": "ArrowDown",
+    "top": 151,
+    "left": 608,
+    "h": 506,
+    "w": 309,
+    "widgetH": 506,
+    "panelHidden": false,
+    "panelOpen": false,
+    "focused": "ORG_GROUP · org_group"
+  },
+  {
+    "key": "hover row2",
+    "top": 151,
+    "left": 608,
+    "h": 506,
+    "w": 309,
+    "widgetH": 506,
+    "panelHidden": false,
+    "panelOpen": false,
+    "focused": "PO_ARRIVEORDER_B · po_arriveorder_b"
+  },
+  {
+    "key": "hover row4",
+    "top": 151,
+    "left": 608,
+    "h": 506,
+    "w": 309,
+    "widgetH": 506,
+    "panelHidden": false,
+    "panelOpen": false,
+    "focused": "ORG_STOCKORG_V · org_stockorg_v"
+  },
+  {
+    "key": "hover row1",
+    "top": 151,
+    "left": 608,
+    "h": 472,
+    "w": 309,
+    "widgetH": 472,
+    "panelHidden": false,
+    "panelOpen": false,
+    "focused": ""
+  },
+  {
+    "key": "hover row6",
+    "top": 151,
+    "left": 608,
+    "h": 506,
+    "w": 309,
+    "widgetH": 506,
+    "panelHidden": false,
+    "panelOpen": false,
+    "focused": "ORG_GROUP · org_group"
+  },
+  {
+    "key": "hover row3",
+    "top": 151,
+    "left": 608,
+    "h": 506,
+    "w": 309,
+    "widgetH": 506,
+    "panelHidden": false,
+    "panelOpen": false,
+    "focused": "ORG_PURCHASEORG_V · org_purchaseorg_v"
+  },
+  {
+    "key": "hover row2",
+    "top": 151,
+    "left": 608,
+    "h": 506,
+    "w": 309,
+    "widgetH": 506,
+    "panelHidden": false,
+    "panelOpen": false,
+    "focused": "PO_ARRIVEORDER_B · po_arriveorder_b"
+  }
+]

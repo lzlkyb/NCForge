@@ -64,8 +64,9 @@ export function pinyinInitials(text: string): Initials | null {
     }
   }
   const value = hasHan ? { text: out, chars, hasHan } : null;
-  // 只用于命令标题 / 设置关键词这类小集合；上限防住意外的大量调用。
-  if (cache.size > 500) cache.clear();
+  // 命令标题 / 设置关键词是小集合，但 SQL 补全要对整库表名的中文名逐键求首字母，
+  // 上限太小会让缓存逐键清空重算。
+  if (cache.size > 4096) cache.clear();
   cache.set(text, value);
   return value;
 }

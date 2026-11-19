@@ -2,7 +2,7 @@ import { monaco } from "./monacoSetup";
 import { connOf, rtOf, sqlColumnEpoch, sqlTabOf } from "./dbStore";
 import { sqlAssistColumns, sqlFieldIdentifiers } from "./sqlAssistColumns";
 import { tabIdOfModel } from "./sqlModels";
-import { analyzeSql, sqlCompletionAt, sqlScopeAt, sqlWildcardAt, sqlWildcardInScope, type SqlSource, type SqlWildcard } from "./sqlScope";
+import { analyzeSql, resolveSqlQualifier, sqlCompletionAt, sqlScopeAt, sqlWildcardAt, sqlWildcardInScope, type SqlSource, type SqlWildcard } from "./sqlScope";
 import { dialectOfSqlModel, sqlAnalysisOf } from "./monacoSql";
 import { getSqlFormatPrefs } from "./sqlFormatPrefs";
 import { completionContext } from "./sqlCompletionContext";
@@ -70,6 +70,7 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
   let quick: monaco.editor.IQuickSuggestionsOptions | undefined;
   let pendingSuggest: ReturnType<typeof setTimeout> | undefined;
   let relationRequest = 0;
+  let columnRequest = 0;
   let dismissed: { model: monaco.editor.ITextModel; version: number; offset: number } | undefined;
   const disposables: monaco.IDisposable[] = [];
   disposables.push(wireSqlBatchAssist(editor));
@@ -82,7 +83,7 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
   disposables.push(wireSqlSelectionAssist(editor));
   // 行内提示：表名后的「主子表联查」chip 与 JOIN 条件的行尾说明。
   disposables.push(wireSqlAssistGhost(editor));
-  const reset = () => { relationRequest++; clearTimeout(pendingSuggest); dismissed = undefined; dirty = undefined; accepted.length = 0; typed = undefined; acceptedKeys.clear(); };
+  const reset = () => { relationRequest++; columnRequest++; clearTimeout(pendingSuggest); dismissed = undefined; dirty = undefined; accepted.length = 0; typed = undefined; acceptedKeys.clear(); };
   const suggestAt = (model: monaco.editor.ITextModel, offset: number, eligible: (state: NonNullable<ReturnType<typeof current>>) => boolean, checkLateRelations = false) => {
     clearTimeout(pendingSuggest);
     const version = model.getVersionId();
@@ -92,7 +93,7 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
       const state = current(editor);
       if (!state || state.offset !== offset || editor.getSelection()?.isEmpty() === false) return;
       const invoke = eligible(state);
-      if (checkLateRelations) watchRelations(state, invoke);
+      if (checkLateRelations) { watchRelations(state, invoke); watchColumns(state, invoke); }
       if (!invoke) return;
       editor.trigger("sql-assist", "editor.action.triggerSuggest", {});
     }, 0);
@@ -127,9 +128,39 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
       suggestAt(model, offset, next => next.connId === connId && getSqlTemplatesEnabled());
     }).catch(() => undefined);
   }
+  /**
+   * 字段晚到自动刷新。冷读时自动预算内只拿得到加载行（请求被后续触发取消时甚至一片空白），
+   * 没有这一步用户必须手动 Ctrl+空格，读成「补全不出」。只在列表仍是占位行或还没弹时补触发；
+   * 真候选已在屏幕上就不打扰用户的选择与焦点。
+   */
+  function watchColumns(state: NonNullable<ReturnType<typeof current>>, invoked: boolean) {
+    const { analysis, model, offset, connId, dialect } = state;
+    if (rtOf(connId).status !== "connected") return;
+    const ctx = completionContext(analysis, offset, dialect);
+    const tables: string[] = [];
+    const push = (source: SqlSource | undefined) => {
+      const table = source?.table && !source.quoted ? source.tableRef ?? source.table : undefined;
+      if (table && !tables.includes(table)) tables.push(table);
+    };
+    if (ctx.kind === "column" && ctx.qualifier) push(resolveSqlQualifier(analysis, offset, ctx.qualifier, ctx.qualifierRef));
+    else if (ctx.kind === "value") push(ctx.valueSource);
+    else if (ctx.kind !== "none") for (const source of (sqlScopeAt(analysis, offset)?.sources ?? []).slice(0, 2)) push(source);
+    if (!tables.length) return;
+    const version = model.getVersionId(), epoch = sqlColumnEpoch(connId), request = ++columnRequest, started = Date.now();
+    const same = () => !disposed && !composing && editor.getModel() === model && model.getVersionId() === version
+      && sqlColumnEpoch(connId) === epoch && !!editor.getPosition() && model.getOffsetAt(editor.getPosition()!) === offset;
+    for (const table of tables.slice(0, 2)) void sqlAssistColumns(connId, table, same, true).then(cols => {
+      if (!cols.length || Date.now() - started < (invoked ? 500 : 120) || columnRequest !== request || !same()) return;
+      const widget = (editor.getContribution("editor.contrib.suggestController") as unknown as
+        { widget?: { value?: { element: { domNode: HTMLElement }; getFocusedItem(): { item: { completion: { insertText?: string } } } | undefined } } } | null)?.widget?.value;
+      const selected = widget?.getFocusedItem()?.item.completion;
+      if (widget?.element.domNode.classList.contains("visible") && selected && selected.insertText !== "") return;
+      suggestAt(model, offset, next => next.connId === connId);
+    }).catch(() => undefined);
+  }
   disposables.push(editor.onKeyDown(event => {
     const key = event.browserEvent.key;
-    if (["Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab", "Enter"].includes(key)) relationRequest++;
+    if (["Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab", "Enter"].includes(key)) { relationRequest++; columnRequest++; }
     if (key !== "Escape") return;
     clearTimeout(pendingSuggest);
     const model = editor.getModel(), position = editor.getPosition();
@@ -146,6 +177,9 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
     const [table, field] = parts as string[];
     const source = analyzeSql(`SELECT * FROM ${table}`, state.dialect).scopes[0]?.sources[0];
     if (!source || !verifiedSqlSource(state.connId, source)) return;
+    // 接受表名后预读字段：下一步几乎必然是别名 + 点号，冷读留给预读做，点号落地即热。
+    const prefetch = source.tableRef ?? source.table;
+    if (!field && prefetch) void sqlAssistColumns(state.connId, prefetch, () => true).catch(() => undefined);
     // Continue editing even when usage recording is disabled or deduplicates the acceptance.
     if (field && args.followOperator) suggestAt(state.model, state.offset, next =>
       getSqlTemplatesEnabled() && sqlPredicateContext(next.analysis, next.offset, completionContext(next.analysis, next.offset, next.dialect).clause)?.kind === "operator");
@@ -179,6 +213,14 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
   if (!quickFixCommand) quickFixCommand = monaco.editor.registerCommand("ncforge.sql.quickFix", () => {
     for (const [candidate, run] of quickFixers) if (candidate.hasTextFocus()) { run(); break; }
   });
+  // Alt+Enter 与源码编辑器（editorActions.registerEditorKeys）及 IDEA 肌肉记忆对齐：
+  // Ctrl+. 会被中文输入法的中/英标点切换吞掉，键盘主键必须避开 IME 占用。
+  disposables.push(editor.addAction({
+    id: "ncforge.sql.intentions", label: "主子表联查 / 查询修正",
+    keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.Enter],
+    precondition: "editorTextFocus", contextMenuGroupId: "navigation", contextMenuOrder: 0.35,
+    run: () => editor.trigger("sql-assist", "editor.action.quickFix", {}),
+  }));
   // 「展开 * 为字段列表」「生成 INSERT 模板」是单值动作，没有「多个子表挑一个」的问题，
   // 走菜单反而多一次点击。补全项直接带这个命令，落到同一个已注册的 editor action。
   actionRunners.set(editor, id => { void editor.getAction(id)?.run(); });
@@ -204,6 +246,12 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
     if (!model) return;
     if (/^[\p{L}\p{N}_$#]$/u.test(change.text)) {
       suggestAt(model, change.rangeOffset + change.text.length, () => false, true);
+      return;
+    }
+    // 点号本身是 triggerCharacter，Monaco 已经会唤；这里只挂晚到刷新，不重复触发
+    // （重复触发会取消上游会话，反而制造空白）。
+    if (change.text === ".") {
+      suggestAt(model, change.rangeOffset + 1, () => false, true);
       return;
     }
     if (![" ", ",", "*"].includes(change.text)) return;

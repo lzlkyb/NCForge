@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Cell, ExecResult } from "./dbApi";
-import { clearSqlBusinessCache, peekSqlBusinessMetadata, readSqlBusinessMetadata, sqlBusinessMetadata, sqlConditionSuggestions, sqlEnumSuggestions, sqlJoinSuggestions } from "./sqlBusiness";
+import { clearSqlBusinessCache, peekSqlBusinessMetadata, readSqlBusinessMetadata, sqlBusinessMetadata, sqlConditionSuggestions, sqlEnumSuggestions, sqlJoinSuggestions, withBodyRelations } from "./sqlBusiness";
+import { rankBillRelations } from "./sqlBillJoin";
 
 const h = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("./tauri", () => ({ invoke: h.invoke }));
@@ -178,5 +179,52 @@ describe("补全元数据缓存", () => {
     expect(h.invoke).toHaveBeenCalledTimes(2);
     expect(await readSqlBusinessMetadata("c", "s", "orders", () => false)).toBeNull();
     expect(h.invoke).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("主子表约定证据", () => {
+  const col = (name: string, pk = false) => ({ name, full: "VARCHAR2(20)", type: "VARCHAR2", size: 20, pk, nullable: !pk, default: null, comment: null, zh: null });
+  const base = sqlBusinessMetadata("so_saleorder", response());
+  const reader = (tables: Record<string, ReturnType<typeof col>[]>) => async (table: string) => tables[table.toLowerCase()] ?? [];
+  it("表体含主表全部主键列才合成主子表关系", async () => {
+    const meta = await withBodyRelations("c", base, ["so_saleorder", "so_saleorder_b", "so_saleorder_b1", "so_saleorder_x"], reader({
+      so_saleorder: [col("pk_order", true), col("vbillcode")],
+      so_saleorder_b: [col("pk_order"), col("pk_detail", true)],
+      so_saleorder_b1: [col("pk_order"), col("crowno")],
+      so_saleorder_x: [col("pk_order"), col("other")],
+    }));
+    expect(meta.relations.map(r => [r.source, r.target, r.kind, r.from, r.to])).toEqual([
+      ["so_saleorder_b", "so_saleorder", "主子表", ["pk_order"], ["pk_order"]],
+      ["so_saleorder_b1", "so_saleorder", "主子表", ["pk_order"], ["pk_order"]],
+    ]);
+  });
+  it("缺主键列、无主键、命名不匹配都不合成", async () => {
+    const missing = await withBodyRelations("c", base, ["so_saleorder", "so_saleorder_b"], reader({
+      so_saleorder: [col("pk_order", true)], so_saleorder_b: [col("pk_detail", true)],
+    }));
+    expect(missing.relations).toEqual([]);
+    const noPk = await withBodyRelations("c", base, ["so_saleorder", "so_saleorder_b"], reader({
+      so_saleorder: [col("vbillcode")], so_saleorder_b: [col("pk_order")],
+    }));
+    expect(noPk.relations).toEqual([]);
+    const wrongName = await withBodyRelations("c", base, ["so_saleorder", "so_saleorder_ext"], reader({
+      so_saleorder: [col("pk_order", true)], so_saleorder_ext: [col("pk_order")],
+    }));
+    expect(wrongName.relations).toEqual([]);
+  });
+  it("已有外键或类引用覆盖的表体不重复合成", async () => {
+    const declared = { ...base, relations: [{ id: "外键:fk_b", source: "so_saleorder_b", target: "so_saleorder", from: ["pk_order"], to: ["pk_order"], kind: "外键" as const }] };
+    const meta = await withBodyRelations("c", declared, ["so_saleorder", "so_saleorder_b"], reader({
+      so_saleorder: [col("pk_order", true)], so_saleorder_b: [col("pk_order")],
+    }));
+    expect(meta.relations).toHaveLength(1);
+    expect(meta.relations[0].kind).toBe("外键");
+  });
+  it("合成关系进明细组且排在其他关联之前", () => {
+    const ranked = rankBillRelations("so_saleorder", [
+      { table: "org_salesorg", rootColumns: ["pk_org"], otherColumns: ["pk_salesorg"], source: "NC类引用 · x", incoming: false },
+      { table: "so_saleorder_b", rootColumns: ["pk_order"], otherColumns: ["pk_order"], source: "主子表 · so_saleorder_b", incoming: true },
+    ]);
+    expect(ranked.map(r => [r.relation.table, r.group])).toEqual([["so_saleorder_b", "detail"], ["org_salesorg", "related"]]);
   });
 });

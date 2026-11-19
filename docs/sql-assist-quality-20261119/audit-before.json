@@ -1,0 +1,309 @@
+{
+  "afterTableSpace": {
+    "visible": true,
+    "rows": [
+      {
+        "label": "po_arriveorder",
+        "focused": true
+      }
+    ],
+    "docs": false
+  },
+  "coldColumnAt150": {
+    "visible": true,
+    "rows": [
+      {
+        "label": "vbillcode",
+        "focused": true
+      },
+      {
+        "label": "vbillcode · 等于",
+        "focused": false
+      },
+      {
+        "label": "pk_po_arriveord",
+        "focused": false
+      },
+      {
+        "label": "pk_po_arriveord · 等于",
+        "focused": false
+      }
+    ],
+    "docs": false
+  },
+  "coldColumnAt1050": {
+    "visible": true,
+    "rows": [
+      {
+        "label": "vbillcode",
+        "focused": true
+      },
+      {
+        "label": "vbillcode · 等于",
+        "focused": false
+      },
+      {
+        "label": "pk_po_arriveord",
+        "focused": false
+      },
+      {
+        "label": "pk_po_arriveord · 等于",
+        "focused": false
+      }
+    ],
+    "docs": false
+  },
+  "widgetDom": [
+    {
+      "cls": "editor-widget suggest-widget with-status-bar dbx-suggest-fit visible",
+      "parent": "overflowingContentWidgets",
+      "h": 107
+    }
+  ],
+  "directProvider": {
+    "text": "SELECT * FROM po_arriveorder a WHERE a.v",
+    "labels": [
+      "pk_po_arriveord",
+      "pk_po_arriveord · 等于",
+      "vbillcode",
+      "vbillcode · 等于"
+    ],
+    "invoke": [
+      "pk_po_arriveord",
+      "pk_po_arriveord · 等于",
+      "vbillcode",
+      "vbillcode · 等于"
+    ],
+    "warm": [
+      "pk_po_arriveord",
+      "pk_po_arriveord · 等于",
+      "vbillcode",
+      "vbillcode · 等于"
+    ]
+  },
+  "pinyinInitials": {
+    "visible": false
+  },
+  "chineseName": {
+    "visible": false
+  },
+  "layerDiag": {
+    "status": "connected",
+    "schema": null,
+    "cols": [
+      "PK_PO_ARRIVEORD",
+      "VBILLCODE",
+      "DBILLDATE",
+      "PK_ORG",
+      "PK_PSNDOC",
+      "NMONEY",
+      "BFLAG",
+      "CREATIONTIME"
+    ],
+    "err": null,
+    "metaKinds": [
+      "tables",
+      "ncNames",
+      "schemas",
+      "columns",
+      "columns"
+    ],
+    "metaSample": {
+      "id": "c",
+      "kind": "columns",
+      "arg": "po_arriveorder"
+    },
+    "totalCalls": 58
+  },
+  "ctxDiag": {
+    "SELECT * FROM po_arriveorder a WHERE a.v": {
+      "kind": "column",
+      "qualifier": "a",
+      "clause": "where",
+      "sources": [
+        [
+          "po_arriveorder",
+          "a"
+        ]
+      ],
+      "resolved": "po_arriveorder",
+      "scope": true,
+      "word": "v"
+    },
+    "SELECT * FROM po_arriveorder a WHERE a.": {
+      "kind": "column",
+      "qualifier": "a",
+      "clause": "where",
+      "sources": [
+        [
+          "po_arriveorder",
+          "a"
+        ]
+      ],
+      "resolved": "po_arriveorder",
+      "scope": true,
+      "word": ""
+    },
+    "采购订单": {
+      "kind": "any",
+      "qualifier": null,
+      "clause": "other",
+      "sources": [],
+      "resolved": null,
+      "scope": false,
+      "word": "采购订单"
+    }
+  },
+  "chineseDirect": {
+    "text": "采购订单",
+    "n": 7,
+    "labels": [
+      "po_order",
+      "SELECT * FROM po_order",
+      "SELECT COUNT(*) FROM po_order",
+      "SELECT * FROM po_order FOR UPDATE",
+      "采购订单 · 主表条件查询",
+      "采购订单 · 按单号查主表"
+    ]
+  },
+  "bareTable": {
+    "visible": true,
+    "rows": [
+      {
+        "label": "SELECT * FROM po_arriveorder",
+        "focused": false
+      },
+      {
+        "label": "po_arriveorder",
+        "focused": false
+      },
+      {
+        "label": "SELECT COUNT(*) FROM po_arriveorder",
+        "focused": false
+      },
+      {
+        "label": "SELECT * FROM po_arriveorder FOR UPDATE",
+        "focused": false
+      },
+      {
+        "label": "到货单 · 关联查询 采购组织",
+        "focused": false
+      },
+      {
+        "label": "到货单 · 关联查询 人员基本档案",
+        "focused": false
+      },
+      {
+        "label": "到货单 · 主表条件查询",
+        "focused": false
+      },
+      {
+        "label": "到货单 · 按单号关联 采购组织",
+        "focused": false
+      },
+      {
+        "label": "到货单 · 按单号关联 人员基本档案",
+        "focused": false
+      },
+      {
+        "label": "到货单 · 按单号查主表",
+        "focused": false
+      }
+    ],
+    "docs": false
+  },
+  "afterEnter": "po_arriveorder",
+  "dotTriggerAt150": {
+    "visible": true,
+    "rows": [
+      {
+        "label": "bflag",
+        "focused": true
+      },
+      {
+        "label": "bflag · 等于",
+        "focused": false
+      },
+      {
+        "label": "creationtime",
+        "focused": false
+      },
+      {
+        "label": "creationtime · 等于",
+        "focused": false
+      },
+      {
+        "label": "dbilldate",
+        "focused": false
+      },
+      {
+        "label": "dbilldate · 等于",
+        "focused": false
+      },
+      {
+        "label": "nmoney",
+        "focused": false
+      },
+      {
+        "label": "nmoney · 等于",
+        "focused": false
+      },
+      {
+        "label": "pk_org",
+        "focused": false
+      },
+      {
+        "label": "pk_org · 等于",
+        "focused": false
+      }
+    ],
+    "docs": false
+  },
+  "dotTriggerAt1050": {
+    "visible": true,
+    "rows": [
+      {
+        "label": "bflag",
+        "focused": true
+      },
+      {
+        "label": "bflag · 等于",
+        "focused": false
+      },
+      {
+        "label": "creationtime",
+        "focused": false
+      },
+      {
+        "label": "creationtime · 等于",
+        "focused": false
+      },
+      {
+        "label": "dbilldate",
+        "focused": false
+      },
+      {
+        "label": "dbilldate · 等于",
+        "focused": false
+      },
+      {
+        "label": "nmoney",
+        "focused": false
+      },
+      {
+        "label": "nmoney · 等于",
+        "focused": false
+      },
+      {
+        "label": "pk_org",
+        "focused": false
+      },
+      {
+        "label": "pk_org · 等于",
+        "focused": false
+      }
+    ],
+    "docs": false
+  },
+  "errors": []
+}

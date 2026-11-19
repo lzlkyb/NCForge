@@ -76,7 +76,7 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
   const waitBudget = context?.triggerKind === monaco.languages.CompletionTriggerKind.Invoke ? 500 : 120;
   const archiveDeadline = Date.now() + waitBudget;
   const loadingItem: Item = {
-    label: { label: "字段加载中", description: "稍后按 Ctrl+空格刷新" },
+    label: { label: "字段加载中", description: "到达后自动刷新" },
     kind: K.Text, insertText: "", filterText: prefix || "字段加载中", sortText: "z",
     range: monaco.Range.fromPositions(position, position),
   };
@@ -221,7 +221,7 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
     const queries = [...conditionQueryTemplates(name, rt.ncNames ?? {}, columns, relations, upper, dialect), ...billQueryTemplates(name, rt.ncNames ?? {}, columns, relations, upper, dialect), ...completeQueryTemplates(name, rt.ncNames ?? {}, columns, relations, upper), ...checkTemplates];
     const bills: Item[] = queries.map((tpl, i) => mark("template", sqlExplicit({
       // 关联编号和条件都在详情里，候选行只需告诉用户查哪张表。
-      label: { label: tpl.label, description: /^(外键|NC类引用) · /.exec(tpl.hint)?.[1] }, kind: K.Snippet,
+      label: { label: tpl.label, description: /^(外键|NC类引用|主子表) · /.exec(tpl.hint)?.[1] }, kind: K.Snippet,
       insertText: next ? tpl.insertText.slice(0, -1) : tpl.insertText,
       insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
       filterText: filter(name), range, sortText: `${head}~8${String(i).padStart(2, "0")}`,
@@ -237,7 +237,7 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
     })))];
   };
   /** 光标前词精确命中的表；半截前缀、或必须加引号才成立的标识符返回空。 */
-  const billHit = () => billTableOf(prefix, tableNames, rt?.ncNames, name => !mixed(name) && sqlIdentifier(name, dialect) === name);
+  const billHit = (text = prefix) => billTableOf(text, tableNames, rt?.ncNames, name => !mixed(name) && sqlIdentifier(name, dialect) === name);
   /**
    * 表位置（`SELECT * FROM po_order`）精确命中时预读一次业务关系。
    *
@@ -250,26 +250,32 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
   const warmBillHints = async (): Promise<void> => {
     if (!connId || !scope || rt?.status !== "connected" || dialect !== "plsql") return;
     const name = billHit();
-    if (name) await early(readSqlBusinessMetadata(connId, scope, name, metadataCurrent), null, waitBudget);
+    // 字段一起预读：否则「打全表名 → 别名 → 点」这条最常见的路第一次点号必然冷读，
+    // 自动预算内拿不到字段，用户看到的是一片空白或一行加载中。
+    if (name) await early(Promise.all([
+      readSqlBusinessMetadata(connId, scope, name, metadataCurrent),
+      readColumns({ table: name, tableRef: name, name, declaration: 0 }),
+    ]), null, waitBudget);
   };
   /**
-   * 表名末尾的「接上子表」。插入点固定在光标处，所以要求光标正好落在表名末尾 ——
-   * 光标在词中间时空 range 会把 JOIN 塞进标识符里。
+   * 表名上的「接上子表」。替换范围整词覆盖（词+JOIN 替换词本身），光标在词中间
+   * 也不会把 JOIN 塞进标识符；要求光标恰在词末会漏掉「写完一句回看」的常见姿态。
    */
   const joinedNames = new Set(sources.flatMap(source => [source.table?.toLowerCase(), source.alias?.toLowerCase()]));
   const joinSnippets = () => {
-    if (!connId || !scope || rt?.status !== "connected" || dialect !== "plsql" || identifier?.end !== offset || !getSqlTemplatesEnabled()) return;
+    if (!connId || !scope || rt?.status !== "connected" || dialect !== "plsql" || !identifier || !getSqlTemplatesEnabled()) return;
     const select = sqlScopeAt(analysis, offset)?.select;
     if (select === undefined || analysis.tokens[select]?.text.toUpperCase() !== "SELECT") return;
-    const name = billHit();
+    const name = billHit() || billHit(identifier.text);
     if (!name) return;
     const source = sources[0];
     if (!source || source.table?.toLowerCase() !== name || source.alias || source.quoted || source.schema && source.schema.toLowerCase() !== schema.toLowerCase()) return;
+    const word = identifier.text, wordRange = monaco.Range.fromPositions(model.getPositionAt(identifier.start), model.getPositionAt(identifier.end));
     const specs = billJoinSpecs(name, tableNames, peekSqlBusinessMetadata(connId, scope, name), rt?.ncNames).filter(spec => !joinedNames.has(spec.table));
     const details = specs.filter(spec => spec.group === "detail");
     const suggestions = (details.length ? details.slice(0, 3) : specs.slice(0, 1)).map((spec, i) => mark("billjoin", sqlExplicit({
       label: { label: `追加 LEFT JOIN · ${rt?.ncNames?.[spec.table] || spec.table}`, description: billJoinGroupLabels[spec.group] }, kind: K.Snippet,
-      insertText: spec.sql, filterText: filter(name), range: monaco.Range.fromPositions(position, position),
+      insertText: word + spec.sql, filterText: filter(name), range: wordRange,
       sortText: sqlAssistSort(match(name), 5, `join${String(i).padStart(4, "0")}`),
       documentation: { value: `${rt?.ncNames?.[spec.table] || spec.table} · ${spec.source}\n\n\`\`\`sql\nSELECT *\nFROM ${name}\n${spec.sql.trimStart().replace(" ON ", "\n    ON ")}\n\`\`\`` },
     })));
@@ -396,7 +402,9 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
     const q = qualifierText(source), insertText = `${qualified ? q + "." : ""}${sqlIdentifier(sqlWordKind(name, dialect) === "identifier" ? name : c.name, dialect)}`;
     const key = source.table ? sqlUsageKey(objectKey(source), name, ctx.clause) : undefined, why = key ? reason(key) : "";
     const base: Item = mark("column", { label: { label: qualified ? `${source.alias ?? source.name}.${name}` : name, detail: ` ${c.full}${c.pk ? " · PK" : ""}`, description: [c.zh, source.tableRef || source.name, why].filter(Boolean).join(" · ") }, kind: c.pk ? K.Property : K.Field,
-      insertText, filterText: filter(name), range, sortText: sqlAssistSort(quality, 1, insertText, scope, key, ctx.assigned.includes(name)), command: key ? command(key, false, "column") : undefined,
+      // 主键单独一组排在最前：空前缀点触发时纯字母序会把 pk 埋到 bflag/creationtime 后面，
+      // 而联查条件几乎总是从主键开始打。
+      insertText, filterText: filter(name), range, sortText: sqlAssistSort(quality, c.pk ? 0 : 1, insertText, scope, key, ctx.assigned.includes(name)), command: key ? command(key, false, "column") : undefined,
       documentation: { value: `${source.tableRef ?? source.name}.${name}\n\n${c.full}${c.zh ? " · " + c.zh : ""}${why ? "\n\n" + why : ""}` } });
     if (predicate?.kind !== "field") return [base];
     // A typed alias stays outside the replacement range, but repeated range operands still need it.

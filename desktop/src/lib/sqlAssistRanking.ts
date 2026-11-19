@@ -1,4 +1,5 @@
 import { sqlUsageRank } from "./sqlUsage";
+import { pinyinInitials } from "./pinyin";
 
 /** Match tiers dominate preference: a frequent fuzzy match must never displace an exact name. */
 export function sqlMatchQuality(prefix: string, name: string, zh = ""): number {
@@ -7,11 +8,16 @@ export function sqlMatchQuality(prefix: string, name: string, zh = ""): number {
   if (n === p) return 0;
   if (n.startsWith(p)) return 1;
   if (z === p || z.startsWith(p)) return 2;
-  if (z.includes(p)) return 3;
-  if (n.includes(p)) return 4;
+  // 拼音首字母（cgdd → 采购订单）：NC 用户记中文名的首字母比记表名更常见。
+  if (z && /[a-z]/i.test(p)) {
+    const initials = pinyinInitials(z);
+    if (initials && (initials.text === p || initials.text.startsWith(p))) return 3;
+  }
+  if (z.includes(p)) return 4;
+  if (n.includes(p)) return 5;
   let at = 0;
   for (const char of n) if (char === p[at]) at++;
-  return at === p.length ? 5 : 9;
+  return at === p.length ? 6 : 9;
 }
 export function sqlAssistSort(quality: number, group: number, name: string, scope?: string | null, key?: string, lower = false): string {
   const score = scope && key ? sqlUsageRank(scope, key) : 0;
