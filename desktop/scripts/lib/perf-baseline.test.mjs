@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { CHANNELS, buildRows, formatTable, indexMs, parseBootLog, parseEcjPerf, parseIncrementalPerf, splitIndexRound, summarize, verdictOf } from "./perf-baseline.mjs";
+import { CHANNELS, buildRows, formatTable, indexMs, parseBootLog, parseEcjPerf, parseIncrementalPerf, parseModuleMakePerf, parseModuleNochangePerf, splitIndexRound, summarize, verdictOf } from "./perf-baseline.mjs";
 
 test("清单：id 唯一、五指标都在、目标与方案 §4.2 一致", () => {
   const ids = CHANNELS.map((c) => c.id);
@@ -12,9 +12,11 @@ test("清单：id 唯一、五指标都在、目标与方案 §4.2 一致", () =
   assert.equal(target.boot, 2000);
   assert.equal(target.completion, 150);
   assert.equal(target.incremental, 1500);
-  // 大文件两项只作代价基线：方案 §4.3 没给数字，编一个目标出来就是自欺
+  // 大文件两项 + make 两项只作代价基线：方案没给数字，编一个目标出来就是自欺
   assert.equal(target.bigfile, null);
   assert.equal(target["bigfile-completion"], null);
+  assert.equal(target["module-make"], null);
+  assert.equal(target["module-nochange"], null);
 });
 
 test("判定是严格小于：正好等于目标算超标", () => {
@@ -254,15 +256,90 @@ test("结论把「未测」单列，不混进达标率", () => {
   const s = summarize(buildRows({ ecj: { ok: true, n: 20, min: 90, p50: 118, max: 200, mean: 130 } }));
   assert.equal(s.pass, 1);
   assert.equal(s.over, 0);
-  // 两条大文件基线也没数：没数就是未测，不能因为「没有目标」就算成已建立基线
-  assert.equal(s.untested, 6);
+  // 四条基线通道（大文件两项 + make 两项）也没数：没数就是未测，不能因为「没有目标」就算成已建立基线
+  assert.equal(s.untested, 8);
   assert.equal(s.baseline, 0);
   assert.match(s.text, /1\/1 项达标/);
-  assert.match(s.text, /6 项未测/);
+  assert.match(s.text, /8 项未测/);
 });
 
 test("一个数都没有时不许说达标", () => {
   const s = summarize(buildRows());
   assert.match(s.text, /没有可判定的指标/);
   assert.ok(!s.text.includes("达标率"));
+});
+
+test("make 热路径解析：汇总行取最大模块，明细行收进 details，汇总不混进明细", () => {
+  const text = [
+    "PERF module-make module=medsoprc sources=1 nochange=2 p50=120 min=110 max=160 runs=10",
+    "PERF module-make module=pu sources=300 nochange=40 p50=260 min=240 max=320 runs=10",
+    "PERF module-make-summary module=pu sources=300 nochange=40 p50=260",
+  ].join("\n");
+  const r = parseModuleMakePerf(text);
+  assert.equal(r.ok, true);
+  assert.equal(r.module, "pu");
+  assert.equal(r.sources, 300);
+  assert.equal(r.nochange, 40);
+  assert.equal(r.p50, 260);
+  // 明细只认两条 module-make 行，汇总行（module-make-summary）不许被当成明细
+  assert.equal(r.details.length, 2);
+  assert.deepEqual(r.details.map((d) => d.module), ["medsoprc", "pu"]);
+  assert.equal(r.details[1].min, 240);
+  assert.equal(r.details[1].runs, 10);
+});
+
+test("make 热路径解析：跳过 / 失败 / 没输出三种分开，不认 ecj/增量的行", () => {
+  assert.match(parseModuleMakePerf("跳过：本机没有工作区 / java / ecj / 桥 jar").reason, /工作区/);
+  assert.match(parseModuleMakePerf("PERF module-make failed: 单文件编译 3 错").reason, /编译失败/);
+  assert.match(parseModuleMakePerf("error: could not compile").reason, /没拿到 PERF module-make/);
+  assert.equal(parseModuleMakePerf("PERF single-file-compile n=20 min=90 p50=118 max=200 mean=130").ok, false);
+  assert.equal(parseModuleMakePerf("PERF incremental-compile n=20 files=5 min=300 p50=800 max=1200 mean=850").ok, false);
+  assert.equal(parseModuleMakePerf(null).ok, false);
+});
+
+test("无变更扫描解析：汇总取最大模块，小/中/大明细收齐", () => {
+  const text = [
+    "PERF module-nochange module=bc sources=1 ms=1",
+    "PERF module-nochange module=medsoprc sources=80 ms=12",
+    "PERF module-nochange module=pu sources=1900 ms=180",
+    "PERF module-nochange-summary module=pu sources=1900 ms=180",
+  ].join("\n");
+  const r = parseModuleNochangePerf(text);
+  assert.equal(r.ok, true);
+  assert.equal(r.module, "pu");
+  assert.equal(r.ms, 180);
+  assert.equal(r.details.length, 3);
+  assert.deepEqual(r.details.map((d) => d.sources), [1, 80, 1900]);
+  assert.match(parseModuleNochangePerf("跳过：本机没有 NC home").reason, /NC home/);
+  assert.match(parseModuleNochangePerf("error: could not compile").reason, /没拿到 PERF module-nochange/);
+  assert.equal(parseModuleNochangePerf(null).ok, false);
+});
+
+test("make 两通道：有自己的数就取自己的，target null 判基线，缺席判未测", () => {
+  const rows = buildRows({
+    moduleMake: { ok: true, module: "pu", sources: 300, nochange: 40, p50: 260, details: [{ module: "pu", sources: 300, nochange: 40, p50: 260, min: 240, max: 320, runs: 10 }] },
+    moduleNochange: { ok: true, module: "pu", sources: 1900, ms: 180, details: [{ module: "bc", sources: 1, ms: 1 }, { module: "pu", sources: 1900, ms: 180 }] },
+  });
+  const mk = rows.find((r) => r.id === "module-make");
+  assert.equal(mk.value, 260);
+  assert.equal(mk.verdict, "基线"); // target null
+  assert.match(mk.note, /pu（300 文件）/);
+  assert.match(mk.note, /无变更 40 ms/);
+  const nc = rows.find((r) => r.id === "module-nochange");
+  assert.equal(nc.value, 180);
+  assert.equal(nc.verdict, "基线");
+  assert.match(nc.note, /1900→180ms/);
+  // 缺席时未测，且不借用 ecj/增量的数
+  const empty = buildRows({ ecj: { ok: true, n: 20, min: 90, p50: 118, max: 200, mean: 130 } });
+  assert.equal(empty.find((r) => r.id === "module-make").value, null);
+  assert.equal(empty.find((r) => r.id === "module-make").verdict, "未测");
+  assert.equal(empty.find((r) => r.id === "module-nochange").value, null);
+});
+
+test("make 编译失败绝不变成耗时数字", () => {
+  const rows = buildRows({ moduleMake: parseModuleMakePerf("PERF module-make failed: 单文件编译 3 错") });
+  const mk = rows.find((r) => r.id === "module-make");
+  assert.equal(mk.value, null);
+  assert.equal(mk.verdict, "未测");
+  assert.match(mk.note, /编译失败/);
 });

@@ -321,6 +321,12 @@ impl Batcher {
         if !self.java.is_empty() || self.java_overflow {
             crate::workspace_types::mark_dirty();
         }
+        // 编译脏集：decide 据此只 stat 脏文件而非全模块扫描。溢出 / rescan 抬高 epoch
+        // 作废所有模块基线（即便本批没有 java，rescan 也要作废——事件可能丢了）。
+        if !self.java.is_empty() || self.java_overflow || self.rescan {
+            let java: Vec<PathBuf> = self.java.iter().cloned().collect();
+            crate::compile_dirty::mark(&self.root, &java, self.java_overflow, self.rescan);
+        }
         // 搜索内容包也要跟着变：它收录的不止 .java（xml/js/配置都算），所以看 pending 全集。
         // mark_dirty 只置个标志，真正的增量重建由 content_pack 的后台线程在静默 1.5s 后做。
         if !self.pending.is_empty() || self.rescan {
@@ -454,7 +460,12 @@ impl WorkspaceWatcher {
                     Err(mpsc::TrySendError::Disconnected(_)) => {}
                 },
                 Ok(_) => {}
-                Err(e) => log::warn!("文件监听出错：{e}"),
+                Err(e) => {
+                    // 监听出错 = 事件可能丢了：不能只 log，必须置 lost 让下一批 rescan，
+                    // 否则编译脏集还以为可信、decide 跳过全扫 → 漏编。
+                    log::warn!("文件监听出错：{e}");
+                    lost_cb.store(true, Ordering::Relaxed);
+                }
             }
         })
         .map_err(|e| format!("无法创建文件监听：{e}"))?;
@@ -464,6 +475,8 @@ impl WorkspaceWatcher {
         // 版本控制页的增量缓存从这里开始记账。登记时会把「脏集合不可信」置上：
         // 监听开始之前（应用没跑、切工作区期间）发生了什么谁也不知道。
         crate::svn_status_cache::watch_root(&root);
+        // 编译脏集同理：启动 / 切工作区先作废，首轮 decide 全扫建基线后才可信。
+        crate::compile_dirty::invalidate(&root);
 
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = Arc::clone(&stop);

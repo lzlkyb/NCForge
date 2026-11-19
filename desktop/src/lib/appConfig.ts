@@ -47,6 +47,8 @@ export interface AppConfig {
   auto_compile_incremental: boolean;
   /** 工作区外的 `.java` 被其他程序改动时也自动编译（默认开）。 */
   auto_compile_external: boolean;
+  /** 编译判定用监听脏集只查改动文件，跳过未改动文件的全模块扫描（默认开）；监听溢出/出错自动回落全扫。 */
+  incremental_stat: boolean;
   /** 打开工作区时后台预热类索引（默认开）。 */
   prewarm_index: boolean;
   /** 复用常驻 ecj JVM（默认开）。关掉 = 每次编译单独起进程，慢但内存最低。 */
@@ -113,6 +115,7 @@ export interface ConfigPatch {
   auto_compile?: boolean;
   auto_compile_incremental?: boolean;
   auto_compile_external?: boolean;
+  incremental_stat?: boolean;
   prewarm_index?: boolean;
   persistent_worker?: boolean;
   build_parallel?: number;

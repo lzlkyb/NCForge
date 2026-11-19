@@ -42,10 +42,12 @@ pub mod build_state;
 /// 读 cc-bridge 变更日志（按需求审查）。
 pub mod cc_journal;
 pub mod change_shelf;
+pub mod class_fp;
 pub mod class_pool;
 pub mod commands;
 pub mod compile;
 pub mod compile_diag;
+pub mod compile_dirty;
 pub mod config;
 pub mod config_io;
 // 搜索内容包：工作区文本的压缩快照（`search.rs` 的首选数据源）
@@ -94,6 +96,7 @@ pub mod local_history;
 pub mod lsp;
 pub mod md_dict;
 pub mod md_dict_sql;
+pub mod module_graph;
 /// 跳转结果的「工作区源码优先」改写（跨模块 jdt:// → 真实 .java）。
 pub mod nav_source;
 pub mod nc_home;

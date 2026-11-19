@@ -210,6 +210,39 @@ pub struct BuildCacheInfo {
     pub parallel: u8,
     /// 常驻 worker / 一次一进程的累计计数与耗时分布（进程内，重启清零）
     pub worker: crate::ecj_worker::WorkerStats,
+    /// 历史原因归类（原因桶 → 条数，按条数降序）：回答「为什么这次慢 / 为什么全量」
+    pub reason_stats: Vec<(String, usize)>,
+}
+
+/// 历史原因归桶。reason 原文带文件数等变量，逐字统计每条都是一桶；
+/// 按关键词归类才能看出「全量都是类路径变化引起的」这类模式。
+fn classify_reason(reason: &str) -> &'static str {
+    if reason.contains("类路径") {
+        "类路径变化（全量）"
+    } else if reason.contains("编译器") {
+        "编译器变化（全量）"
+    } else if reason.contains("源码根") || reason.contains("产物目录") {
+        "布局变化（全量）"
+    } else if reason.contains("没有可用的构建清单") {
+        "首次编译 / 清单失效（全量）"
+    } else if reason.contains("手动要求全量") {
+        "手动全量"
+    } else if reason.contains("保底") || reason.contains("超上限") || reason.contains("超过 30%")
+    {
+        "传播保底（全量）"
+    } else if reason.contains("内容变化") {
+        "增量"
+    } else if reason.contains("未变化") {
+        "跳过"
+    } else if reason.contains("阻断") {
+        "阻断"
+    } else if reason.contains("取消") {
+        "取消"
+    } else if reason.is_empty() {
+        "（未记录）"
+    } else {
+        "其他"
+    }
 }
 
 /// 设置页「维护」卡片：缓存占用、上次构建、未跟踪产物。
@@ -253,6 +286,16 @@ pub async fn build_cache_info(state: State<'_, Arc<AppState>>) -> Result<BuildCa
         untracked_classes.truncate(100);
         let history = build_state::read_history(&config_dir, &root);
         let last_build = history.last().cloned();
+        let mut buckets: std::collections::HashMap<&'static str, usize> =
+            std::collections::HashMap::new();
+        for h in &history {
+            *buckets.entry(classify_reason(&h.reason)).or_default() += 1;
+        }
+        let mut reason_stats: Vec<(String, usize)> = buckets
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        reason_stats.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         Ok(BuildCacheInfo {
             index_bytes,
             index_files,
@@ -266,6 +309,7 @@ pub async fn build_cache_info(state: State<'_, Arc<AppState>>) -> Result<BuildCa
             history,
             parallel,
             worker: crate::ecj_worker::stats(),
+            reason_stats,
         })
     })
     .await

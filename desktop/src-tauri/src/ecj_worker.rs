@@ -56,6 +56,10 @@ struct Stats {
     worker_ms_total: AtomicU64,
     oneshot_compiles: AtomicU64,
     oneshot_ms_total: AtomicU64,
+    /// struct 指纹批取：调用数 / 失败数（桥不可用、协议错、OOM、超时）/ 累计耗时
+    struct_calls: AtomicU64,
+    struct_failures: AtomicU64,
+    struct_ms_total: AtomicU64,
     /// 完成的编译耗时分布（只统计真正跑完的 worker 编译与一次一进程）
     lt100: AtomicU64,
     lt300: AtomicU64,
@@ -82,6 +86,9 @@ impl Stats {
             worker_ms_total: AtomicU64::new(0),
             oneshot_compiles: AtomicU64::new(0),
             oneshot_ms_total: AtomicU64::new(0),
+            struct_calls: AtomicU64::new(0),
+            struct_failures: AtomicU64::new(0),
+            struct_ms_total: AtomicU64::new(0),
             lt100: AtomicU64::new(0),
             lt300: AtomicU64::new(0),
             lt1000: AtomicU64::new(0),
@@ -127,6 +134,10 @@ pub struct WorkerStats {
     pub worker_ms_total: u64,
     pub oneshot_compiles: u64,
     pub oneshot_ms_total: u64,
+    /// struct 指纹批取统计（进程内，重启清零）
+    pub struct_calls: u64,
+    pub struct_failures: u64,
+    pub struct_ms_total: u64,
     /// 耗时桶：`[0,100) [100,300) [300,1000) [1000,3000) [3000,∞)` 毫秒
     pub latency: [u64; 5],
 }
@@ -147,6 +158,9 @@ pub fn stats() -> WorkerStats {
         worker_ms_total: s.worker_ms_total.load(Ordering::Relaxed),
         oneshot_compiles: s.oneshot_compiles.load(Ordering::Relaxed),
         oneshot_ms_total: s.oneshot_ms_total.load(Ordering::Relaxed),
+        struct_calls: s.struct_calls.load(Ordering::Relaxed),
+        struct_failures: s.struct_failures.load(Ordering::Relaxed),
+        struct_ms_total: s.struct_ms_total.load(Ordering::Relaxed),
         latency: [
             s.lt100.load(Ordering::Relaxed),
             s.lt300.load(Ordering::Relaxed),
@@ -448,6 +462,122 @@ pub fn find_jar(dirs: &[PathBuf]) -> Option<PathBuf> {
     dirs.iter()
         .map(|d| d.join(BRIDGE_JAR))
         .find(|p| p.is_file())
+}
+
+/// struct 指纹批取的超时：读 class 是纯 IO + 解析，千个 class 也是秒级；
+/// 60 秒还没回只能是 worker 卡死，杀掉降级，不拖住构建。
+const STRUCT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// 批量取 class 结构指纹（桥 `struct` 命令，与 compile 共用同一个 worker 池）。
+///
+/// 回退语义与 compile 不同：struct 没有「一次一进程」替身，失败一律 `Ok(None)`，
+/// **调用方必须按「结构可能变了」保守处理**（传播引用方 / 宁可多编），绝不能当「没变」。
+/// 取消 → `Err(CANCELLED)`；OOM / 超时 / 协议错 → 杀 worker、`Ok(None)` 降级。
+pub fn struct_fps(
+    java: &Path,
+    ecj_jar: &Path,
+    bridge_jar: &Path,
+    classes: &[PathBuf],
+    work_dir: &Path,
+    cancel: Option<&AtomicBool>,
+) -> Result<Option<std::collections::HashMap<String, String>>, String> {
+    if classes.is_empty() {
+        return Ok(Some(std::collections::HashMap::new()));
+    }
+    if !bridge_jar.is_file() || !ecj_jar.is_file() {
+        return Ok(None);
+    }
+    let started = Instant::now();
+    let env = BridgeEnv {
+        java: java.to_path_buf(),
+        jars: vec![bridge_jar.to_path_buf(), ecj_jar.to_path_buf()],
+        config_dir: std::env::temp_dir(),
+        main_class: "NcEcjBridge".to_string(),
+        label: "ecj".to_string(),
+        xmx_mb: XMX_MB,
+    };
+    let Some(worker) = acquire(env, cancel) else {
+        Stats::bump(&STATS.cancels);
+        return Err(CANCELLED.to_string());
+    };
+    let result = struct_call(&worker, classes, work_dir, cancel);
+    STATS.struct_calls.fetch_add(1, Ordering::Relaxed);
+    STATS
+        .struct_ms_total
+        .fetch_add(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+    if result.is_none() {
+        Stats::bump(&STATS.struct_failures);
+    }
+    release(worker);
+    match result {
+        Some(m) => Ok(Some(m)),
+        None if cancelled(cancel) => Err(CANCELLED.to_string()),
+        None => Ok(None),
+    }
+}
+
+fn struct_call(
+    worker: &Arc<Bridge>,
+    classes: &[PathBuf],
+    work_dir: &Path,
+    cancel: Option<&AtomicBool>,
+) -> Option<std::collections::HashMap<String, String>> {
+    if std::fs::create_dir_all(work_dir).is_err() {
+        return None;
+    }
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let paths = work_dir.join(format!(
+        "ecj-struct-{}-{}.paths",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let body: String = classes
+        .iter()
+        .map(|p| crate::class_fp::display(&p.to_string_lossy()))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    if std::fs::write(&paths, body).is_err() {
+        return None;
+    }
+    // 参数文件路径也要去 verbatim 前缀：桥用 Java File 读它，//?/ 开头打不开
+    let arg_line = crate::class_fp::display(&paths.to_string_lossy());
+    let done = AtomicBool::new(false);
+    let done_ref = &done;
+    let outcome = std::thread::scope(|scope| {
+        let watcher = cancel.map(|flag| {
+            let w = Arc::clone(worker);
+            scope.spawn(move || {
+                while !done_ref.load(Ordering::Relaxed) {
+                    if flag.load(Ordering::Relaxed) {
+                        w.restart();
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(40));
+                }
+            })
+        });
+        let r = worker.call("struct", &[&arg_line], STRUCT_TIMEOUT);
+        done.store(true, Ordering::Relaxed);
+        if let Some(h) = watcher {
+            let _ = h.join();
+        }
+        r
+    });
+    let _ = std::fs::remove_file(&paths);
+    match outcome {
+        // Bridge::call 已把响应信封拆掉，回的就是 data 本体（structs/errors/pid）
+        Ok(v) => crate::class_fp::parse(&v),
+        Err(e) if e.code == "oom" => {
+            log::warn!("常驻 ecj worker 堆不足（struct），杀掉重建");
+            worker.restart();
+            None
+        }
+        Err(e) => {
+            log::warn!("struct 指纹获取失败（{}），按结构可能变了处理", e.code);
+            None
+        }
+    }
 }
 
 #[cfg(test)]

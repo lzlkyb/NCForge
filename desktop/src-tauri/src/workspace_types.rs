@@ -178,6 +178,12 @@ impl WorkspaceTypes {
         self.entries.len()
     }
 
+    /// 全部类型命中（只读借用，不克隆）。构建侧派生模块依赖图用
+    /// （`module_graph::type_maps`），与搜索共用同一份索引，不另扫源码。
+    pub fn hits(&self) -> impl Iterator<Item = &TypeHit> {
+        self.entries.iter().map(|e| &e.hit)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

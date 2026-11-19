@@ -31,7 +31,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildRows, formatTable, parseBootLog, parseEcjPerf, parseIncrementalPerf, summarize } from "./lib/perf-baseline.mjs";
+import { buildRows, formatTable, parseBootLog, parseEcjPerf, parseIncrementalPerf, parseModuleMakePerf, parseModuleNochangePerf, summarize } from "./lib/perf-baseline.mjs";
 
 const desktop = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /**
@@ -142,6 +142,24 @@ if (wanted("incremental") && !REUSE) {
   incremental = readJson("perf-incremental.json");
 }
 
+// —— module-make / module-nochange：真实工作区 make 速度。一条 Rust 测试同时 emit 两路行。
+let moduleMake = null;
+let moduleNochange = null;
+if (wanted("module-make") && !REUSE) {
+  const { out } = run("真实模块 make 速度（真实工作区只读 + 临时区编译）", process.execPath, [
+    "scripts/rust-gate.mjs", "test", "--lib", "--", "--ignored", "模块make速度_live", "--nocapture",
+  ]);
+  moduleMake = parseModuleMakePerf(out);
+  moduleNochange = parseModuleNochangePerf(out);
+  writeFileSync(join(base, "perf-module-make.json"), JSON.stringify({ generatedAt: new Date().toISOString(), ...moduleMake }, null, 2));
+  writeFileSync(join(base, "perf-module-nochange.json"), JSON.stringify({ generatedAt: new Date().toISOString(), ...moduleNochange }, null, 2));
+  if (!moduleMake.ok) console.log(`   ⚠️ ${moduleMake.reason}`);
+  if (!moduleNochange.ok) console.log(`   ⚠️ ${moduleNochange.reason}`);
+} else {
+  moduleMake = readJson("perf-module-make.json");
+  moduleNochange = readJson("perf-module-nochange.json");
+}
+
 // —— gaps：补全 p50 与大文件代价。
 if (wanted("gaps") && !REUSE) {
   run("补全 / 诊断 / 大文件（jdt.ls 真机）", process.execPath, ["scripts/code-editor-gaps-live.mjs"]);
@@ -166,7 +184,7 @@ if (bootLog) {
 }
 if (boot) writeFileSync(join(base, "perf-boot.json"), JSON.stringify(boot, null, 2));
 
-const rows = buildRows({ ecj, incremental, gaps, index, boot });
+const rows = buildRows({ ecj, incremental, gaps, index, boot, moduleMake, moduleNochange });
 const table = formatTable(rows);
 const sum = summarize(rows);
 
@@ -177,7 +195,7 @@ if (boot?.stages && Object.keys(boot.stages).length) {
   console.log(`启动分段：${Object.entries(boot.stages).map(([k, v]) => `${k} ${v} ms`).join(" / ")}`);
 }
 
-const report = { generatedAt: new Date().toISOString(), rows, summary: sum, inputs: { ecj, incremental, gaps, index, boot } };
+const report = { generatedAt: new Date().toISOString(), rows, summary: sum, inputs: { ecj, incremental, gaps, index, boot, moduleMake, moduleNochange } };
 const outJson = join(base, "perf-baseline.json");
 const outMd = join(base, "perf-baseline.md");
 writeFileSync(outJson, JSON.stringify(report, null, 2));

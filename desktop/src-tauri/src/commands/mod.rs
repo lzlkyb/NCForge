@@ -16,6 +16,7 @@ mod build_engine;
 mod change_shelf_cmds;
 mod client_cmds;
 mod compile_cmds;
+mod compile_index;
 mod db_cmds;
 mod db_conn_cmds;
 mod db_export_cmds;

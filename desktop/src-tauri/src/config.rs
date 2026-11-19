@@ -132,6 +132,13 @@ pub struct AppConfig {
     /// 与「保存当前文件」分开：外部改动往往是一批文件，走模块增量而不是单文件。
     #[serde(default = "default_true")]
     pub auto_compile_external: bool,
+    /// 编译判定（decide）用文件监听脏集只 stat 改动文件，而非每次全模块扫描（默认开）。
+    ///
+    /// 大模块全扫约 1ms/文件，994 文件模块光扫描就近 1s；接脏集后无变更直接 Skip、
+    /// 有改动只查脏文件。正确性靠 epoch 兜底：监听溢出 / 出错 / 切工作区一律回落全扫。
+    /// 关掉 = 每次 decide 都全扫（与加这个字段之前完全一致），用于排查脏集疑似漏编。
+    #[serde(default = "default_true")]
+    pub incremental_stat: bool,
     /// 打开工作区后在后台预热类索引（首次冷扫 10~100 秒，预热后第一次保存就能编上）。
     #[serde(default = "default_true")]
     pub prewarm_index: bool,
@@ -339,6 +346,7 @@ impl Default for AppConfig {
             auto_compile: true,
             auto_compile_incremental: true,
             auto_compile_external: true,
+            incremental_stat: true,
             prewarm_index: true,
             persistent_worker: true,
             build_parallel: 2,

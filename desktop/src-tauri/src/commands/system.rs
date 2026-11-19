@@ -73,6 +73,9 @@ pub struct ConfigPatch {
     /// 外部 `.java` 改动也触发自动编译。
     #[serde(default)]
     pub auto_compile_external: Option<bool>,
+    /// decide 用监听脏集增量 stat（关掉 = 每次全模块扫描）。
+    #[serde(default)]
+    pub incremental_stat: Option<bool>,
     /// 打开工作区后后台预热类索引。
     #[serde(default)]
     pub prewarm_index: Option<bool>,
@@ -114,6 +117,9 @@ pub async fn patch_config(
             }
             if let Some(v) = patch.auto_compile_external {
                 cfg.auto_compile_external = v;
+            }
+            if let Some(v) = patch.incremental_stat {
+                cfg.incremental_stat = v;
             }
             if let Some(v) = patch.prewarm_index {
                 cfg.prewarm_index = v;

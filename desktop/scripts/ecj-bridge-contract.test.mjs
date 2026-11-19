@@ -10,7 +10,10 @@
  * ① 同一进程连续多次编译都回响应，且 pid 不变（常驻成立）；
  * ② 有错 → exit=1 且输出带错误；无错 → exit=0；
  * ③ 响应里的 id 与请求一致（Rust 侧按 id 分发）；
- * ④ 堆不足回 code="oom"，不能伪装成「编译错误」（Rust 侧据此回退一次一进程）。
+ * ④ 堆不足回 code="oom"，不能伪装成「编译错误」（Rust 侧据此回退一次一进程）；
+ * ⑤ struct 指纹与 Eclipse 自己的 hasStructuralChanges（diff 命令当 oracle）逐项对齐：
+ *    方法体/块内注解不变指纹，签名/常量（含 private）/注解成员值/增删成员变指纹；
+ * ⑥ struct/diff 的单文件失败进 errors 不炸整批，读路径文件失败回 other 帧。
  */
 import assert from 'node:assert/strict';
 import { clearTimeout } from 'node:timers';
@@ -157,6 +160,166 @@ test('常驻 ecj 桥：复用 JVM、按 id 回包、错误语义正确', async (
     child.stdin.write('0\tquit\n');
     await new Promise((r) => child.once('exit', r));
     console.log(`连续编译耗时（ms）：${times.join(', ')}（首次含 JVM/JIT 预热）`);
+  } catch (e) {
+    child.kill();
+    throw e;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('struct 指纹与 Eclipse hasStructuralChanges 对齐；单文件失败不炸整批', async () => {
+  assert.ok(existsSync(ECJ), `缺 ${ECJ}`);
+  assert.ok(existsSync(BRIDGE), `缺 ${BRIDGE}，先跑 node scripts/build-bridge-jar.mjs ecj`);
+
+  const dir = mkdtempSync(join(tmpdir(), 'ncforge-ecj-struct-'));
+  const src = join(dir, 'src');
+  mkdirSync(src);
+  const java = findJava();
+  const child = spawn(java, ['-Dfile.encoding=UTF-8', '-Xmx512m', '-cp', `${BRIDGE};${ECJ}`, 'NcEcjBridge', '--config', dir], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let buf = '';
+  const waiters = new Map();
+  child.stdout.on('data', (d) => {
+    buf += d.toString('utf8');
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i);
+      buf = buf.slice(i + 1);
+      if (!line.trim()) continue;
+      const msg = JSON.parse(line);
+      const w = waiters.get(msg.id);
+      if (w) {
+        waiters.delete(msg.id);
+        w(msg);
+      }
+    }
+  });
+  let stderr = '';
+  child.stderr.on('data', (d) => (stderr += d.toString('utf8')));
+  let seq = 0;
+  const request = (cmd, arg) =>
+    new Promise((resolvePromise, reject) => {
+      const id = String(++seq);
+      const timer = setTimeout(() => reject(new Error(`等 ${id}(${cmd}) 超时；stderr=${stderr}`)), 30000);
+      waiters.set(id, (msg) => {
+        clearTimeout(timer);
+        resolvePromise(msg);
+      });
+      child.stdin.write(`${id}\t${cmd}\t${escape(arg)}\n`);
+    });
+  const fwd = (p) => p.replace(/\\/g, '/');
+
+  // 编译一份源到指定输出目录（走桥的 compile 命令，与真实链路同一条路）
+  const compileTo = async (files, outDir) => {
+    mkdirSync(outDir, { recursive: true });
+    const args = join(dir, `c${seq}.args`);
+    writeFileSync(args, `-1.8 -g -nowarn -proc:none -preserveAllLocals\n-d "${fwd(outDir)}"\n${files.map((f) => `"${fwd(f)}"\n`).join('')}`);
+    const r = await request('compile', args);
+    assert.equal(r.ok, true, `compile 帧应 ok：${JSON.stringify(r)}`);
+    assert.equal(r.data.exit, 0, `编译应无错：${r.data.output}`);
+    return r;
+  };
+  const structOf = async (classFiles) => {
+    const paths = join(dir, `s${seq}.paths`);
+    writeFileSync(paths, classFiles.map(fwd).join('\n') + '\n');
+    const r = await request('struct', paths);
+    assert.equal(r.ok, true, `struct 帧应 ok：${JSON.stringify(r)}`);
+    const byBase = {};
+    for (const s of r.data.structs) byBase[s.path.split('/').pop()] = s.fp;
+    return { byBase, errors: r.data.errors, pid: r.data.pid };
+  };
+  const diffOf = async (pairs) => {
+    const pf = join(dir, `d${seq}.pairs`);
+    writeFileSync(pf, pairs.map(([a, b]) => `${fwd(a)}\t${fwd(b)}`).join('\n') + '\n');
+    const r = await request('diff', pf);
+    assert.equal(r.ok, true, `diff 帧应 ok：${JSON.stringify(r)}`);
+    const byBase = {};
+    for (const d of r.data.diffs) byBase[d.old.split('/').pop()] = d.structural;
+    return { byBase, errors: r.data.errors };
+  };
+
+  const anno = join(src, 'Mark.java');
+  writeFileSync(anno, 'package p;\nimport java.lang.annotation.*;\n@Retention(RetentionPolicy.RUNTIME)\npublic @interface Mark { String value(); }\n');
+  const base = join(src, 'Base.java');
+  const original = [
+    'package p;',
+    '@Mark("a")',
+    'public class Base {',
+    '  public static final String S = "a";',
+    '  public static final int N = 1;',
+    '  private static final String PS = "x";',
+    '  public int field;',
+    '  private int priv;',
+    '  public void m(int x) throws java.io.IOException { int local = 1; }',
+    '  private void helper() {}',
+    '  public static class Inner { public void im() {} }',
+    '}',
+    '',
+  ].join('\n');
+  writeFileSync(base, original);
+
+  try {
+    const out0 = join(dir, 'out0');
+    const first = await compileTo([anno, base], out0);
+    const classes = (out) => [join(out, 'p', 'Base.class'), join(out, 'p', 'Base$Inner.class')];
+    const fp0 = await structOf(classes(out0));
+    assert.ok(fp0.byBase['Base.class'], 'Base 应有指纹');
+    assert.ok(fp0.byBase['Base$Inner.class'], 'Inner 应有指纹');
+    assert.deepEqual(fp0.errors, [], '正常批不应有 errors');
+
+    // 每个变体：改源码 → 编到新目录 → struct 指纹差 ⟺ diff oracle 判结构变化。
+    // expected 按 Eclipse hasStructuralChanges 的语义写（private 成员不豁免、注解成员值算、
+    // 方法体不算）。先跑 oracle 再断言指纹，两边不一致就是指纹投影漏了东西。
+    const variants = [
+      ['只改方法体', original.replace('int local = 1;', 'int local = 2;'), false, false],
+      ['改 String 常量', original.replace('String S = "a";', 'String S = "b";'), true, null],
+      ['改 int 常量', original.replace('int N = 1;', 'int N = 2;'), true, null],
+      ['改 private 常量', original.replace('String PS = "x";', 'String PS = "y";'), true, null],
+      ['改 public 方法签名', original.replace('void m(int x)', 'void m(String x)'), true, null],
+      ['加 private 方法', original.replace('private void helper() {}', 'private void helper() {}\n  private void extra() {}'), true, null],
+      ['加 private 字段', original.replace('private int priv;', 'private int priv;\n  private int priv2;'), true, null],
+      ['加类注解', original.replace('@Mark("a")', '@Deprecated\n@Mark("a")'), true, null],
+      ['改注解成员值', original.replace('@Mark("a")', '@Mark("b")'), true, null],
+      ['改内部类方法签名', original.replace('public void im() {}', 'public void im(int x) {}'), false, true],
+    ];
+    for (const [name, text, expectBase, expectInner] of variants) {
+      writeFileSync(base, text);
+      const outN = join(dir, `out_${seq}`);
+      await compileTo([anno, base], outN);
+      const fpN = await structOf(classes(outN));
+      const oracle = await diffOf(classes(out0).map((c, i) => [c, classes(outN)[i]]));
+      assert.deepEqual(oracle.errors, [], `${name}: oracle 不应有 errors`);
+      for (const cls of ['Base.class', 'Base$Inner.class']) {
+        const structural = oracle.byBase[cls];
+        const fpChanged = fp0.byBase[cls] !== fpN.byBase[cls];
+        assert.equal(fpChanged, structural, `${name} / ${cls}: 指纹变化(${fpChanged})必须与 Eclipse 结构判定(${structural})一致`);
+      }
+      if (expectBase !== null) {
+        assert.equal(oracle.byBase['Base.class'], expectBase, `${name}: Base 结构判定不符 Eclipse 语义`);
+      }
+      if (expectInner !== null) {
+        assert.equal(oracle.byBase['Base$Inner.class'], expectInner, `${name}: Inner 结构判定不符 Eclipse 语义`);
+      }
+    }
+
+    // 单文件失败进 errors，不炸整批；缺路径文件回 other 帧
+    const missing = join(dir, 'no-such.class');
+    const bad = await structOf([classes(out0)[0], missing]);
+    assert.ok(bad.byBase['Base.class'], '坏文件不应影响好文件的指纹');
+    assert.equal(bad.errors.length, 1, '坏文件应进 errors');
+    assert.ok(bad.errors[0].includes('no-such.class'), 'errors 应带路径');
+    const noFile = await request('struct', join(dir, 'absent.paths'));
+    assert.equal(noFile.ok, false);
+    assert.equal(noFile.code, 'other');
+
+    // struct/diff 与 compile 复用同一个 JVM
+    assert.equal(fp0.pid, first.data.pid, 'struct 应与 compile 复用同一 JVM');
+    const again = await compileTo([anno, base], join(dir, 'out_again'));
+    assert.equal(again.data.pid, first.data.pid, 'struct/diff 之后 compile 仍复用同一 JVM');
+    child.stdin.write('0\tquit\n');
+    await new Promise((r) => child.once('exit', r));
   } catch (e) {
     child.kill();
     throw e;

@@ -26,6 +26,7 @@ import { BuildSettings } from "./BuildSettings";
 const cfg = {
   auto_compile_incremental: true,
   auto_compile_external: true,
+  incremental_stat: true,
   prewarm_index: true,
   persistent_worker: true,
   build_parallel: 2,
@@ -100,5 +101,23 @@ describe("常驻 ecj 编译进程开关", () => {
     expect(text).not.toContain("≥3s");
     // 右侧均值只看当前生效路径（常驻开 → worker 800ms / 4 次）
     expect(text).toContain("均 200 ms");
+  });
+});
+
+describe("增量判定只查改动文件开关", () => {
+  const statRow = () => container.querySelector<HTMLElement>("#build-incremental-stat")!;
+  const statSwitch = () => statRow().querySelector<HTMLButtonElement>('[role="switch"]')!;
+
+  it("默认开：界面显示已开启", async () => {
+    await render();
+    expect(statRow().textContent).toContain("编译判定只查改动文件");
+    expect(statSwitch().getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("关掉时只提交 incremental_stat，界面随之切到已关闭", async () => {
+    await render();
+    await act(async () => { statSwitch().click(); });
+    expect(patchConfig).toHaveBeenCalledWith({ incremental_stat: false });
+    expect(statRow().textContent).toContain("已关闭");
   });
 });

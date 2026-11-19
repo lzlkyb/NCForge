@@ -46,9 +46,13 @@ const BRIDGES = {
   ecj: {
     src: join(ta, 'ecj-bridge', 'NcEcjBridge.java'),
     out: join(ta, 'resources', 'ecj-bridge', 'ncecj.jar'),
-    // ecj 的批量编译入口（Main.compile）编桥时要在 classpath 上；运行时也用它
+    // ecj 的批量编译入口（Main.compile）与 ClassFileReader（struct/diff 命令）编桥时要在
+    // classpath 上；运行时也用它
     cp: [join(ta, 'resources', 'ecj', 'ecj-3.17.jar')],
     label: 'NcEcjBridge',
+    // 运行时是 NC 的 ufjdk（7/8）：JAVA_HOME 指向 JDK 9+ 时必须 --release 8，
+    // 否则编出 53+ 的字节码，常驻 worker 起不来
+    java8: true,
   },
   hotswap: {
     src: join(ta, 'hotswap-agent', 'HotswapAgent.java'),

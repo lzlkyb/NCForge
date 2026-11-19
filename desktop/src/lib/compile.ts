@@ -121,6 +121,10 @@ export interface WorkerStats {
   workerMsTotal: number;
   oneshotCompiles: number;
   oneshotMsTotal: number;
+  /** class 结构指纹批取统计（旧版后端没有这三个字段，故可选） */
+  structCalls?: number;
+  structFailures?: number;
+  structMsTotal?: number;
   /** 耗时桶：<100ms、<300ms、<1s、<3s、≥3s */
   latency: number[];
 }
@@ -140,6 +144,8 @@ export interface BuildCacheInfo {
   history: BuildHistoryEntry[];
   parallel: number;
   worker: WorkerStats;
+  /** 历史原因归类（原因桶 → 条数，降序）；旧版后端没有这个字段，故可选 */
+  reasonStats?: [string, number][];
 }
 
 export interface CleanTmpReport {
@@ -147,7 +153,10 @@ export interface CleanTmpReport {
   bytes: number;
 }
 
-/** 编译 `path` 所在的模块（模块目录或模块内任一文件）。 */
+/**
+ * 编译 `path` 所在的模块（make 语义：先按依赖闭包把被依赖模块带到最新，没变就跳，
+ * 再编目标；依赖编不过 → 目标 blocked）。强制全量走 `buildRebuildModule`。
+ */
 export const compileModule = (path: string) => invoke<CompileResult>("compile_module", { path });
 
 /**

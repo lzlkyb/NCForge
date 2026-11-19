@@ -32,6 +32,8 @@ export const CHANNELS = [
   { id: "bigfile", name: "大文件 didOpen → 首批诊断", target: null, source: "gaps" },
   { id: "bigfile-completion", name: "大文件补全 p50", target: null, source: "gaps" },
   { id: "incremental", name: "1–5 文件增量编译", target: 1500, source: "incremental" },
+  { id: "module-make", name: "真实模块 make 热路径（保存→class+结构判定 p50）", target: null, source: "module-make" },
+  { id: "module-nochange", name: "真实模块无变更扫描（decide→Skip，最大模块）", target: null, source: "module-nochange" },
 ];
 
 /** 判定口径：方案写的是「< 0.4 s」，所以是严格小于，等于目标算超标。 */
@@ -81,6 +83,45 @@ export function parseIncrementalPerf(text) {
   const skipped = /跳过：(.+)/.exec(src);
   if (skipped) return { ok: false, reason: skipped[1].trim().slice(0, 120) };
   return { ok: false, reason: "没拿到 PERF incremental-compile 行（测试没跑起来？）" };
+}
+
+/**
+ * 解析 Rust 侧 `模块make速度_live` 的 make 热路径行。
+ *
+ * 汇总行 `PERF module-make-summary module=… sources=… nochange=… p50=…` 取已测里
+ * 源文件最多的模块（decide 扫描成本随规模涨，最大者最代表真实 make）；明细行
+ * `PERF module-make module=… … min=… max=… runs=…` 逐模块 collected 进 details。
+ * 三种非正常结局同 ecj/incremental 口径：跳过 / 编译失败 / 没输出。
+ */
+export function parseModuleMakePerf(text) {
+  const src = String(text ?? "");
+  const details = [...src.matchAll(/PERF module-make module=(\S+) sources=(\d+) nochange=(\d+) p50=(\d+) min=(\d+) max=(\d+) runs=(\d+)/g)]
+    .map((m) => ({ module: m[1], sources: +m[2], nochange: +m[3], p50: +m[4], min: +m[5], max: +m[6], runs: +m[7] }));
+  const sum = /PERF module-make-summary module=(\S+) sources=(\d+) nochange=(\d+) p50=(\d+)/.exec(src);
+  if (sum) {
+    return { ok: true, module: sum[1], sources: +sum[2], nochange: +sum[3], p50: +sum[4], details };
+  }
+  const failed = /PERF module-make failed: (.+)/.exec(src);
+  if (failed) return { ok: false, reason: `编译失败：${failed[1].trim().slice(0, 120)}` };
+  const skipped = /跳过：(.+)/.exec(src);
+  if (skipped) return { ok: false, reason: skipped[1].trim().slice(0, 120) };
+  return { ok: false, reason: "没拿到 PERF module-make 行（测试没跑起来？）" };
+}
+
+/**
+ * 解析同一探针的无变更扫描行。汇总 `PERF module-nochange-summary module=… sources=… ms=…`
+ * 取最大模块；明细 `PERF module-nochange module=… sources=… ms=…` 是小/中/大三个代表，
+ * 看「编译全部」无变更时每模块扫描成本随规模怎么涨。无变更只读 decide，不会编译失败。
+ */
+export function parseModuleNochangePerf(text) {
+  const src = String(text ?? "");
+  const details = [...src.matchAll(/PERF module-nochange module=(\S+) sources=(\d+) ms=(\d+)/g)]
+    .map((m) => ({ module: m[1], sources: +m[2], ms: +m[3] }));
+  const sum = /PERF module-nochange-summary module=(\S+) sources=(\d+) ms=(\d+)/.exec(src);
+  if (sum) return { ok: true, module: sum[1], sources: +sum[2], ms: +sum[3], details };
+  const skipped = /跳过：(.+)/.exec(src);
+  if (skipped) return { ok: false, reason: skipped[1].trim().slice(0, 120) };
+  return { ok: false, reason: "没拿到 PERF module-nochange 行（测试没跑起来？）" };
 }
 
 /**
@@ -149,7 +190,7 @@ export function splitIndexRound(round) {
  * @param {{ecj?: object|null, incremental?: object|null, gaps?: object|null, index?: object|null, boot?: object|null}} inputs
  */
 export function buildRows(inputs = {}) {
-  const { ecj = null, incremental = null, gaps = null, index = null, boot = null } = inputs;
+  const { ecj = null, incremental = null, gaps = null, index = null, boot = null, moduleMake = null, moduleNochange = null } = inputs;
   const latency = gaps?.diagnosticsLatency ?? {};
   const valueOf = {
     boot: () => num(boot?.firstFrameMs),
@@ -159,6 +200,8 @@ export function buildRows(inputs = {}) {
     bigfile: () => num(latency.bigFileMs),
     "bigfile-completion": () => num(latency.bigFileCompletionP50Ms),
     incremental: () => (incremental?.ok ? num(incremental.p50) : null),
+    "module-make": () => (moduleMake?.ok ? num(moduleMake.p50) : null),
+    "module-nochange": () => (moduleNochange?.ok ? num(moduleNochange.ms) : null),
   };
   const noteOf = {
     boot: () => (boot ? `日志里 ${boot.runs} 次启动，取最后一次` : "需真机跑一次，把 stderr 存成文件后 --boot-log=<路径>"),
@@ -180,6 +223,15 @@ export function buildRows(inputs = {}) {
     incremental: () => (incremental?.ok
       ? `n=${incremental.n}，${incremental.files} 文件，${incremental.min}~${incremental.max} ms`
       : (incremental?.reason ?? "跑 --only=incremental")),
+    "module-make": () => (moduleMake?.ok
+      ? `${moduleMake.module}（${moduleMake.sources} 文件）· 无变更 ${moduleMake.nochange} ms · 测了 ${moduleMake.details?.length ?? 0} 个模块`
+      : (moduleMake?.reason ?? "跑 --only=module-make")),
+    "module-nochange": () => (moduleNochange?.ok
+      ? `${moduleNochange.module}（${moduleNochange.sources} 文件）`
+        + (moduleNochange.details?.length
+          ? ` · 小/中/大 ${moduleNochange.details.map((d) => `${d.sources}→${d.ms}ms`).join("、")}`
+          : "")
+      : (moduleNochange?.reason ?? "跑 --only=module-make")),
   };
   return CHANNELS.map((c) => {
     const value = valueOf[c.id]();

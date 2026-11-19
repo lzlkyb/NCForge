@@ -6,7 +6,7 @@
 //!    走全量，最多多编一次，不能因为账本坏了编错或删错。
 //! 2. **清理只删声明过的产物**。有清单按清单；没清单只删能映射回源码的 `.class`，
 //!    映射不上的列出来给用户看，不删。输出根目录、源码、`.classpath`、NC home 永不碰。
-//! 3. **增量宁可多编**。源码级 ABI + 反向依赖都是近似：签名变了就把引用方带上，
+//! 3. **增量宁可多编**。class 结构指纹 + 反向依赖都是近似：结构变了就把引用方带上，
 //!    看不出来就全量；绝不靠时间戳猜依赖。
 
 use std::collections::{HashMap, HashSet};
@@ -22,7 +22,8 @@ use crate::eclipse_cp::LinkedOverride;
 use crate::workspace::decode_lossy;
 
 /// 清单格式版本。字段或语义变化时 +1，旧清单自动作废。
-pub const SCHEMA: u32 = 1;
+/// 2：源码 ABI 指纹退役，改 class 结构指纹（桥 struct）+ 内容哈希 + 类型名 + 外部引用聚合。
+pub const SCHEMA: u32 = 2;
 const MAGIC: &[u8] = b"NCBS1\n";
 const HISTORY_MAX: usize = 50;
 /// jar 修改时间检查的进程内缓存时长：每次编译都 stat 7000 个 jar 太贵，
@@ -42,15 +43,70 @@ pub struct SourceStamp {
     pub size: u64,
     pub mtime_ms: u64,
     pub package: String,
-    /// 源码级 ABI 指纹；`None` = 解析不出，按「可能变了」处理
-    pub abi: Option<String>,
-    /// 单文件编译只更新了 stat、没更新 ABI（见 `build_engine::compile_files`）。
-    /// 下次模块级增量必须重新看这个文件，否则签名变更永远传播不到引用方。
+    /// 内容 SHA-256；空串 = 未算，按「可能变了」处理。
+    /// stat 命中但内容没变（SVN 更新 / 外部工具 touch）时靠它免编。
     #[serde(default)]
-    pub abi_stale: bool,
+    pub hash: String,
+    /// class 结构指纹（桥 struct 命令，投影面对齐 Eclipse hasStructuralChanges）；
+    /// `None` = 未知，按「结构可能变了」处理。取代旧源码级 ABI 指纹。
+    #[serde(default)]
+    pub struct_fp: Option<String>,
+    /// 单文件编译写过 class 但没做结构判定（见 `build_engine::compile_files`）。
+    /// 下次增量必须把该文件再走一轮编译补判定，否则签名变更永远传播不到引用方。
+    #[serde(default)]
+    pub struct_pending: bool,
+    /// 本文件声明的类型简单名（删除后找引用方用，不必再读源码）
+    #[serde(default)]
+    pub types: Vec<String>,
+    /// 本文件的外部引用（模块依赖图派生用，见 `module_graph`）
+    #[serde(default)]
+    pub ext: ExtRefs,
     /// 该源文件产出的 class（相对产物目录，含 `Outer$Inner.class`）
     #[serde(default)]
     pub classes: Vec<String>,
+}
+
+/// 一个模块的外部引用聚合（清单级 = 各源文件 ext 的并集）。
+/// 模块依赖图靠它 join 工作区类型索引派生：NC 单根 `.classpath` 没有显式模块依赖，
+/// 这是 make 编排 / 下游失效 / 真实分层的唯一边来源。全部小写、排序、去重。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtRefs {
+    /// 显式 import 的 FQCN
+    pub fq: Vec<String>,
+    /// 通配 import 的包
+    pub wild: Vec<String>,
+    /// 本模块源码出现过的包（同包跨模块边用）
+    pub packages: Vec<String>,
+    /// 正文出现的大写开头标识符（同包 / 通配边的候选简单名，宁可多连）
+    pub simple: Vec<String>,
+}
+
+impl ExtRefs {
+    /// 并集（增量时旧聚合 ∪ 新文件：陈旧边只会多编，不会漏编；全量时精确重算）。
+    pub fn merge(&mut self, other: &ExtRefs) {
+        self.fq.extend(other.fq.iter().cloned());
+        self.wild.extend(other.wild.iter().cloned());
+        self.packages.extend(other.packages.iter().cloned());
+        self.simple.extend(other.simple.iter().cloned());
+        for v in [
+            &mut self.fq,
+            &mut self.wild,
+            &mut self.packages,
+            &mut self.simple,
+        ] {
+            v.sort();
+            v.dedup();
+        }
+    }
+}
+
+/// 被删除的源文件：源码已不在，引用方只能靠旧清单里的包名 + 类型名找。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemovedSource {
+    pub path: PathBuf,
+    pub package: String,
+    pub types: Vec<String>,
 }
 
 impl SourceStamp {
@@ -73,6 +129,9 @@ pub struct Manifest {
     pub source_roots: Vec<String>,
     pub outputs: Vec<String>,
     pub sources: Vec<SourceStamp>,
+    /// 模块外部引用聚合（派生模块依赖图用）
+    #[serde(default)]
+    pub ext: ExtRefs,
     /// 有序 jar 集合 + NC home + 覆盖表 + 依赖工程 `.classpath` 的指纹
     pub classpath_fp: String,
     /// ecj / java / 编译参数的指纹
@@ -106,16 +165,17 @@ impl Manifest {
 pub enum Decision {
     /// 输入指纹与源文件都没变，整模块不用编
     Skip,
-    /// 必须全量（首次、配置变化、增删文件、签名影响面过大）
+    /// 必须全量（首次、配置变化、布局变化）
     Full { reason: String },
-    /// 只编这些文件（绝对路径）
+    /// 第一轮只编这些文件（内容变化 + 新增）。引用方由**编译后**的 class 结构 diff
+    /// 决定（Eclipse 队列模型），删除文件的引用方靠旧清单类型名找——都在
+    /// `build_engine::build_one` 里做，决策阶段不猜签名。
     Incremental {
         files: Vec<PathBuf>,
         reason: String,
-        /// 真正被改动的文件（`files` 里还包含被连带上的引用方）
+        /// 真正被改动 / 新增的文件（跨模块传播只看这个）
         changed: Vec<PathBuf>,
-        /// 是否检测到源码级 ABI 变化；跨模块传播只看这个
-        abi_changed: bool,
+        removed: Vec<RemovedSource>,
     },
 }
 
@@ -382,16 +442,45 @@ pub fn path_eq(a: &str, b: &str) -> bool {
 
 // ───────────────────────────── 源码 / ABI ─────────────────────────────
 
-/// 扫描模块当前的源码。`with_abi=false` 只取 stat（快速判跳过）。
-pub fn scan_sources(layout: &ModuleLayout, with_abi: bool) -> Vec<(PathBuf, SourceStamp)> {
-    layout
-        .collect_sources()
-        .into_iter()
-        .filter_map(|p| source_stamp(layout, &p, with_abi).map(|s| (p, s)))
-        .collect()
+/// 扫描模块当前的源码。`with_details=false` 只取 stat（快速判跳过）。
+///
+/// 大模块（≥128 文件）有界并行 stat/哈希（上限 4，开发机重负载蓝屏史，不按核数放开）；
+/// 小模块串行免线程开销。分块按 `collect_sources` 的有序列表切，各块顺序处理再拼接，
+/// 结果与串行逐字节一致（差分门禁可比）。
+pub fn scan_sources(layout: &ModuleLayout, with_details: bool) -> Vec<(PathBuf, SourceStamp)> {
+    let sources = layout.collect_sources();
+    let threads = if sources.len() >= 128 { 4 } else { 1 };
+    scan_with(layout, &sources, with_details, threads)
 }
 
-pub fn source_stamp(layout: &ModuleLayout, path: &Path, with_abi: bool) -> Option<SourceStamp> {
+/// `scan_sources` 的可指定并发版（测试用 1 vs 4 验一致性）。`threads<=1` 走串行。
+fn scan_with(
+    layout: &ModuleLayout,
+    sources: &[PathBuf],
+    with_details: bool,
+    threads: usize,
+) -> Vec<(PathBuf, SourceStamp)> {
+    let serial = |c: &[PathBuf]| -> Vec<(PathBuf, SourceStamp)> {
+        c.iter()
+            .filter_map(|p| source_stamp(layout, p, with_details).map(|s| (p.clone(), s)))
+            .collect()
+    };
+    if threads <= 1 || sources.len() < 2 {
+        return serial(sources);
+    }
+    let chunk = sources.len().div_ceil(threads);
+    let chunks: Vec<&[PathBuf]> = sources.chunks(chunk).collect();
+    std::thread::scope(|s| {
+        let handles: Vec<_> = chunks.iter().map(|c| s.spawn(|| serial(c))).collect();
+        let mut out = Vec::with_capacity(sources.len());
+        for h in handles {
+            out.extend(h.join().expect("scan 线程不该 panic"));
+        }
+        out
+    })
+}
+
+pub fn source_stamp(layout: &ModuleLayout, path: &Path, with_details: bool) -> Option<SourceStamp> {
     let rel = layout.rel_source_of(path)?;
     let out = layout
         .output_for(path)
@@ -409,73 +498,66 @@ pub fn source_stamp(layout: &ModuleLayout, path: &Path, with_abi: bool) -> Optio
         size,
         mtime_ms,
         package: String::new(),
-        abi: None,
-        abi_stale: false,
+        hash: String::new(),
+        struct_fp: None,
+        struct_pending: false,
+        types: Vec::new(),
+        ext: ExtRefs::default(),
         classes: Vec::new(),
     };
-    if with_abi {
-        let text = decode_lossy(&std::fs::read(path).ok()?);
+    if with_details {
+        let bytes = std::fs::read(path).ok()?;
+        stamp.hash = sha(&[&bytes]);
+        let text = decode_lossy(&bytes);
         stamp.package = crate::compile::extract_package(&text).unwrap_or_default();
-        stamp.abi = abi_fingerprint(&text);
+        let clean = strip_comments_and_literals(&text);
+        let deps = parse_deps_clean(&clean);
+        stamp.types = deps.types.clone();
+        stamp.ext = ext_refs(&clean, &deps);
     }
     Some(stamp)
 }
 
-/// 源码级 ABI 指纹：public/protected 成员、类型声明、继承关系，去掉注释/字符串/方法体。
-///
-/// 宁可多报（把注解、泛型参数也算进去），不可漏报——漏一次就是「编译成功但运行期
-/// 加载旧字节码」。解析不出声明时返回 `None`，调用方按「ABI 可能变了」处理。
-pub fn abi_fingerprint(text: &str) -> Option<String> {
-    let clean = strip_comments_and_literals(text);
-    let mut statements = Vec::new();
-    let mut buf = String::new();
-    let mut depth = 0i32;
-    for ch in clean.chars() {
-        match ch {
-            '{' => {
-                if depth <= 2 {
-                    push_decl(&mut statements, &buf);
-                }
-                buf.clear();
-                depth = (depth + 1).min(64);
-            }
-            '}' => {
-                buf.clear();
-                depth = (depth - 1).max(0);
-            }
-            ';' => {
-                if depth <= 2 {
-                    push_decl(&mut statements, &buf);
-                }
-                buf.clear();
-            }
-            _ if depth <= 2 => buf.push(ch),
-            _ => {}
-        }
-    }
-    if statements.is_empty() {
-        return None;
-    }
-    let joined = statements.join("\n");
-    Some(sha(&[joined.as_bytes()]))
+/// 大写开头标识符：同包 / 通配跨模块边的候选简单名。宁可多收（JDK 类名也进来），
+/// join 类型索引时自然滤掉工作区没有的名字。
+fn upper_words(clean: &str) -> Vec<String> {
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r"\b[A-Z][A-Za-z0-9_$]*\b").expect("静态正则不会编译失败")
+    });
+    let mut out: Vec<String> = re
+        .find_iter(clean)
+        .map(|m| m.as_str().to_ascii_lowercase())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
-fn push_decl(out: &mut Vec<String>, buf: &str) {
-    let s = buf.split_whitespace().collect::<Vec<_>>().join(" ");
-    let s = s.trim();
-    if s.is_empty() {
-        return;
+fn ext_refs(clean: &str, deps: &SourceDeps) -> ExtRefs {
+    let mut fq = Vec::new();
+    let mut wild = Vec::new();
+    for (name, w) in &deps.imports {
+        if *w {
+            wild.push(name.to_ascii_lowercase());
+        } else {
+            fq.push(name.to_ascii_lowercase());
+        }
     }
-    let type_decl = ["class ", "interface ", "enum ", "record "]
-        .iter()
-        .any(|k| s.contains(&format!(" {k}")) || s.starts_with(k));
-    let member = s.starts_with("public ")
-        || s.starts_with("protected ")
-        || s.starts_with("abstract ")
-        || s.starts_with("public(")
-        || s.starts_with("protected(");
-    if s.starts_with("package ") || type_decl || member {
-        out.push(s.to_string());
+    fq.sort();
+    fq.dedup();
+    wild.sort();
+    wild.dedup();
+    let packages = if deps.package.is_empty() {
+        Vec::new()
+    } else {
+        vec![deps.package.to_ascii_lowercase()]
+    };
+    ExtRefs {
+        fq,
+        wild,
+        packages,
+        simple: upper_words(clean),
     }
 }
 
@@ -603,18 +685,37 @@ pub fn referrers(changed: &[PathBuf], all: &[PathBuf]) -> Option<Vec<PathBuf>> {
                 format!("{}.{}", deps.package, t)
             };
             changed_fq.insert(fq.to_ascii_lowercase());
+            // 简单名保持原大小写：mentions_word / may_mention 在原文里按词边界找
             simple.insert(t.clone());
         }
         changed_pkgs.insert(deps.package.to_ascii_lowercase());
     }
 
-    let changed_set: HashSet<String> = changed
+    let exclude: HashSet<String> = changed
         .iter()
         .map(|p| build_layout::slash(p).to_ascii_lowercase())
         .collect();
+    Some(referrers_of_names(
+        &changed_fq,
+        &changed_pkgs,
+        &simple,
+        &exclude,
+        all,
+    ))
+}
+
+/// 按类型名集合找引用方。删除的源文件用这个：源码已不在，只有旧清单里的
+/// 包名 + 类型名（`RemovedSource`）。规则与 `referrers` 同一套，宁可多编。
+pub fn referrers_of_names(
+    changed_fq: &HashSet<String>,
+    changed_pkgs: &HashSet<String>,
+    simple: &HashSet<String>,
+    exclude: &HashSet<String>,
+    all: &[PathBuf],
+) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for p in all {
-        if changed_set.contains(&build_layout::slash(p).to_ascii_lowercase()) {
+        if exclude.contains(&build_layout::slash(p).to_ascii_lowercase()) {
             continue;
         }
         let Ok(bytes) = std::fs::read(p) else {
@@ -622,7 +723,7 @@ pub fn referrers(changed: &[PathBuf], all: &[PathBuf]) -> Option<Vec<PathBuf>> {
         };
         // 快速预筛：正文字节里连类名都没出现（注释/字符串也算），不可能有引用。
         // 全工作区扫描时这一步省掉 95% 以上的解码与解析。
-        if !may_mention(&bytes, &simple) {
+        if !may_mention(&bytes, simple) {
             continue;
         }
         let text = decode_lossy(&bytes);
@@ -666,7 +767,7 @@ pub fn referrers(changed: &[PathBuf], all: &[PathBuf]) -> Option<Vec<PathBuf>> {
             out.push(p.clone());
         }
     }
-    Some(out)
+    out
 }
 
 /// 正文字节里是否可能出现某个类名。
@@ -684,7 +785,7 @@ fn may_mention(bytes: &[u8], names: &HashSet<String>) -> bool {
     })
 }
 
-fn mentions_word(text: &str, name: &str) -> bool {
+pub(crate) fn mentions_word(text: &str, name: &str) -> bool {
     let bytes = text.as_bytes();
     let needle = name.as_bytes();
     if needle.is_empty() || needle.len() > bytes.len() {
@@ -708,61 +809,78 @@ fn mentions_word(text: &str, name: &str) -> bool {
     false
 }
 
-/// 全量编译时，哪些源文件相对旧清单真的变了（stat + ABI）。
+/// 全量编译时，哪些源文件相对旧清单真的变了（stat + 内容哈希 + 待判定标记）。
 ///
-/// 全量分支（新增/删除、超过阈值、类路径变化）也要知道签名有没有变：
-/// 跨模块传播靠 `changed` / `abi_changed` 决定谁要跟着重编。
-/// 先只 stat 全部文件，命中了才读文件算 ABI，避免全量时多扫一遍 7 千个源文件。
+/// 结构变没变在**编译后**由桥 struct 指纹比对判定，不在这里猜；这里只挑出
+/// 「需要参与结构判定」的文件，避免全量时对七千个文件都算指纹。
+/// 先只 stat 全部文件，命中了才读文件算哈希。
 pub fn changed_against_manifest(
     layout: &ModuleLayout,
     manifest: Option<&Manifest>,
     files: &[PathBuf],
-) -> (Vec<PathBuf>, bool) {
+) -> Vec<PathBuf> {
     let Some(m) = manifest else {
-        return (Vec::new(), false);
+        return Vec::new();
     };
     let prev = m.sources_by_key();
     let mut changed = Vec::new();
-    let mut abi_changed = false;
     for p in files {
         let Some(stamp) = source_stamp(layout, p, false) else {
             continue;
         };
-        let old = prev.get(&stamp.key());
-        let touched = match old {
-            None => true,
-            Some(o) => o.size != stamp.size || o.mtime_ms != stamp.mtime_ms || o.abi_stale,
-        };
-        if !touched {
+        let Some(old) = prev.get(&stamp.key()) else {
+            changed.push(p.clone());
             continue;
+        };
+        if old.size == stamp.size && old.mtime_ms == stamp.mtime_ms && !old.struct_pending {
+            continue;
+        }
+        // 内容哈希命中且无待判定 → touch 不算变（SVN 更新场景）
+        if !old.struct_pending && !old.hash.is_empty() {
+            if let Ok(bytes) = std::fs::read(p) {
+                if sha(&[&bytes]) == old.hash {
+                    continue;
+                }
+            }
         }
         changed.push(p.clone());
-        let Some(old) = old else {
-            abi_changed = true;
-            continue;
-        };
-        let Some(old_abi) = old.abi.clone() else {
-            abi_changed = true;
-            continue;
-        };
-        let Ok(bytes) = std::fs::read(p) else {
-            abi_changed = true;
-            continue;
-        };
-        if abi_fingerprint(&decode_lossy(&bytes)).as_deref() != Some(old_abi.as_str()) {
-            abi_changed = true;
-        }
     }
-    (changed, abi_changed)
+    changed
 }
 
 /// 决定这一轮怎么编。
+///
+/// 只回答「第一轮编哪些文件」：内容变化 + 新增。签名变没变、引用方要不要跟，
+/// 是编译后 class 结构 diff 的事（`build_engine::build_one`），决策阶段不猜。
+/// 新增/删除不再一律全量（Eclipse 队列模型）：新增进第一轮，删除靠旧清单类型名
+/// 找引用方；解析不出的保守退路仍在构建引擎里（referrers 返回 None → 全量）。
 pub fn decide(
     layout: &ModuleLayout,
     manifest: Option<&Manifest>,
     classpath_fp: &str,
     compiler_fp: &str,
     force_full: bool,
+) -> Decision {
+    decide_with_hint(
+        layout,
+        manifest,
+        classpath_fp,
+        compiler_fp,
+        force_full,
+        None,
+    )
+}
+
+/// `decide` 的脏集增量版：`hint` 可靠时只 stat 脏文件（含增删改），不必全模块扫描；
+/// `hint=None` 或不可靠 → 回落全扫（与 `decide` 完全一致）。正确性兜底见 `compile_dirty`
+/// 的 epoch 模型：溢出 / rescan / 切工作区 / 监听出错都会让 hint 不可信。
+pub fn decide_with_hint(
+    layout: &ModuleLayout,
+    manifest: Option<&Manifest>,
+    classpath_fp: &str,
+    compiler_fp: &str,
+    force_full: bool,
+    hint: Option<&crate::compile_dirty::DirtyHint>,
 ) -> Decision {
     if force_full {
         return Decision::Full {
@@ -791,102 +909,195 @@ pub fn decide(
         };
     }
 
+    // 脏集可信：只查脏文件，不扫全模块。空脏集 → 直接 Skip（build_all 无变更的大头）。
+    if let Some(h) = hint {
+        if h.reliable {
+            return decide_incremental(layout, m, h);
+        }
+    }
+
     let current = scan_sources(layout, false);
     let prev = m.sources_by_key();
     let mut modified: Vec<PathBuf> = Vec::new();
+    let mut added: Vec<PathBuf> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    let mut added = false;
     for (path, stamp) in &current {
         let key = stamp.key();
         seen.insert(key.clone());
         match prev.get(&key) {
-            None => added = true,
+            None => added.push(path.clone()),
             Some(old)
-                if old.size != stamp.size || old.mtime_ms != stamp.mtime_ms || old.abi_stale =>
+                if old.size != stamp.size
+                    || old.mtime_ms != stamp.mtime_ms
+                    || old.struct_pending =>
             {
-                modified.push(path.clone())
+                // stat 变了先读内容：哈希命中且无待判定 → touch 不算变。
+                // struct_pending 必须进编译轮补结构判定，哈希相同也不能跳。
+                let unchanged = !old.struct_pending
+                    && !old.hash.is_empty()
+                    && std::fs::read(path)
+                        .ok()
+                        .map(|b| sha(&[&b]) == old.hash)
+                        .unwrap_or(false);
+                if !unchanged {
+                    modified.push(path.clone());
+                }
             }
             _ => {}
         }
     }
-    let removed = prev.keys().any(|k| !seen.contains(k));
-    if added || removed {
-        return Decision::Full {
-            reason: if added {
-                "检测到新增源文件（可能被任何同包 / 通配 import 引用）".to_string()
-            } else {
-                "检测到删除或改名".to_string()
-            },
-        };
+    let mut removed: Vec<RemovedSource> = Vec::new();
+    for s in &m.sources {
+        if !seen.contains(&s.key()) {
+            let path =
+                build_layout::safe_join(&layout.module_dir, &format!("{}/{}", s.root, s.rel))
+                    .unwrap_or_default();
+            removed.push(RemovedSource {
+                path,
+                package: s.package.clone(),
+                types: s.types.clone(),
+            });
+        }
     }
-    if modified.is_empty() {
+    if modified.is_empty() && added.is_empty() && removed.is_empty() {
         return Decision::Skip;
     }
 
-    // 只改了方法体：ABI 不变，只编改动的文件
-    let mut abi_changed = false;
-    for p in &modified {
-        let text = match std::fs::read(p) {
-            Ok(b) => decode_lossy(&b),
-            Err(_) => {
-                abi_changed = true;
-                break;
-            }
-        };
-        let now_abi = abi_fingerprint(&text);
-        let key = source_stamp(layout, p, false).map(|s| s.key());
-        let old = key.as_ref().and_then(|k| prev.get(k));
-        match (now_abi, old.and_then(|s| s.abi.clone())) {
-            (Some(a), Some(b)) if a == b => {}
-            _ => {
-                abi_changed = true;
-                break;
-            }
-        }
-    }
-    if abi_changed {
-        let all: Vec<PathBuf> = current.iter().map(|(p, _)| p.clone()).collect();
-        let Some(refs) = referrers(&modified, &all) else {
-            return Decision::Full {
-                reason: "无法解析被修改文件的类型声明，保守走全量".to_string(),
-            };
-        };
-        let mut files = modified.clone();
-        files.extend(refs);
-        files.sort();
-        files.dedup();
-        // 增量反而要编 30% 以上：直接全量，别让“增量”比全量还慢
-        if files.len() * 100 > all.len().saturating_mul(30) {
-            return Decision::Full {
-                reason: format!(
-                    "签名变化影响 {} / {} 个源文件（超过 30%），改跑全量",
-                    files.len(),
-                    all.len()
-                ),
-            };
-        }
-        return Decision::Incremental {
-            reason: format!(
-                "{} 个文件签名变化，连带 {} 个引用方",
-                modified.len(),
-                files.len() - modified.len()
-            ),
-            files,
-            changed: modified,
-            abi_changed: true,
-        };
-    }
+    let mut files = modified.clone();
+    files.extend(added.iter().cloned());
+    files.sort();
+    files.dedup();
     Decision::Incremental {
-        reason: format!("{} 个文件内容变化，签名未变", modified.len()),
-        files: modified.clone(),
-        changed: modified,
-        abi_changed: false,
+        reason: format!(
+            "{} 个文件内容变化，{} 个新增，{} 个删除",
+            modified.len(),
+            added.len(),
+            removed.len()
+        ),
+        changed: files.clone(),
+        files,
+        removed,
+    }
+}
+
+/// 脏集可信时的增量判定：只 stat 脏集里的路径，不扫全模块。
+///
+/// 脏集含增 / 删 / 改三类（watcher 不区分，统一进 java 集）：stat 得到 → 比清单判
+/// 改 / 增；stat 不到（已删）→ 若在清单里则判删。可信前提下脏集是完整的，故不必
+/// 再遍历清单查「有没有漏掉的删除」——那正是全扫，与增量目的相悖。
+fn decide_incremental(
+    layout: &ModuleLayout,
+    m: &Manifest,
+    h: &crate::compile_dirty::DirtyHint,
+) -> Decision {
+    let prev = m.sources_by_key();
+    let mut modified: Vec<PathBuf> = Vec::new();
+    let mut added: Vec<PathBuf> = Vec::new();
+    let mut removed: Vec<RemovedSource> = Vec::new();
+    for p in &h.paths {
+        let Some(stamp) = source_stamp(layout, p, false) else {
+            continue;
+        };
+        let key = stamp.key();
+        let exists = p.exists();
+        match prev.get(&key) {
+            None => {
+                if exists {
+                    added.push(p.clone());
+                }
+            }
+            Some(old) => {
+                if !exists {
+                    removed.push(RemovedSource {
+                        path: p.clone(),
+                        package: old.package.clone(),
+                        types: old.types.clone(),
+                    });
+                } else if old.size != stamp.size
+                    || old.mtime_ms != stamp.mtime_ms
+                    || old.struct_pending
+                {
+                    let unchanged = !old.struct_pending
+                        && !old.hash.is_empty()
+                        && std::fs::read(p)
+                            .ok()
+                            .map(|b| sha(&[&b]) == old.hash)
+                            .unwrap_or(false);
+                    if !unchanged {
+                        modified.push(p.clone());
+                    }
+                }
+            }
+        }
+    }
+    if modified.is_empty() && added.is_empty() && removed.is_empty() {
+        return Decision::Skip;
+    }
+    let mut files = modified.clone();
+    files.extend(added.iter().cloned());
+    files.sort();
+    files.dedup();
+    Decision::Incremental {
+        reason: format!(
+            "脏集增量：{} 个内容变化，{} 个新增，{} 个删除",
+            modified.len(),
+            added.len(),
+            removed.len()
+        ),
+        changed: files.clone(),
+        files,
+        removed,
+    }
+}
+
+/// Skip 时的 stat 刷新：mtime/size 变了但内容哈希没变的文件，把新 stat 写回清单，
+/// 下次 decide 不再重复读文件。返回 `None` = 没什么可刷的（调用方不写盘）。
+/// 待判定（struct_pending）文件不刷：它们必须走编译轮，不能在这里被静默抹平。
+pub fn touch_refresh(layout: &ModuleLayout, m: &Manifest) -> Option<Manifest> {
+    let mut next = m.clone();
+    let mut changed = false;
+    for s in &mut next.sources {
+        if s.struct_pending {
+            continue;
+        }
+        let Some(abs) =
+            build_layout::safe_join(&layout.module_dir, &format!("{}/{}", s.root, s.rel))
+        else {
+            continue;
+        };
+        let (size, mtime_ms) = stat_of(&abs);
+        if size == s.size && mtime_ms == s.mtime_ms {
+            continue;
+        }
+        if s.hash.is_empty() {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&abs) else {
+            continue;
+        };
+        if sha(&[&bytes]) == s.hash {
+            s.size = size;
+            s.mtime_ms = mtime_ms;
+            changed = true;
+        }
+    }
+    if changed {
+        Some(next)
+    } else {
+        None
     }
 }
 
 // ───────────────────────────── 清单更新 / 旧产物 ─────────────────────────────
 
 /// 编译成功后更新清单。`compiled` 为本次实际参与编译的文件；全量传全部源文件。
+///
+/// `struct_fps`：源文件 key → 本轮 class 结构指纹（`None` = 桥失败/未知，按可能变了处理）。
+/// `preserve_struct=true`（保存后的单文件快速编译）：沿用旧指纹并标 `struct_pending`，
+/// 把结构判定留给下一轮空闲增量——与旧 `preserve_abi` 同一形状，判定数据换成 class 指纹。
+// 参数多是语义需要：布局 / 旧清单 / 本轮文件 / 两个配置指纹 / seed / 全量标志 /
+// 结构指纹表 / 保留标志，各自独立，打包成结构体只会把调用点搅得更乱。
+#[allow(clippy::too_many_arguments)]
 pub fn updated_manifest(
     layout: &ModuleLayout,
     previous: Option<&Manifest>,
@@ -895,11 +1106,19 @@ pub fn updated_manifest(
     compiler_fp: &str,
     seed_jars: Vec<u32>,
     full: bool,
+    struct_fps: &HashMap<String, Option<String>>,
+    preserve_struct: bool,
 ) -> Manifest {
     let compiled_set: HashSet<String> = compiled
         .iter()
         .map(|p| build_layout::slash(p).to_ascii_lowercase())
         .collect();
+    let prev_map = previous.map(|m| m.sources_by_key()).unwrap_or_default();
+    let mut ext = if full {
+        ExtRefs::default()
+    } else {
+        previous.map(|m| m.ext.clone()).unwrap_or_default()
+    };
     let mut sources: Vec<SourceStamp> = Vec::new();
     if !full {
         if let Some(prev) = previous {
@@ -923,6 +1142,14 @@ pub fn updated_manifest(
             if let Some(out) = layout.output_for(p) {
                 s.classes = classes_for_source(&out, &s.package, p);
             }
+            if preserve_struct {
+                s.struct_fp = prev_map.get(&s.key()).and_then(|o| o.struct_fp.clone());
+                s.struct_pending = true;
+            } else {
+                s.struct_fp = struct_fps.get(&s.key()).cloned().flatten();
+                s.struct_pending = false;
+            }
+            ext.merge(&s.ext);
             sources.push(s);
         }
     }
@@ -945,12 +1172,25 @@ pub fn updated_manifest(
         source_roots,
         outputs,
         sources,
+        ext,
         classpath_fp: classpath_fp.to_string(),
         compiler_fp: compiler_fp.to_string(),
         seed_jars,
         last_success_ms: now_ms(),
         last_attempt: None,
     }
+}
+
+/// 无清单模块的外部引用：按需全扫一遍源码（make 闭包遇到从未编过的模块时用）。
+/// 有清单的模块直接读 `Manifest.ext`，不走这里。
+pub fn module_ext_refs(layout: &ModuleLayout) -> ExtRefs {
+    let mut ext = ExtRefs::default();
+    for p in layout.collect_sources() {
+        if let Some(s) = source_stamp(layout, &p, true) {
+            ext.merge(&s.ext);
+        }
+    }
+    ext
 }
 
 /// 某源文件在产物目录里对应的 class（`Outer.class` + `Outer$*.class`）。
@@ -1447,28 +1687,45 @@ mod tests {
     }
 
     #[test]
-    fn abi_ignores_method_bodies_comments_and_strings() {
-        let a = "package p;\npublic class A { public void f() { int x = 1; } }";
-        let b = "package p;\n// x\npublic class A { public void f() { int y = 2; String s = \"public void g()\"; } }";
-        assert_eq!(abi_fingerprint(a), abi_fingerprint(b));
+    fn ext_refs_collects_imports_packages_and_mentioned_names() {
+        let src = "package p; import q.A; import r.*; public class B { A a; C c; }";
+        let clean = strip_comments_and_literals(src);
+        let deps = parse_deps_clean(&clean);
+        let ext = ext_refs(&clean, &deps);
+        assert_eq!(ext.fq, vec!["q.a".to_string()]);
+        assert_eq!(ext.wild, vec!["r".to_string()]);
+        assert_eq!(ext.packages, vec!["p".to_string()]);
+        // 正文大写开头标识符（小写归一）：同包 / 通配边的候选简单名
+        assert!(ext.simple.contains(&"a".to_string()));
+        assert!(ext.simple.contains(&"c".to_string()));
+        assert!(ext.simple.contains(&"b".to_string()));
+        // 注释 / 字符串里的大写词不算引用
+        let noisy = "package p; // import x.Y;\npublic class B { String s = \"Z\"; }";
+        let clean2 = strip_comments_and_literals(noisy);
+        let deps2 = parse_deps_clean(&clean2);
+        let ext2 = ext_refs(&clean2, &deps2);
+        assert!(ext2.fq.is_empty());
+        assert!(!ext2.simple.contains(&"y".to_string()));
+        assert!(!ext2.simple.contains(&"z".to_string()));
     }
 
     #[test]
-    fn abi_changes_with_signature_and_visibility() {
-        let a = "public class A { public void f(int x) {} }";
-        let b = "public class A { public void f(String x) {} }";
-        let c = "public class A { protected void f(int x) {} }";
-        assert_ne!(abi_fingerprint(a), abi_fingerprint(b));
-        assert_ne!(abi_fingerprint(a), abi_fingerprint(c));
-    }
-
-    #[test]
-    fn abi_includes_extends_and_public_fields() {
-        let a = "public class A extends B { public int x; }";
-        let b = "public class A extends C { public int x; }";
-        let c = "public class A extends B { public long x; }";
-        assert_ne!(abi_fingerprint(a), abi_fingerprint(b));
-        assert_ne!(abi_fingerprint(a), abi_fingerprint(c));
+    fn ext_refs_merge_is_sorted_union() {
+        let mut a = ExtRefs {
+            fq: vec!["q.b".into(), "q.a".into()],
+            wild: vec!["r".into()],
+            packages: vec!["p".into()],
+            simple: vec!["b".into()],
+        };
+        a.merge(&ExtRefs {
+            fq: vec!["q.a".into(), "s.c".into()],
+            wild: vec!["r".into(), "t".into()],
+            packages: vec!["p2".into()],
+            simple: vec!["a".into(), "b".into()],
+        });
+        assert_eq!(a.fq, vec!["q.a".to_string(), "q.b".into(), "s.c".into()]);
+        assert_eq!(a.wild, vec!["r".to_string(), "t".into()]);
+        assert_eq!(a.simple, vec!["a".to_string(), "b".into()]);
     }
 
     #[test]
@@ -1481,6 +1738,7 @@ mod tests {
             source_roots: vec!["src/public".into()],
             outputs: vec!["classes".into()],
             sources: vec![],
+            ext: ExtRefs::default(),
             classpath_fp: "a".into(),
             compiler_fp: "b".into(),
             seed_jars: vec![1, 2],
@@ -1548,10 +1806,14 @@ mod tests {
                 size: 1,
                 mtime_ms: 1,
                 package: "p".into(),
-                abi: None,
-                abi_stale: false,
+                hash: String::new(),
+                struct_fp: None,
+                struct_pending: false,
+                types: vec![],
+                ext: ExtRefs::default(),
                 classes: vec!["p/A.class".into()],
             }],
+            ext: ExtRefs::default(),
             classpath_fp: "a".into(),
             compiler_fp: "b".into(),
             seed_jars: vec![],
@@ -1596,6 +1858,7 @@ mod tests {
             source_roots: vec!["src/other".into()],
             outputs: vec!["classes".into()],
             sources: vec![],
+            ext: ExtRefs::default(),
             classpath_fp: "a".into(),
             compiler_fp: "b".into(),
             seed_jars: vec![],
@@ -1628,7 +1891,17 @@ mod tests {
         }
         let l = ModuleLayout::resolve(&root, "gl");
         let all = l.collect_sources();
-        let man = updated_manifest(&l, None, &all, "cp", "cc", vec![], true);
+        let man = updated_manifest(
+            &l,
+            None,
+            &all,
+            "cp",
+            "cc",
+            vec![],
+            true,
+            &HashMap::new(),
+            false,
+        );
         assert_eq!(decide(&l, Some(&man), "cp", "cc", false), Decision::Skip);
 
         // 只改方法体：只编 A
@@ -1644,30 +1917,123 @@ mod tests {
             other => panic!("expected incremental, got {other:?}"),
         }
 
-        // 改签名：B 被连带
+        // 改签名：第一轮仍只编 A——引用方要不要跟，是编译后 class 结构 diff 的事，
+        // 决策阶段不猜（旧源码 ABI 在这里猜，常把「只改方法体」也当成签名变化）
         write(
             &m.join("src/public/p/A.java"),
             "package p; public class A { public void f(int x) {} }",
         );
         match decide(&l, Some(&man), "cp", "cc", false) {
-            Decision::Incremental { files, .. } => assert_eq!(files.len(), 2),
-            other => panic!("expected incremental with referrer, got {other:?}"),
+            Decision::Incremental { files, .. } => {
+                assert_eq!(files.len(), 1);
+                assert!(build_layout::slash(&files[0]).ends_with("p/A.java"));
+            }
+            other => panic!("expected incremental, got {other:?}"),
         }
 
-        // 新增文件：全量
+        // 新增文件：进第一轮增量，不再一律全量（Eclipse 队列模型）
         write(
             &m.join("src/public/p/C.java"),
             "package p; public class C {}",
         );
-        assert!(matches!(
-            decide(&l, Some(&man), "cp", "cc", false),
-            Decision::Full { .. }
-        ));
+        match decide(&l, Some(&man), "cp", "cc", false) {
+            Decision::Incremental { files, removed, .. } => {
+                assert!(files
+                    .iter()
+                    .any(|p| build_layout::slash(p).ends_with("p/C.java")));
+                assert!(removed.is_empty());
+            }
+            other => panic!("expected incremental with added file, got {other:?}"),
+        }
         // 配置变化：全量
         assert!(matches!(
             decide(&l, Some(&man), "other", "cc", false),
             Decision::Full { .. }
         ));
+    }
+
+    #[test]
+    fn decision_touch_with_same_hash_skips_and_pending_forces_round() {
+        let root = tmp("decide-touch");
+        let m = root.join("gl");
+        let a = m.join("src/public/p/A.java");
+        write(&a, "package p; public class A { public void f() {} }");
+        let l = ModuleLayout::resolve(&root, "gl");
+        let man = updated_manifest(
+            &l,
+            None,
+            &l.collect_sources(),
+            "cp",
+            "cc",
+            vec![],
+            true,
+            &HashMap::new(),
+            false,
+        );
+        assert!(!man.sources[0].hash.is_empty(), "全量清单应记内容哈希");
+
+        // touch（SVN 更新 / 外部工具重写同样内容）：stat 变了哈希没变 → Skip
+        write(&a, "package p; public class A { public void f() {} }");
+        assert_eq!(decide(&l, Some(&man), "cp", "cc", false), Decision::Skip);
+        // Skip 后把新 stat 刷回清单，下次不再重复读文件
+        let refreshed = touch_refresh(&l, &man).expect("touch 应触发 stat 刷新");
+        let (size, mtime) = (std::fs::metadata(&a).unwrap().len(), stat_of(&a).1);
+        assert_eq!(refreshed.sources[0].size, size);
+        assert_eq!(refreshed.sources[0].mtime_ms, mtime);
+        assert_eq!(
+            decide(&l, Some(&refreshed), "cp", "cc", false),
+            Decision::Skip
+        );
+        assert!(touch_refresh(&l, &refreshed).is_none(), "刷过的不该再刷");
+
+        // struct_pending（保存快速编译留下的待判定）：哈希相同也必须进编译轮
+        let mut pending = man.clone();
+        pending.sources[0].struct_pending = true;
+        match decide(&l, Some(&pending), "cp", "cc", false) {
+            Decision::Incremental { files, .. } => assert_eq!(files.len(), 1),
+            other => panic!("pending must force a compile round, got {other:?}"),
+        }
+        // pending 文件不能被 touch_refresh 静默抹平
+        assert!(touch_refresh(&l, &pending).is_none());
+    }
+
+    #[test]
+    fn decision_reports_removed_with_old_types() {
+        let root = tmp("decide-rm");
+        let m = root.join("gl");
+        write(
+            &m.join("src/public/p/A.java"),
+            "package p; public class A { public int x; }",
+        );
+        write(
+            &m.join("src/public/p/B.java"),
+            "package p; public class B { A a; }",
+        );
+        let l = ModuleLayout::resolve(&root, "gl");
+        let man = updated_manifest(
+            &l,
+            None,
+            &l.collect_sources(),
+            "cp",
+            "cc",
+            vec![],
+            true,
+            &HashMap::new(),
+            false,
+        );
+        let a_stamp = man.sources.iter().find(|s| s.rel == "p/A.java").unwrap();
+        assert_eq!(a_stamp.types, vec!["A".to_string()]);
+        std::fs::remove_file(m.join("src/public/p/A.java")).unwrap();
+        match decide(&l, Some(&man), "cp", "cc", false) {
+            Decision::Incremental { files, removed, .. } => {
+                assert!(files.is_empty(), "只删除时第一轮没有文件要编");
+                assert_eq!(removed.len(), 1);
+                assert_eq!(removed[0].package, "p");
+                assert_eq!(removed[0].types, vec!["A".to_string()]);
+                assert!(build_layout::slash(&removed[0].path).ends_with("p/A.java"));
+            }
+            other => panic!("expected incremental with removed, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1686,7 +2052,17 @@ mod tests {
         write(&m.join("classes/p/A.class"), "x");
         write(&m.join("classes/p/B.class"), "x");
         let l = ModuleLayout::resolve(&root, "gl");
-        let prev = updated_manifest(&l, None, &l.collect_sources(), "cp", "cc", vec![], true);
+        let prev = updated_manifest(
+            &l,
+            None,
+            &l.collect_sources(),
+            "cp",
+            "cc",
+            vec![],
+            true,
+            &HashMap::new(),
+            false,
+        );
         assert_eq!(prev.sources.len(), 2);
         std::fs::remove_file(m.join("src/public/p/B.java")).unwrap();
         let next = updated_manifest(
@@ -1697,6 +2073,8 @@ mod tests {
             "cc",
             vec![],
             true,
+            &HashMap::new(),
+            false,
         );
         let stale = stale_classes(&l, &prev, &next);
         assert_eq!(stale.len(), 1);
@@ -1761,7 +2139,7 @@ mod tests {
     }
 
     #[test]
-    fn changed_against_manifest_detects_body_and_signature_edits() {
+    fn changed_against_manifest_detects_edits_and_ignores_touch() {
         let root = tmp("changed-ab");
         let m = root.join("gl");
         let a = m.join("src/public/p/A.java");
@@ -1771,28 +2149,140 @@ mod tests {
         );
         let l = ModuleLayout::resolve(&root, "gl");
         let files = l.collect_sources();
-        let prev = updated_manifest(&l, None, &files, "cp", "cc", vec![], true);
+        let prev = updated_manifest(
+            &l,
+            None,
+            &files,
+            "cp",
+            "cc",
+            vec![],
+            true,
+            &HashMap::new(),
+            false,
+        );
 
-        let (changed, abi) = changed_against_manifest(&l, Some(&prev), &files);
-        assert!(changed.is_empty() && !abi, "没改不该报变化");
+        let changed = changed_against_manifest(&l, Some(&prev), &files);
+        assert!(changed.is_empty(), "没改不该报变化");
 
-        // 只改方法体：有改动、签名没变
+        // touch：重写同样内容（stat 变、哈希不变）不算变
+        write(
+            &a,
+            "package p; public class A { public int f() { return 1; } }",
+        );
+        assert!(changed_against_manifest(&l, Some(&prev), &files).is_empty());
+
+        // 只改方法体：有改动（结构变没变由编译后的 class 指纹判，这里不猜）
         write(
             &a,
             "package p; public class A { public int f() { return 10; } }",
         );
-        let (changed, abi) = changed_against_manifest(&l, Some(&prev), &files);
+        let changed = changed_against_manifest(&l, Some(&prev), &files);
         assert_eq!(changed.len(), 1);
-        assert!(!abi);
 
-        // 改返回类型：签名变了
+        // struct_pending：哈希相同也要报变化（必须进编译轮补结构判定）
         write(
             &a,
-            "package p; public class A { public long f() { return 10; } }",
+            "package p; public class A { public int f() { return 1; } }",
         );
-        let (changed, abi) = changed_against_manifest(&l, Some(&prev), &files);
-        assert_eq!(changed.len(), 1);
-        assert!(abi);
+        let mut pending = prev.clone();
+        pending.sources[0].struct_pending = true;
+        assert_eq!(
+            changed_against_manifest(&l, Some(&pending), &files).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn preserve_struct_keeps_old_fp_and_marks_pending() {
+        let root = tmp("preserve");
+        let m = root.join("gl");
+        let a = m.join("src/public/p/A.java");
+        write(&a, "package p; public class A { public void f() {} }");
+        let l = ModuleLayout::resolve(&root, "gl");
+        let files = l.collect_sources();
+        let key = source_stamp(&l, &a, false).unwrap().key();
+        let mut fps = HashMap::new();
+        fps.insert(key.clone(), Some("fp-old".to_string()));
+        let prev = updated_manifest(&l, None, &files, "cp", "cc", vec![], true, &fps, false);
+        assert_eq!(prev.sources[0].struct_fp.as_deref(), Some("fp-old"));
+        assert!(!prev.sources[0].struct_pending);
+
+        // 保存快速编译（preserve_struct=true）：改了源码也不能把新指纹写进去，
+        // 否则空闲增量永远看不见「结构变了」
+        write(&a, "package p; public class A { public void f(int x) {} }");
+        let fast = updated_manifest(
+            &l,
+            Some(&prev),
+            &files,
+            "cp",
+            "cc",
+            vec![],
+            false,
+            &HashMap::new(),
+            true,
+        );
+        assert_eq!(fast.sources[0].struct_fp.as_deref(), Some("fp-old"));
+        assert!(fast.sources[0].struct_pending);
+
+        // 空闲增量（preserve_struct=false）：写真值、清 pending
+        let mut fps2 = HashMap::new();
+        fps2.insert(key, Some("fp-new".to_string()));
+        let idle = updated_manifest(
+            &l,
+            Some(&fast),
+            &files,
+            "cp",
+            "cc",
+            vec![],
+            false,
+            &fps2,
+            false,
+        );
+        assert_eq!(idle.sources[0].struct_fp.as_deref(), Some("fp-new"));
+        assert!(!idle.sources[0].struct_pending);
+
+        // 桥失败（fps 里是 None）：指纹置空 = 未知，下一轮按「可能变了」处理
+        let mut fps3 = HashMap::new();
+        fps3.insert(source_stamp(&l, &a, false).unwrap().key(), None);
+        let unknown = updated_manifest(
+            &l,
+            Some(&idle),
+            &files,
+            "cp",
+            "cc",
+            vec![],
+            false,
+            &fps3,
+            false,
+        );
+        assert!(unknown.sources[0].struct_fp.is_none());
+        assert!(!unknown.sources[0].struct_pending);
+    }
+
+    #[test]
+    fn schema1_manifest_is_invalidated() {
+        let d = tmp("schema1");
+        let mut m = Manifest {
+            schema: 1,
+            workspace: "C:/ws".into(),
+            module: "gl".into(),
+            source_roots: vec!["src/public".into()],
+            outputs: vec!["classes".into()],
+            sources: vec![],
+            ext: ExtRefs::default(),
+            classpath_fp: "a".into(),
+            compiler_fp: "b".into(),
+            seed_jars: vec![],
+            last_success_ms: 1,
+            last_attempt: None,
+        };
+        let p = d.join("gl.bin");
+        write_manifest(&p, &m).unwrap();
+        // 旧 schema（源码 ABI 时代）一律作废 → 调用方走全量，不能拿旧指纹当 class 指纹用
+        assert!(read_manifest(&p, Path::new("C:/ws"), "gl").is_none());
+        m.schema = SCHEMA;
+        write_manifest(&p, &m).unwrap();
+        assert!(read_manifest(&p, Path::new("C:/ws"), "gl").is_some());
     }
 
     #[test]
@@ -1817,10 +2307,14 @@ mod tests {
                 size: 1,
                 mtime_ms: 1,
                 package: "p".into(),
-                abi: None,
-                abi_stale: false,
+                hash: String::new(),
+                struct_fp: None,
+                struct_pending: false,
+                types: vec![],
+                ext: ExtRefs::default(),
                 classes: vec!["../../outside.class".into()],
             }],
+            ext: ExtRefs::default(),
             classpath_fp: "a".into(),
             compiler_fp: "b".into(),
             seed_jars: vec![],
@@ -1833,5 +2327,272 @@ mod tests {
         assert_eq!(r.removed, 0);
         assert!(!r.failed.is_empty());
         assert!(outside.exists());
+    }
+
+    // ───────────── decide_with_hint：脏集增量 stat ─────────────
+
+    fn hint_setup(tag: &str) -> (PathBuf, ModuleLayout, Vec<PathBuf>, Manifest) {
+        let root = tmp(tag);
+        let m = root.join("gl");
+        write(
+            &m.join("src/public/p/A.java"),
+            "package p; public class A { public int x; }",
+        );
+        write(
+            &m.join("src/public/p/B.java"),
+            "package p; public class B { public int y; }",
+        );
+        let l = ModuleLayout::resolve(&root, "gl");
+        let files = l.collect_sources();
+        let man = updated_manifest(
+            &l,
+            None,
+            &files,
+            "cp",
+            "cc",
+            vec![],
+            true,
+            &HashMap::new(),
+            false,
+        );
+        (root, l, files, man)
+    }
+
+    fn hint(paths: Vec<PathBuf>, reliable: bool) -> crate::compile_dirty::DirtyHint {
+        crate::compile_dirty::DirtyHint { paths, reliable }
+    }
+
+    #[test]
+    fn 脏集可靠_空集直接skip() {
+        let (_root, l, _files, man) = hint_setup("hint-empty");
+        let d = decide_with_hint(&l, Some(&man), "cp", "cc", false, Some(&hint(vec![], true)));
+        assert_eq!(d, Decision::Skip, "可靠空脏集应直接 Skip，不扫全模块");
+    }
+
+    #[test]
+    fn 脏集可靠_只编脏文件() {
+        let (root, l, files, man) = hint_setup("hint-one");
+        let a = root.join("gl/src/public/p/A.java");
+        write(
+            &a,
+            "package p; public class A { public int x; public int z; }",
+        );
+        let d = decide_with_hint(
+            &l,
+            Some(&man),
+            "cp",
+            "cc",
+            false,
+            Some(&hint(vec![a.clone()], true)),
+        );
+        match d {
+            Decision::Incremental { files, .. } => {
+                assert_eq!(files, vec![a], "只应编脏集里的 A");
+            }
+            other => panic!("应增量，got {other:?}"),
+        }
+        let _ = files;
+    }
+
+    #[test]
+    fn 脏集不可信_回落全扫抓全部改动() {
+        // 核心正确性守卫：hint 不可信时即便只报了 A，全扫也必须把 B 的改动一起抓出来。
+        let (root, l, _files, man) = hint_setup("hint-unreliable");
+        let a = root.join("gl/src/public/p/A.java");
+        let b = root.join("gl/src/public/p/B.java");
+        write(
+            &a,
+            "package p; public class A { public int x; public int z; }",
+        );
+        write(
+            &b,
+            "package p; public class B { public int y; public int w; }",
+        );
+        let d = decide_with_hint(
+            &l,
+            Some(&man),
+            "cp",
+            "cc",
+            false,
+            Some(&hint(vec![a.clone()], false)),
+        );
+        match d {
+            Decision::Incremental { mut files, .. } => {
+                files.sort();
+                let mut want = vec![a, b];
+                want.sort();
+                assert_eq!(files, want, "不可信必须全扫，A/B 都抓到");
+            }
+            other => panic!("应全扫增量，got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 脏集可靠_删除被识别() {
+        let (root, l, _files, man) = hint_setup("hint-remove");
+        let a = root.join("gl/src/public/p/A.java");
+        std::fs::remove_file(&a).unwrap();
+        let d = decide_with_hint(
+            &l,
+            Some(&man),
+            "cp",
+            "cc",
+            false,
+            Some(&hint(vec![a.clone()], true)),
+        );
+        match d {
+            Decision::Incremental { files, removed, .. } => {
+                assert!(files.is_empty(), "只删除时没有文件要编");
+                assert_eq!(removed.len(), 1);
+                assert!(removed[0].path.ends_with("A.java"));
+            }
+            other => panic!("应识别删除，got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 脏集可靠_新增被识别() {
+        let (root, l, _files, man) = hint_setup("hint-add");
+        let c = root.join("gl/src/public/p/C.java");
+        write(&c, "package p; public class C {}");
+        let d = decide_with_hint(
+            &l,
+            Some(&man),
+            "cp",
+            "cc",
+            false,
+            Some(&hint(vec![c.clone()], true)),
+        );
+        match d {
+            Decision::Incremental { files, .. } => assert_eq!(files, vec![c]),
+            other => panic!("应识别新增，got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 脏集可靠_只信脏集_漏报的不发现() {
+        // 钉住信任边界：可靠增量只看脏集，B 改了但不在脏集里就不发现——
+        // 这正是「可靠」二字的分量，溢出/丢事件必须经 epoch 作废基线回落全扫。
+        let (root, l, _files, man) = hint_setup("hint-trust");
+        let a = root.join("gl/src/public/p/A.java");
+        let b = root.join("gl/src/public/p/B.java");
+        write(
+            &a,
+            "package p; public class A { public int x; public int z; }",
+        );
+        write(
+            &b,
+            "package p; public class B { public int y; public int w; }",
+        );
+        let d = decide_with_hint(
+            &l,
+            Some(&man),
+            "cp",
+            "cc",
+            false,
+            Some(&hint(vec![a.clone()], true)),
+        );
+        match d {
+            Decision::Incremental { files, .. } => {
+                assert_eq!(files, vec![a], "可靠增量只编脏集里的 A");
+                assert!(!files.contains(&b), "B 不在脏集，增量不发现（信任边界）");
+            }
+            other => panic!("应增量，got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hint为none_走全扫() {
+        let (root, l, _files, man) = hint_setup("hint-none");
+        let a = root.join("gl/src/public/p/A.java");
+        write(
+            &a,
+            "package p; public class A { public int x; public int z; }",
+        );
+        let d = decide_with_hint(&l, Some(&man), "cp", "cc", false, None);
+        match d {
+            Decision::Incremental { files, .. } => assert_eq!(files, vec![a]),
+            other => panic!("None hint 应全扫增量，got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 并行scan与串行结果一致() {
+        let root = tmp("scan-par");
+        let m = root.join("gl");
+        for i in 0..12 {
+            write(
+                &m.join(format!("src/public/p/C{i}.java")),
+                &format!("package p; public class C{i} {{ public int v = {i}; }}"),
+            );
+        }
+        let l = ModuleLayout::resolve(&root, "gl");
+        let sources = l.collect_sources();
+        for details in [false, true] {
+            let serial = scan_with(&l, &sources, details, 1);
+            let parallel = scan_with(&l, &sources, details, 4);
+            assert_eq!(
+                serial, parallel,
+                "details={details} 并行必须与串行逐字段一致"
+            );
+            assert_eq!(serial.len(), 12);
+        }
+    }
+
+    #[test]
+    fn 脏集增量全流程_基线后只查脏文件_溢出回落() {
+        use crate::compile_dirty as cd;
+        let (root, l, _files, man) = hint_setup("hint-flow");
+        let rs = l.source_roots.clone();
+        let a = root.join("gl/src/public/p/A.java");
+        let b = root.join("gl/src/public/p/B.java");
+        // 启动作废 → 不可信 → 全扫（无变更）→ 建基线
+        cd::invalidate(&root);
+        assert!(!cd::hint(&root, "gl", &rs).reliable);
+        let d = decide_with_hint(
+            &l,
+            Some(&man),
+            "cp",
+            "cc",
+            false,
+            Some(&cd::hint(&root, "gl", &rs)),
+        );
+        assert_eq!(d, Decision::Skip);
+        cd::baseline(&root, "gl", &rs);
+        // 基线后可靠空脏集 → 直接 Skip（不扫）
+        let h = cd::hint(&root, "gl", &rs);
+        assert!(h.reliable && h.paths.is_empty());
+        assert_eq!(
+            decide_with_hint(&l, Some(&man), "cp", "cc", false, Some(&h)),
+            Decision::Skip
+        );
+        // 改 A + mark → 可靠增量只编 A → consume → 又空
+        write(
+            &a,
+            "package p; public class A { public int x; public int z; }",
+        );
+        cd::mark(&root, std::slice::from_ref(&a), false, false);
+        let h = cd::hint(&root, "gl", &rs);
+        assert!(h.reliable && h.paths == vec![a.clone()]);
+        match decide_with_hint(&l, Some(&man), "cp", "cc", false, Some(&h)) {
+            Decision::Incremental { files, .. } => assert_eq!(files, vec![a.clone()]),
+            other => panic!("应增量编 A，got {other:?}"),
+        }
+        cd::consume(&root, std::slice::from_ref(&a));
+        assert!(cd::hint(&root, "gl", &rs).paths.is_empty());
+        // 溢出 → 基线作废；此时改了 B（不在脏集）→ 不可信回落全扫必须抓到 B
+        cd::mark(&root, &[], true, false);
+        write(
+            &b,
+            "package p; public class B { public int y; public int w; }",
+        );
+        let h = cd::hint(&root, "gl", &rs);
+        assert!(!h.reliable, "溢出后必须不可信");
+        match decide_with_hint(&l, Some(&man), "cp", "cc", false, Some(&h)) {
+            Decision::Incremental { files, .. } => {
+                assert!(files.contains(&b), "回落全扫要抓到 B：{files:?}")
+            }
+            other => panic!("溢出回落应全扫增量，got {other:?}"),
+        }
     }
 }
