@@ -40,6 +40,9 @@ describe("已选集合归一", () => {
     const n = items.filter(it => matchesSvnFilter(it, "picked", new Set(), picked)).length;
     const ms = performance.now() - t;
     expect(n).toBe(3000);
-    expect(ms).toBeLessThan(10 * 3); // 留余量；改前是 O(行×已选) 约 900 万次 keyOf
+    // 防御目标是 O(行×已选) 的二次方回归（改前约 900 万次 keyOf ≈ 秒级），不是绝对性能。
+    // 30ms 的余量在全量套件（598 文件并行）满负载下会被调度延迟打穿（2026-11-19 实测
+    // 34.1ms 假红，单跑 3/3 稳定通过）；100ms 仍能抓住秒级回归。
+    expect(ms).toBeLessThan(100);
   });
 });
