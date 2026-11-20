@@ -5,8 +5,6 @@ import type { monaco } from "./monacoSetup";
 const h = vi.hoisted(() => ({
   enabled: true,
   providers: new Set<monaco.languages.CodeActionProvider>(),
-  scope: undefined as unknown,
-  analysis: { tokens: [{ kind: "identifier", text: "po_order", start: 0, end: 8 }], roles: new Map(), scopes: [], regions: [] } as Record<string, unknown>,
   columns: {
     po_order: [{ name: "vbillcode", full: "VARCHAR2(40)", pk: false }, { name: "pk_order", full: "CHAR(20)", pk: true }],
     po_order_b: [{ name: "pk_order", full: "CHAR(20)", pk: false }],
@@ -23,18 +21,12 @@ vi.mock("./monacoSetup", () => ({ monaco: {
     ({ startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column }) },
   languages: { registerCodeActionProvider: (_: string, p: monaco.languages.CodeActionProvider) => { h.providers.add(p); return { dispose: () => h.providers.delete(p) }; } },
 } }));
-vi.mock("./monacoSql", () => ({
-  dialectOfSqlModel: () => "plsql", SQL_LANGUAGE_IDS: ["sql"],
-  sqlAnalysisOf: () => h.analysis,
-}));
+vi.mock("./monacoSql", async () => {
+  const { analyzeSql } = await import("./sqlScope");
+  return { dialectOfSqlModel: () => "plsql", SQL_LANGUAGE_IDS: ["sql"],
+    sqlAnalysisOf: (model: monaco.editor.ITextModel) => analyzeSql(model.getValue(), "plsql") };
+});
 vi.mock("./sqlTemplates", async (orig) => ({ ...(await orig<typeof import("./sqlTemplates")>()), getSqlTemplatesEnabled: () => h.enabled }));
-// 🔴 真实 `sqlScopeAt` 返回的 Scope **自带 sources**（sqlScope.ts:155-159）。
-// 夹具以前只给 `{start,end}`、把 sources 单独挂在 analysis.scopes 上，与真实结构不一致：
-// 按 scope.sources 判「已 JOIN 过哪些表」的代码会在这种夹具下永远读到空。
-vi.mock("./sqlScope", () => ({
-  sqlScopeAt: () => h.scope,
-  sqlSourcesAt: () => (h.scope as { sources?: unknown[] } | undefined)?.sources ?? [],
-}));
 vi.mock("./sqlUsage", () => ({ sqlUsageScope: () => "scope" }));
 vi.mock("./dbResultContext", () => ({ connectionKey: () => "id" }));
 vi.mock("./sqlModels", () => ({ tabIdOfModel: () => "t1" }));
@@ -47,12 +39,11 @@ vi.mock("./dbStore", () => ({
     tables: [{ name: "po_order" }, { name: "po_order_b" }], ncNames: { po_order: "采购订单", po_order_b: "采购订单明细" } }),
 }));
 
-import { clearBillActionCache, wireSqlBillAssist } from "./sqlBillAssist";
+import { clearBillActionCache, wireSqlBillAssist, type SqlCodeAction } from "./sqlBillAssist";
 
 const cleanups: (() => void)[] = [];
 beforeEach(() => {
-  h.enabled = true; h.scope = undefined;
-  h.analysis = { tokens: [{ kind: "identifier", text: "po_order", start: 0, end: 8 }], roles: new Map(), scopes: [], regions: [] };
+  h.enabled = true;
   h.meta = { ...h.meta, relations: [{ id: "外键 · FK_ORDER_B", source: "po_order_b", target: "po_order", from: ["pk_order"], to: ["pk_order"], kind: "外键" }] } as never;
   h.providers.clear(); clearBillActionCache();
 });
@@ -76,17 +67,6 @@ const ask = (model: monaco.editor.ITextModel, column = 5, cancelled = false) => 
   return providers[providers.length - 1].provideCodeActions(model, at(column), {} as monaco.languages.CodeActionContext, { isCancellationRequested: cancelled } as monaco.CancellationToken);
 };
 
-/**
- * 统一设置「光标所在 scope」与 analysis，两者 sources 必须一致。
- * 真实 sqlScopeAt 返回的 Scope 自带 sources，夹具分两份写就会读到空。
- */
-function inScope(sources: { declaration: number; name?: string; table?: string }[], end = 200) {
-  h.scope = { start: 0, end, sources };
-  h.analysis = { tokens: [{ kind: "identifier", text: "po_order", start: 14, end: 22 }], roles: new Map(),
-    scopes: [{ sources }], regions: [] };
-}
-const MAIN = [{ declaration: 0, table: "po_order" }];
-
 it("光标停在裸表名上时给一条联查，替换的是表名本身", async () => {
   const model = fake(), result = await ask(model);
   expect(result?.actions).toHaveLength(1);
@@ -100,14 +80,13 @@ it("光标停在裸表名上时给一条联查，替换的是表名本身", asyn
 
 // 语句内的别名、字段、CTE 都推不出「要接哪张子表」，也不是表声明：不给，免得追加到词中间。
 it("语句内非表声明的位置不给（别名、字段、CTE）", async () => {
-  h.scope = { start: 0, end: 20, sources: [] };
-  expect((await ask(fake()))?.actions).toEqual([]);
+  const sql = "SELECT o.pk_order FROM po_order o";
+  expect((await ask(fake(sql), sql.indexOf("pk_order") + 2))?.actions).toEqual([]);
 });
 
 // 🔴 这条是 2026-11-14 修的死入口：`SELECT * FROM po_order` 上的 chip 和补全列表里的
 // 动作项都能点，但 CodeAction 原先在该位置返回空 → 点下去只是弹一个空菜单。
 it("语句内的表名上只追加 JOIN，不动用户写好的 SELECT", async () => {
-  inScope(MAIN);
   const result = await ask(fake("select * from po_order"), 19);
   expect(result?.actions).toHaveLength(1);
   expect(result?.actions[0].title).toBe("追加 LEFT JOIN：采购订单明细");
@@ -118,25 +97,17 @@ it("语句内的表名上只追加 JOIN，不动用户写好的 SELECT", async (
 });
 
 it("预览与实际插入使用主表别名，并把 LEFT JOIN 放在已有别名之后", async () => {
-  const { analyzeSql } = await vi.importActual<typeof import("./sqlScope")>("./sqlScope");
   const sql = "SELECT * FROM po_order o WHERE o.vbillcode = '1'";
-  const analysis = analyzeSql(sql, "plsql");
-  h.analysis = { ...analysis };
-  h.scope = analysis.scopes[0];
   const result = await ask(fake(sql), sql.indexOf("po_order") + 1);
   const action = result?.actions[0];
   const text = " LEFT JOIN po_order_b ON po_order_b.pk_order = o.pk_order";
-  expect(action).toMatchObject({ ncforgeJoin: { group: "detail", sql: text }, edit: { edits: [{
+  expect(action).toMatchObject({ ncforgeJoin: { group: "detail", sql: text.trim() }, edit: { edits: [{
     textEdit: { text, range: { startColumn: sql.indexOf(" WHERE") + 1, endColumn: sql.indexOf(" WHERE") + 1 } },
   }] } });
 });
 
 it("从已有 JOIN 的表继续联查时，在完整的 ON 字符串条件后追加", async () => {
-  const { analyzeSql } = await vi.importActual<typeof import("./sqlScope")>("./sqlScope");
   const sql = "SELECT * FROM org x JOIN po_order o ON x.id = o.org AND o.status = 'WHERE' WHERE x.enabled = 1";
-  const analysis = analyzeSql(sql, "plsql");
-  h.analysis = { ...analysis };
-  h.scope = analysis.scopes[0];
   const result = await ask(fake(sql), sql.indexOf("po_order") + 1);
   const insertion = sql.indexOf(" WHERE x.enabled") + 1;
   expect(result?.actions[0]).toMatchObject({ edit: { edits: [{ textEdit: {
@@ -148,21 +119,14 @@ it("从已有 JOIN 的表继续联查时，在完整的 ON 字符串条件后追
 // 补全列表里的动作项按「光标前的词」判定；CodeAction 若只认「光标压着的词」，
 // 用户打完表名多敲一个空格就会点出空菜单。
 it("光标停在表名后的空格上也认", async () => {
-  inScope(MAIN);
   const result = await ask(fake("select * from po_order "), 24);
   expect(result?.actions.map(a => a.title)).toEqual(["追加 LEFT JOIN：采购订单明细"]);
-});
-
-it("已经 JOIN 过这张子表时不再追加第二条", async () => {
-  inScope([...MAIN, { declaration: 1, name: "po_order_b", table: "po_order_b" }]);
-  expect((await ask(fake("select * from po_order left join po_order_b b on 1=1"), 19))?.actions).toEqual([]);
 });
 
 // 🔴 「已经 JOIN 过」必须按**已解析的表声明**精确相等判，不能拿全文 includes：
 // 字符串常量、注释、以及前缀包含（po_order_b vs po_order_bak）都会误判成「已 JOIN」，
 // 于是该给的追加动作消失。旧实现还判整个 model 而非当前 scope。
 it("子表名只出现在字符串/注释里时仍然给追加动作", async () => {
-  inScope(MAIN);
   for (const sql of [
     "select * from po_order where note = 'po_order_b'",
     "select * from po_order -- po_order_b 待接",
@@ -174,17 +138,60 @@ it("子表名只出现在字符串/注释里时仍然给追加动作", async () 
 });
 
 it("前缀相同的另一张表不算已 JOIN（po_order_b ≠ po_order_bak）", async () => {
-  inScope(MAIN);
   const sql = "select * from po_order left join po_order_bak k on 1=1";
   expect((await ask(fake(sql), 19))?.actions.map(a => a.title)).toEqual(["追加 LEFT JOIN：采购订单明细"]);
 });
 
-it("真 JOIN 过就不再追加，且按解析出的表名判（大小写与 schema 前缀都要认）", async () => {
+it("按 ON 条件标出已添加的具体关系，兼容倒序等式、大小写和同 schema 前缀", async () => {
   for (const joined of ["po_order_b", "PO_ORDER_B", "nc65.po_order_b"]) {
-    inScope([...MAIN, { declaration: 1, name: joined, table: joined }]);
-    const sql = `select * from po_order left join ${joined} b on 1=1`;
-    expect((await ask(fake(sql), 19))?.actions, joined).toEqual([]);
+    const sql = `select * from po_order o left join ${joined} b on (o.pk_order = B.PK_ORDER) where o.dr = 0`;
+    const [action] = (await ask(fake(sql), 19))!.actions as SqlCodeAction[];
+    expect(action.ncforgeJoin).toBeUndefined();
+    expect(action.ncforgeJoinBatch?.added.map(item => item.table), joined).toEqual(["po_order_b"]);
   }
+});
+
+it("同表不同关系使用不同别名，批量预览保留两个完整的 ON 条件", async () => {
+  const relations = h.meta!.relations as Record<string, unknown>[];
+  h.meta = { ...h.meta, relations: [...relations, { ...relations[0], id: "外键 · FK_OTHER", from: ["pk_order", "bill_type"], to: ["other_id", "bill_type"] }] };
+  const sql = "SELECT o.* FROM po_order o WHERE o.dr = 0";
+  const actions = (await ask(fake(sql), sql.indexOf("po_order") + 2))!.actions as SqlCodeAction[];
+  const choices = actions.map(action => action.ncforgeJoin!);
+  const batch = actions[0].ncforgeJoinBatch!;
+  expect(batch.sources).toEqual([{ id: expect.any(Number), label: "po_order o" }]);
+  expect(batch.clause).toBe("WHERE");
+  expect(batch.preview(choices)).toBe("LEFT JOIN po_order_b po_order_b_pk_order\n  ON po_order_b_pk_order.pk_order = o.pk_order\n"
+    + "LEFT JOIN po_order_b po_order_b_other_id\n  ON po_order_b_other_id.pk_order = o.other_id AND po_order_b_other_id.bill_type = o.bill_type");
+  const existing = "SELECT o.* FROM po_order o LEFT JOIN po_order_b b ON b.pk_order = o.other_id WHERE o.dr = 0";
+  const partial = (await ask(fake(existing), existing.indexOf("po_order") + 2))!.actions as SqlCodeAction[];
+  expect(partial).toHaveLength(2);
+  expect(partial[0].ncforgeJoinBatch?.added).toEqual([]);
+});
+
+it("第三张表的 ON 中比较前两张表的字段时，不把它们标为已添加", async () => {
+  const sql = "SELECT o.* FROM po_order o LEFT JOIN po_order_b b ON b.pk_order = o.other_id "
+    + "LEFT JOIN org x ON x.id = b.org_id AND b.pk_order = o.pk_order";
+  const [action] = (await ask(fake(sql), sql.indexOf("po_order") + 2))!.actions as SqlCodeAction[];
+  expect(action.ncforgeJoin?.rootColumns).toEqual(["pk_order"]);
+  expect(action.ncforgeJoinBatch?.added).toEqual([]);
+});
+
+it("从主表添加时越过已有 JOIN，保留行尾注释、CRLF 和后续语句", async () => {
+  const sql = "SELECT o.* FROM po_order o LEFT JOIN org x ON x.status = 'LEFT JOIN' -- 保留原条件\r\nWHERE o.dr=0;\r\nSELECT 1 FROM dual";
+  const [action] = (await ask(fake(sql), sql.indexOf("po_order") + 2))!.actions;
+  expect(action.edit?.edits[0]).toMatchObject({ textEdit: { range: { startColumn: sql.indexOf("\r\n") + 1 },
+    text: "\nLEFT JOIN po_order_b\n  ON po_order_b.pk_order = o.pk_order" } });
+});
+
+it.each(["GROUP BY o.pk_order", "ORDER BY o.pk_order", "FOR UPDATE"])("把 JOIN 插在 %s 前", async clause => {
+  const head = "SELECT o.pk_order FROM po_order o";
+  const sql = head + " " + clause;
+  const [action] = (await ask(fake(sql), sql.indexOf("po_order") + 2))!.actions as SqlCodeAction[];
+  expect(action.ncforgeJoinBatch?.clause).toBe(clause.split(" ")[0]);
+  expect(action.edit?.edits[0]).toMatchObject({ textEdit: {
+    range: { startColumn: head.length + 1, endColumn: head.length + 1 },
+    text: " LEFT JOIN po_order_b ON po_order_b.pk_order = o.pk_order",
+  } });
 });
 
 it("主表没有单号字段时不硬凑一条要用户自己补条件的 SQL", async () => {

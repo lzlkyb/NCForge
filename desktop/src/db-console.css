@@ -83,12 +83,13 @@
 .dbx-console-main { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: auto; position: relative; }
 /* 空 SQL 页的一行提示：绝对定位浮在右上角，不占编辑器高度、不挡输入。 */
 .dbx-sql-empty-hint { position: absolute; top: 10px; right: 16px; z-index: 1; pointer-events: none; color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); opacity: 0.75; }
+.dbx-console-main:has(.wb-editor-host[data-sql-has-text]) > .dbx-sql-empty-hint { display:none; }
 .dbx-sql-empty-hint kbd { padding: 0 4px; border: 1px solid hsl(var(--border)); border-radius: 3px; font-family: var(--font-mono); font-size: 10px; }
 .dbx-editor { flex: 1; min-height: 140px; min-width: 0; position: relative; }
 .dbx-editor .wb-editor-host { position: absolute; inset: 0; }
 .monaco-editor.dbx-sql-overflow { position:fixed; inset:0; pointer-events:none; z-index:50; background:transparent; }
 .dbx-sql-overflow > :is(.overflowingContentWidgets, .overflowingOverlayWidgets) > * { pointer-events:auto; }
-.dbx-sql-overflow > .dbx-sql-action-view { padding:var(--gap-control); pointer-events:auto; }
+.dbx-sql-overflow > .dbx-sql-action-view { padding:var(--gap-control); width:max-content!important; pointer-events:auto; }
 .dbx-sql-action-view .action-widget {
   max-width:none;
   --vscode-list-focusBackground:var(--color-accent);
@@ -96,24 +97,127 @@
   --vscode-editorActionList-focusBackground:var(--color-accent);
   --vscode-editorActionList-focusForeground:var(--color-accent-foreground);
 }
-.monaco-editor.dbx-sql-overflow .dbx-sql-action-view .action-widget { background:var(--color-popover)!important; backdrop-filter:none; }
+.monaco-editor.dbx-sql-overflow .dbx-sql-action-view .action-widget {
+  min-width:0; border-radius:var(--r-card); border-color:var(--color-border)!important;
+  background:var(--color-popover)!important; color:var(--color-foreground); backdrop-filter:none; box-shadow:var(--shadow-pop);
+}
 .dbx-sql-action-view .action-widget .monaco-list .monaco-scrollable-element { overflow:hidden; }
-.dbx-sql-action-view .action-widget .monaco-list-row.group-header { margin-top:0; color:var(--color-muted-foreground)!important; }
+.dbx-sql-action-view .action-widget .monaco-list-row.group-header {
+  margin-top:0; font-size:var(--dbx-fs-meta); color:var(--color-muted-foreground)!important;
+}
+.dbx-sql-action-view .action-widget .monaco-list-row { border-radius:var(--r-control); }
+.dbx-sql-action-view .action-widget .monaco-list-row.action .codicon { color:var(--color-muted-foreground); }
+.dbx-sql-action-view .action-widget .monaco-list-row.action.focused .codicon { color:var(--color-primary); }
+.dbx-sql-action-view .action-widget .monaco-list-row.action:not(.focused):hover { background:transparent!important; }
 .dbx-sql-action-view .action-widget .monaco-list-row.action .title, .dbx-sql-action-measure {
   min-width:0; white-space:normal; overflow-wrap:anywhere; line-height:1.4;
 }
 .dbx-sql-action-measure { position:absolute; visibility:hidden; pointer-events:none; }
+.monaco-editor.dbx-sql-overflow .dbx-sql-action-view .action-widget[data-sql-preview="side"] {
+  --sql-action-inset:calc(var(--gap-control) * 1.5);
+  display:grid; padding:0; overflow:hidden;
+  grid-template-columns:var(--sql-action-list-width) minmax(0,1fr);
+  grid-template-rows:auto var(--sql-action-body-height) auto;
+}
+.dbx-sql-action-view .action-widget[data-sql-preview="side"] > :not(.actionList,.dbx-sql-action-preview) { grid-column:1 / -1; }
+.dbx-sql-action-view .action-widget[data-sql-preview="side"] > .actionList { grid-column:1; grid-row:2; min-height:0; }
+.dbx-sql-action-view .action-widget[data-sql-preview="side"] > .dbx-sql-action-preview { grid-column:2; grid-row:2; }
+.dbx-sql-action-view .action-widget[data-sql-preview="side"] :is(.actionList,.monaco-list,.monaco-list-rows,.monaco-scrollable-element,.shadow) {
+  background:transparent!important; box-shadow:none!important;
+}
+.dbx-sql-action-view .action-widget[data-sql-preview="side"] .monaco-list-row {
+  margin-inline:calc(var(--gap-control) / 2); width:calc(100% - var(--gap-control));
+  padding-inline:var(--gap-control); border-radius:var(--r-control);
+}
+.dbx-sql-action-top {
+  display:grid; grid-template-columns:var(--sql-action-list-width) minmax(0,1fr); align-items:center;
+  border-bottom:1px solid var(--color-border); color:var(--color-foreground);
+}
+.dbx-sql-action-top > div { min-width:0; padding:var(--gap-control) var(--sql-action-inset); }
+.dbx-sql-action-title { display:flex; align-items:baseline; gap:var(--gap-control); white-space:nowrap; }
+.dbx-sql-action-title > strong { flex:none; font-size:var(--dbx-fs-body); font-weight:600; }
+.dbx-sql-action-title > span {
+  overflow:hidden; text-overflow:ellipsis; color:var(--color-muted-foreground); font-size:var(--dbx-fs-meta);
+}
 .dbx-sql-action-keys {
-  padding:var(--gap-control); border-top:1px solid var(--color-border);
+  display:flex; justify-content:flex-end; gap:var(--sql-action-inset); padding:var(--gap-control) var(--sql-action-inset);
+  border-top:1px solid var(--color-border); color:var(--color-muted-foreground); font-size:var(--dbx-fs-meta);
+}
+.dbx-sql-action-keys > span { display:flex; align-items:center; gap:4px; }
+.dbx-sql-action-keys kbd { color:var(--color-foreground); font-family:var(--font-mono); }
+.dbx-sql-action-preview:not([data-state="ready"]) ~ .dbx-sql-action-keys [data-sql-apply] { display:none; }
+.dbx-sql-action-preview {
+  display:grid; grid-template-rows:auto minmax(0,1fr); gap:var(--gap-control); min-width:0; min-height:0;
+  padding:var(--gap-control) var(--sql-action-inset); border-inline-start:1px solid var(--color-border); color:var(--color-foreground);
+}
+.dbx-sql-action-preview-heading { font-weight:600; font-size:var(--dbx-fs-body); }
+.dbx-sql-action-preview-label {
+  display:flex; align-items:center; gap:var(--gap-control); min-width:0;
   color:var(--color-muted-foreground); font-size:var(--dbx-fs-meta);
 }
-.dbx-sql-action-preview { padding:var(--gap-control); border-top:1px solid var(--color-border); color:var(--color-foreground); }
-.dbx-sql-action-preview > summary { cursor:pointer; color:var(--color-primary); }
+.dbx-sql-action-preview-label > span:last-child { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.dbx-sql-action-preview-label > .codicon { color:var(--color-primary); }
+.dbx-sql-action-preview-label[hidden], .dbx-sql-action-preview-label > [hidden] { display:none; }
+.dbx-sql-action-preview:has(> .dbx-sql-action-preview-label[hidden]) { grid-template-rows:minmax(0,1fr); }
 .dbx-sql-action-preview > pre {
-  /* 固定高度：上下键换行时预览文本长短不一，若随内容伸缩会拖着浮层重排跳位。 */
-  height:24vh; margin:var(--gap-control) 0 0; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere;
-  font-family:var(--font-mono); line-height:1.5;
+  align-self:start; min-height:0; max-height:100%; margin:0; overflow:auto; overscroll-behavior:contain;
+  white-space:pre-wrap;
+  user-select:text; font-family:var(--font-mono); font-size:var(--dbx-fs-meta); line-height:1.55;
 }
+.dbx-sql-action-preview > pre:focus-visible { outline:2px solid var(--color-ring); outline-offset:-2px; }
+.monaco-editor.dbx-sql-overflow .dbx-sql-action-view .action-widget[data-sql-join-batch] {
+  grid-template-rows:auto auto var(--sql-action-body-height) auto;
+}
+.dbx-sql-action-view .action-widget[data-sql-join-batch] > .dbx-sql-join-source { grid-column:1; grid-row:2; }
+.dbx-sql-action-view .action-widget[data-sql-join-batch] > .actionList { grid-row:3; }
+.dbx-sql-action-view .action-widget[data-sql-join-batch] > .dbx-sql-action-preview {
+  grid-row:2 / 4; grid-template-rows:auto minmax(0,1fr) auto;
+}
+.dbx-sql-join-source {
+  display:flex; align-items:center; flex-wrap:wrap; gap:var(--gap-control); min-width:0;
+  padding:var(--gap-control) var(--sql-action-inset); border-bottom:1px solid var(--color-border);
+  color:var(--color-muted-foreground); font-size:var(--dbx-fs-meta);
+}
+.dbx-sql-join-source > label { display:flex; align-items:center; gap:var(--gap-control); white-space:nowrap; min-width:0; flex:1; }
+.dbx-sql-join-source code, .dbx-sql-join-source select {
+  min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; font:inherit; font-family:var(--font-mono);
+  color:var(--color-foreground);
+}
+.dbx-sql-join-source select, .dbx-sql-join-added {
+  padding-inline:calc(var(--gap-control) / 2); border:1px solid var(--color-border);
+  border-radius:var(--r-control); background:var(--color-popover); color:var(--color-foreground);
+}
+.dbx-sql-join-added { cursor:pointer; }
+.dbx-sql-join-added[hidden], .dbx-sql-join-placement[hidden] { display:none; }
+.dbx-sql-action-view .action-widget [data-sql-join-row] .title { display:flex; flex-direction:column; }
+.dbx-sql-action-view .action-widget [data-sql-join-row] .title > small {
+  color:var(--color-muted-foreground); font-size:var(--dbx-fs-badge); line-height:1.35;
+}
+.dbx-sql-join-check {
+  flex:none; accent-color:var(--color-primary); cursor:pointer;
+  margin:0 var(--gap-control) 0 0;
+}
+.dbx-sql-action-view .action-widget .monaco-list [data-sql-join-picked]:not(.focused),
+.dbx-sql-action-view .action-widget .monaco-list [data-sql-join-picked]:not(.focused):hover {
+  background:var(--color-accent)!important; color:var(--color-accent-foreground);
+}
+.dbx-sql-join-placement { color:var(--color-muted-foreground); font-size:var(--dbx-fs-badge); }
+.dbx-sql-action-view [data-sql-join-batch] .dbx-sql-action-keys { justify-content:flex-start; align-items:center; flex-wrap:wrap; }
+.dbx-sql-join-apply {
+  display:inline-flex; align-items:center; gap:var(--gap-control); padding:0 var(--gap-control);
+  min-height:var(--h-control); margin-inline-start:auto; border:0; border-radius:var(--r-control);
+  color:var(--color-primary-foreground); background:var(--color-primary); font-weight:600; cursor:pointer;
+}
+.dbx-sql-action-keys .dbx-sql-join-apply kbd {
+  color:inherit; font-weight:400; padding-inline-start:var(--gap-control); border-inline-start:1px solid currentColor;
+}
+.dbx-sql-join-apply:disabled { color:var(--color-muted-foreground); background:var(--color-secondary); cursor:default; }
+.dbx-sql-action-preview:not([data-state="ready"]) > pre { color:var(--color-muted-foreground); font-family:inherit; }
+.dbx-sql-action-preview [data-sql-token="keyword"] { color:var(--sql-keyword-color); }
+.dbx-sql-action-preview [data-sql-token="string"] { color:var(--sql-string-color); }
+.dbx-sql-action-preview [data-sql-token="number"] { color:var(--sql-number-color); }
+.dbx-sql-action-preview [data-sql-token="comment"] { color:var(--sql-comment-color); }
+.dbx-sql-action-preview [data-sql-changed] { background:var(--color-accent); }
 /* Give the name its natural width first. Monaco measures wrapped rows for scrolling. */
 .monaco-editor .dbx-suggest-fit { --vscode-editorSuggestWidget-focusHighlightForeground:var(--color-primary); }
 .monaco-editor .dbx-suggest-fit .monaco-list .monaco-list-row { min-height:var(--sql-suggest-line-height, 1.5em); }
@@ -126,16 +230,77 @@
 .monaco-editor .dbx-suggest-fit .monaco-list .monaco-list-row > .contents > .main > .right { min-width:0; }
 .monaco-editor .dbx-suggest-fit .monaco-list .left .label-name { white-space:pre-wrap; overflow-wrap:anywhere; }
 .monaco-editor .dbx-suggest-fit .monaco-list .monaco-list-row .suggest-icon { align-self:start; line-height:var(--sql-suggest-line-height, 1.5em); }
-.monaco-editor .dbx-suggest-fit:not(.docs-side) .monaco-list .monaco-list-row.focused > .contents > .main > .right > .readMore { visibility:visible; top:0; }
-.monaco-editor .suggest-widget.dbx-suggest-fit.with-status-bar:not(.docs-side) .monaco-list .monaco-list-row.focused > .contents > .main > .right > .readMore { display:inline-block; }
+.monaco-editor .dbx-suggest-fit .monaco-list .monaco-list-row[data-sql-key-column] .suggest-icon { color:var(--color-primary); }
+.monaco-editor .dbx-suggest-fit .monaco-list .monaco-list-row[data-sql-key-column] > .contents > .main > .left {
+  flex:0 1 auto; align-items:center; min-width:0;
+}
+.monaco-editor .dbx-suggest-fit .monaco-list .monaco-list-row[data-sql-key-column] > .contents > .main > .right { flex:1 1 0; }
+.monaco-editor .dbx-suggest-fit .monaco-list .monaco-list-row[data-sql-key-column] .left .label-name { white-space:nowrap; }
+.monaco-editor .dbx-suggest-fit [data-sql-key-column] .signature-label { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.monaco-editor .dbx-suggest-fit [data-sql-key-column] .monaco-icon-label {
+  flex-shrink:0; min-width:0; max-width:calc(100% - 3.5em);
+}
+.monaco-editor .dbx-suggest-fit [data-sql-key-column="both"] .monaco-icon-label { max-width:calc(100% - 6em); }
+.dbx-sql-key-badges { display:inline-flex; flex:none; gap:calc(var(--gap-control) / 2); margin-inline:var(--gap-control); }
+.dbx-sql-key-badges[hidden], .dbx-sql-key-badges > [hidden] { display:none; }
+.dbx-sql-key-badges > span {
+  padding-inline:calc(var(--gap-control) / 2); border:1px solid var(--color-border); border-radius:var(--r-control);
+  background:var(--color-popover); color:var(--color-popover-foreground); font:600 var(--dbx-fs-meta)/1.35 var(--font-sans); white-space:nowrap;
+}
+.dbx-suggest-fit .codicon-ncforge-column-foreign::before {
+  content:""; display:inline-block; width:1em; height:1em; vertical-align:middle; background:currentColor;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linejoin='round'%3E%3Cpath d='M1.5 2.5h5v5h-5zM9.5 8.5h5v5h-5zM6.5 5h5.5v3.5M1.5 4.5h5m3 6h5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.monaco-editor .dbx-suggest-fit:not(.docs-side, [data-sql-suggest-preview]) .monaco-list .monaco-list-row.focused > .contents > .main > .right > .readMore { visibility:visible; top:0; }
+.monaco-editor .suggest-widget.dbx-suggest-fit.with-status-bar:not(.docs-side, [data-sql-suggest-preview]) .monaco-list .monaco-list-row.focused > .contents > .main > .right > .readMore { display:inline-block; }
 .monaco-editor .dbx-suggest-fit[data-sql-explicit] .suggest-status-bar::before {
   content:"↑↓ 选择 · → 预览 · Enter 应用 · Esc 关闭";
   padding-inline:var(--gap-control); color:var(--color-muted-foreground); white-space:nowrap;
 }
 .monaco-editor .dbx-suggest-fit[data-sql-explicit] .suggest-status-bar > :is(.left, .right) { display:none; }
+.dbx-suggest-fit > :is(.dbx-sql-suggest-heading, .dbx-sql-suggest-preview, .dbx-sql-suggest-keys) { display:none; }
+html[data-ui-style] .monaco-editor .dbx-suggest-fit[data-sql-suggest-preview]:not(.message) {
+  --sql-action-inset:calc(var(--gap-control) * 1.5);
+  --sql-action-list-width:clamp(220px, 47%, 286px);
+  display:grid!important; grid-template-columns:var(--sql-action-list-width) minmax(0,1fr);
+  grid-template-rows:auto minmax(0,1fr) auto;
+  background:var(--color-popover)!important; border-color:var(--color-border)!important;
+  border-radius:var(--r-card)!important; box-shadow:var(--shadow-pop)!important; backdrop-filter:none;
+}
+.dbx-suggest-fit[data-sql-suggest-preview]:not(.message) > .dbx-sql-suggest-heading { display:grid; grid-column:1 / -1; grid-row:1; }
+.dbx-suggest-fit[data-sql-suggest-preview]:not(.message) > .dbx-sql-suggest-preview {
+  display:grid; grid-column:2; grid-row:2;
+}
+.dbx-sql-suggest-preview > pre { overflow-wrap:anywhere; }
+.dbx-suggest-fit[data-sql-suggest-preview]:not(.message) > .dbx-sql-suggest-keys { display:flex; grid-column:1 / -1; grid-row:3; }
+.monaco-editor .dbx-suggest-fit[data-sql-suggest-preview]:not(.message) > :is(.monaco-sash, .suggest-status-bar) { display:none; }
+.monaco-editor .dbx-suggest-fit[data-sql-suggest-preview] > .tree {
+  grid-column:1; grid-row:2; min-width:0; min-height:0; margin-block:var(--gap-control); height:auto!important;
+}
+.monaco-editor .dbx-suggest-fit[data-sql-suggest-preview] :is(.tree, .monaco-list, .monaco-list-rows, .monaco-scrollable-element, .shadow) {
+  background:transparent!important; box-shadow:none!important;
+}
+.monaco-editor .dbx-suggest-fit[data-sql-suggest-preview] .monaco-list-row {
+  width:calc(100% - var(--gap-control)); margin-inline:calc(var(--gap-control) / 2); padding-inline:var(--gap-control); border-radius:var(--r-control);
+}
+.monaco-editor .dbx-suggest-fit[data-sql-suggest-preview] .monaco-list .monaco-list-row.focused { background:var(--color-accent); color:var(--color-accent-foreground); }
+.monaco-editor .dbx-suggest-fit[data-sql-suggest-preview] .monaco-list .monaco-list-row .main { padding-inline-end:0; gap:var(--gap-control); font-family:var(--font-sans)!important; }
+.monaco-editor .dbx-suggest-fit[data-sql-suggest-preview] .monaco-list .monaco-list-row .main > .right { flex:0 1 auto; color:var(--color-muted-foreground); }
+.monaco-editor .dbx-suggest-fit[data-sql-suggest-preview] .monaco-list .monaco-list-row .main > .left { flex:0 1 auto; }
+.monaco-editor .dbx-suggest-fit[data-sql-suggest-preview] .monaco-list .monaco-list-row .label-name { white-space:nowrap; }
+.monaco-editor .dbx-suggest-fit[data-sql-suggest-preview] .monaco-list .monaco-list-row .right > .readMore { display:none; }
+.monaco-editor .dbx-suggest-fit[data-sql-suggest-preview] .monaco-list .monaco-list-row .suggest-icon { color:var(--color-primary); }
 .monaco-editor.dbx-sql-overflow .suggest-details > .monaco-scrollable-element > .body > .docs.markdown-docs .monaco-tokenized-source {
   white-space:pre-wrap; overflow-wrap:anywhere;
 }
+html[data-ui-style] .dbx-sql-overflow :is(.monaco-hover, .parameter-hints-widget) {
+  background:var(--color-popover)!important; border-color:var(--color-border)!important;
+  border-radius:var(--r-card)!important; box-shadow:var(--shadow-pop)!important; backdrop-filter:none;
+  color:var(--color-foreground); font-size:var(--dbx-fs-meta); line-height:1.5;
+}
+.dbx-sql-overflow .monaco-hover .hover-row .hover-contents { padding:var(--gap-control) calc(var(--gap-control) * 1.5); }
+.dbx-sql-overflow .parameter-hints-widget :is(.signature,.docs:not(.empty)) { padding:var(--gap-control) calc(var(--gap-control) * 1.5); }
+.dbx-sql-overflow .parameter-hints-widget .parameter.active { color:var(--color-primary); }
 @media (max-width: 700px) {
   .monaco-editor .suggest-widget.dbx-suggest-fit .monaco-list .monaco-list-row:has(.codicon-symbol-snippet) > .contents > .main > .right > .details-label { display:none; }
 }
@@ -774,23 +939,25 @@ html[data-reduced=true] .dbx-query-surface .dbx-grid,html[data-reduced=true] .db
 .dbx-other-tools > .dbx-hint, .dbx-other-tools > .dbx-badline { grid-column: 1 / -1; margin: 0; }
 .dbx-other-tools > span { min-width: 0; }
 
-/* ── SQL 行内提示（lib/sqlAssistGhost）：表名后的 chip 与条件行尾说明 ──
-   两者的定位都由 Monaco 的 float widget / 装饰负责，这里只管外观：
-   chip 长得像正文里的一枚小按钮（不抢视线，但看得出能点），
-   行尾说明是浅灰小字，不和代码抢颜色。 */
+/* SQL 助手在代码末尾显示文字，在行号旁显示图标。 */
 .ncforge-sql-chip {
-  margin-left: 10px; padding: 0 7px; height: 18px;
-  display: inline-flex; align-items: center; gap: 3px;
-  border: 1px solid hsl(var(--primary) / .35); border-radius: 9px;
-  background: hsl(var(--primary) / .08); color: hsl(var(--primary));
+  padding-inline:var(--gap-control); height:min(1.125rem, var(--h-icon));
+  display:inline-flex; align-items:center; justify-content:center; column-gap:var(--gap-control);
+  border:1px solid var(--color-border); border-radius:var(--r-control);
+  background:var(--color-accent); color:var(--color-accent-foreground);
   font-size: var(--dbx-fs-badge); line-height: 1; font-weight: 600;
   cursor: pointer; user-select: none; white-space: nowrap;
 }
 .ncforge-sql-chip:hover, .ncforge-sql-chip:focus-visible {
-  background: hsl(var(--primary) / .16); border-color: hsl(var(--primary) / .55);
+  border-color:var(--color-primary); color:var(--color-primary);
 }
 .ncforge-sql-chip[hidden] { display: none; }
-.ncforge-sql-lens {
-  margin-left: 4px; color: hsl(var(--muted-foreground));
-  font-size: var(--dbx-fs-badge); font-style: italic; opacity: .85;
+.ncforge-sql-chip[data-placement="end"] > .codicon { display:none; }
+.ncforge-sql-chip[data-placement="gutter"] {
+  width:min(1.125rem, var(--h-icon)); padding:0; border-color:transparent; background:transparent;
+}
+.ncforge-sql-chip[data-placement="gutter"]:hover, .ncforge-sql-chip[data-placement="gutter"]:focus-visible { background:var(--color-accent); }
+.ncforge-sql-chip[data-placement="gutter"] > .ncforge-sql-chip-label { position:absolute; visibility:hidden; }
+.wb-editor-host:is([data-sql-suggest-open], [data-sql-action-open]) .ncforge-sql-chip {
+  visibility:hidden; pointer-events:none;
 }

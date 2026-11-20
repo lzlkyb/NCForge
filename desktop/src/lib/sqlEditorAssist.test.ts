@@ -13,7 +13,7 @@ vi.mock("./monacoSetup", () => ({ monaco: { editor: {
   EditorOption: { quickSuggestions: 90 },
   ShowLightbulbIconMode: { Off: "off", OnCode: "onCode", On: "on" },
   registerCommand: (id: string, fn: (...args: unknown[]) => void) => { h.commands.set(id, fn); return { dispose: () => h.commands.delete(id) }; },
-}, KeyMod: { Alt: 512, CtrlCmd: 2048, Shift: 1024 }, KeyCode: { Enter: 3 } } }));
+}, languages: { CompletionItemKind: { Snippet: 1 } }, Range: { fromPositions: (a: unknown, b: unknown) => [a, b] }, KeyMod: { Alt: 512, CtrlCmd: 2048, Shift: 1024 }, KeyCode: { Enter: 3 } } }));
 vi.mock("./dbStore", () => ({ connOf: () => h.conn, rtOf: () => h.rt, sqlColumnEpoch: () => h.epoch, sqlTabOf: (id: string) => ({ id, connId: "conn" }), columnsOf: h.columns }));
 vi.mock("./sqlModels", () => ({ tabIdOfModel: (m: { id: string }) => m.id }));
 vi.mock("./sqlFormat", () => ({ sqlLanguageOf: () => "plsql" }));
@@ -29,6 +29,13 @@ vi.mock("./sqlBusiness", async importOriginal => ({
   peekSqlBusinessMetadata: () => null, readSqlBusinessMetadata: h.relations,
 }));
 const cleanups: (() => void)[] = [];
+
+async function applyFieldPreview(editor: monaco.editor.IStandaloneCodeEditor) {
+  const { sqlAssistPickerChoices } = await import("./sqlAssistPicker");
+  const item = sqlAssistPickerChoices(editor.getModel()!, editor.getPosition()!)?.suggestions[0];
+  item?.ncforgeApply?.(editor);
+  return item?.ncforgePreview;
+}
 
 beforeEach(() => {
   vi.resetModules(); localStorage.clear(); h.commands.clear(); h.columns.mockReset(); h.toast.mockReset();
@@ -270,6 +277,8 @@ describe("SQL 编辑器习惯与辅助操作", () => {
     const fake = fakeEditor("SELECT m.* FROM nc.bd_material m"); await wire(fake); fake.move(9);
     expect(fake.actions.has("ncforge.sql.batchIn")).toBe(true);
     await fake.actions.get("ncforge.sql.expandStar")!.run();
+    expect(fake.executeEdits).not.toHaveBeenCalled();
+    await applyFieldPreview(fake.editor);
     expect(h.columns).toHaveBeenCalledWith("conn", "nc.bd_material");
     expect(fake.executeEdits).toHaveBeenCalledWith("sql-assist", [{ range: { startLineNumber: 1, startColumn: 10, endLineNumber: 1, endColumn: 11 }, text: 'code, m.name' }]);
   });
@@ -316,18 +325,21 @@ describe("SQL 编辑器习惯与辅助操作", () => {
     }
     expect(h.columns).not.toHaveBeenCalled();
     const sql = "SELECT DISTINCT *, price FROM bd_material", fake = fakeEditor(sql); await wire(fake); fake.move(sql.indexOf("*"));
-    await fake.actions.get("ncforge.sql.expandStar")!.run(); expect(h.columns).toHaveBeenCalledTimes(1); expect(fake.executeEdits.mock.calls[0][1][0].text).toBe("code, name");
+    await fake.actions.get("ncforge.sql.expandStar")!.run(); await applyFieldPreview(fake.editor); expect(h.columns).toHaveBeenCalledTimes(1); expect(fake.executeEdits.mock.calls[0][1][0].text).toBe("code, name");
   });
 
   it("展开带引号别名的通配符保持原始引号与大小写", async () => {
     const sql = 'SELECT "M".* FROM bd_material "M"', fake = fakeEditor(sql); await wire(fake); fake.move(sql.indexOf("*"));
-    await fake.actions.get("ncforge.sql.expandStar")!.run(); expect(fake.executeEdits.mock.calls[0][1][0].text).toBe('code, "M".name');
+    await fake.actions.get("ncforge.sql.expandStar")!.run(); await applyFieldPreview(fake.editor); expect(fake.executeEdits.mock.calls[0][1][0].text).toBe('code, "M".name');
   });
 
   it("INSERT 模板使用完整表身份和可跳转占位符，插入到完整外层语句之后", async () => {
     const sql = "SELECT * FROM (SELECT * FROM nc.bd_material) t; SELECT 1 FROM dual;";
     const fake = fakeEditor(sql); await wire(fake); fake.move(sql.indexOf("bd_material") + 5);
     await fake.actions.get("ncforge.sql.insertTemplate")!.run();
+    expect(fake.snippet.insert).not.toHaveBeenCalled();
+    const preview = await applyFieldPreview(fake.editor);
+    expect(preview).toMatchObject({ text: "INSERT INTO nc.bd_material (code, name)\nVALUES (CODE, NAME);" });
     expect(fake.snippet.insert).toHaveBeenCalledWith('\n\nINSERT INTO nc.bd_material (code, name)\nVALUES (${1:CODE}, ${2:NAME});$0');
     expect(fake.spy.setSelection).toHaveBeenCalledWith({ startLineNumber: 1, startColumn: sql.indexOf(";") + 2, endLineNumber: 1, endColumn: sql.indexOf(";") + 2 });
   });
@@ -340,7 +352,7 @@ describe("SQL 编辑器习惯与辅助操作", () => {
     await fake.actions.get("ncforge.sql.forgetTable")!.run(); expect(u.usageSnapshot(scope)[key]).toBeUndefined();
   });
 
-  it("多个编辑器共用接受命令，各自的主表选择命令随编辑器注销", async () => {
+  it("多个编辑器共用接受命令，最后一个编辑器销毁时注销", async () => {
     const first = fakeEditor("SELECT * FROM bd_material"), second = fakeEditor("SELECT * FROM bd_material");
     const a = await wire(first), b = await wire(second); first.focus(false);
     expect(h.commands.has("ncforge.sql.accept")).toBe(true);
@@ -348,10 +360,8 @@ describe("SQL 编辑器习惯与辅助操作", () => {
     expect(h.commands.has("ncforge.sql.quickFix")).toBe(true);
     // 补全列表里的单值动作（展开 * / INSERT 模板）走这条，落到同一个 editor action。
     expect(h.commands.has("ncforge.sql.runAction")).toBe(true);
-    expect([...h.commands.keys()].filter(id => id.startsWith("ncforge.sql.chooseSummary."))).toHaveLength(2);
     const { u, scope, key } = await accept();
-    // 共用命令（accept / acceptStat / quickFix / runAction）留到最后一个编辑器注销；每个编辑器自己的选择命令先走。
-    expect(u.usageSnapshot(scope)[key].accept).toBe(1); a.dispose(); expect(h.commands.size).toBe(5);
+    expect(u.usageSnapshot(scope)[key].accept).toBe(1); a.dispose(); expect(h.commands.size).toBe(4);
     b.dispose(); expect(h.commands.size).toBe(0);
   });
 

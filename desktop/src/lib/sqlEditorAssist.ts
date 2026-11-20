@@ -19,6 +19,8 @@ import { wireSqlJoinMeaningAssist } from "./sqlJoinMeaningAssist";
 import { wireSqlBillAssist } from "./sqlBillAssist";
 import { wireSqlSelectionAssist } from "./sqlSelectionAssist";
 import { wireSqlAssistGhost } from "./sqlAssistGhost";
+import { hasSqlAssistPicker, openSqlAssistPicker } from "./sqlAssistPicker";
+import { sqlPreviewEdits, sqlPreviewSnippet } from "./sqlPreviewCode";
 import { peekSqlBusinessMetadata, readSqlBusinessMetadata } from "./sqlBusiness";
 import { recordAssistAccept } from "./sqlAssistStats";
 import { toast } from "../components/ui/toast";
@@ -32,7 +34,8 @@ let acceptStatCommand: monaco.IDisposable | undefined;
 const quickFixers = new Map<Editor, () => void>();
 let quickFixCommand: monaco.IDisposable | undefined;
 /** 同上，但用来直接跑一条 editor action（展开 `*`、INSERT 模板这类单值动作）。 */
-const actionRunners = new Map<Editor, (actionId: string) => void>();
+type SqlActionKeyword = { start: number; end: number };
+const actionRunners = new Map<Editor, (actionId: string, keyword?: SqlActionKeyword) => void>();
 let runActionCommand: monaco.IDisposable | undefined;
 
 function current(editor: Editor) {
@@ -81,7 +84,7 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
   disposables.push(wireSqlBillAssist(editor));
   // 选区类动作（转 IN / 查重 / 汇总）原先只有右键菜单一条路，接到 Ctrl+. 下。
   disposables.push(wireSqlSelectionAssist(editor));
-  // 行内提示：表名后的「主子表联查」chip 与 JOIN 条件的行尾说明。
+  // SQL 辅助入口共用同一块行尾空间和行号旁的图标位。
   disposables.push(wireSqlAssistGhost(editor));
   const reset = () => { relationRequest++; columnRequest++; clearTimeout(pendingSuggest); dismissed = undefined; dirty = undefined; accepted.length = 0; typed = undefined; acceptedKeys.clear(); };
   const suggestAt = (model: monaco.editor.ITextModel, offset: number, eligible: (state: NonNullable<ReturnType<typeof current>>) => boolean, checkLateRelations = false) => {
@@ -164,6 +167,11 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
     if (key !== "Escape") return;
     clearTimeout(pendingSuggest);
     const model = editor.getModel(), position = editor.getPosition();
+    if (model && hasSqlAssistPicker(model)) {
+      // Closing the picker must also keep the original selected fields available.
+      event.preventDefault();
+      event.stopPropagation();
+    }
     if (model && position) dismissed = { model, version: model.getVersionId(), offset: model.getOffsetAt(position) };
     closeSuggestions();
   }));
@@ -223,10 +231,15 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
   }));
   // 「展开 * 为字段列表」「生成 INSERT 模板」是单值动作，没有「多个子表挑一个」的问题，
   // 走菜单反而多一次点击。补全项直接带这个命令，落到同一个已注册的 editor action。
-  actionRunners.set(editor, id => { void editor.getAction(id)?.run(); });
-  if (!runActionCommand) runActionCommand = monaco.editor.registerCommand("ncforge.sql.runAction", (_accessor, actionId: string) => {
-    if (typeof actionId !== "string") return;
-    for (const [candidate, run] of actionRunners) if (candidate.hasTextFocus()) { run(actionId); break; }
+  actionRunners.set(editor, (id, keyword) => {
+    if (id === "ncforge.sql.expandStar" && keyword) void fields(false, keyword);
+    else void editor.getAction(id)?.run();
+  });
+  if (!runActionCommand) runActionCommand = monaco.editor.registerCommand("ncforge.sql.runAction", (_accessor, request: string | { id: string; keyword: SqlActionKeyword }) => {
+    const id = typeof request === "string" ? request : request?.id;
+    const keyword = typeof request === "object" ? request?.keyword : undefined;
+    if (typeof id !== "string") return;
+    for (const [candidate, run] of actionRunners) if (candidate.hasTextFocus()) { run(id, keyword); break; }
   });
   disposables.push(editor.onDidChangeModel(reset));
   /**
@@ -330,7 +343,7 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
     if (state) suggestAt(state.model, state.offset, () => true);
   }));
 
-  async function fields(insert: boolean) {
+  async function fields(insert: boolean, keyword?: SqlActionKeyword) {
     const state = current(editor);
     if (!state) return;
     const scope = sqlScopeAt(state.analysis, state.offset);
@@ -351,32 +364,41 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
     const version = state.model.getVersionId(), capturedScope = state.scope, epoch = sqlColumnEpoch(state.connId);
     // Refresh/reconnect can change fields without changing the connection/schema identity.
     const stillCurrent = () => !disposed && !state.model.isDisposed() && editor.getModel() === state.model && state.model.getVersionId() === version && sqlColumnEpoch(state.connId) === epoch && sqlAssistScope(state.connId) === capturedScope && sqlTabOf(tabIdOfModel(state.model))?.connId === state.connId && !!editor.getPosition() && state.model.getOffsetAt(editor.getPosition()!) === state.offset;
-    let cols;
-    try { cols = await sqlAssistColumns(state.connId, verified.tableRef, stillCurrent, true); }
-    catch { if (stillCurrent()) toast("暂时无法读取字段，请刷新表结构后重试", "warning"); return; }
-    if (!stillCurrent()) return;
-    if (!cols.length) { toast("这张表暂时没有可用字段", "info"); return; }
-    const names = sqlFieldIdentifiers(cols, state.dialect);
-    editor.pushUndoStop();
-    if (insert) {
+    const title = insert ? "INSERT 模板" : "展开字段", icon = insert ? "new-file" : "symbol-field";
+    await openSqlAssistPicker(editor, title, icon, stillCurrent, async valid => {
+      const cols = await sqlAssistColumns(state.connId, verified.tableRef, valid, true).catch(() => {
+        throw new Error("暂时无法读取字段，请刷新表结构后重试");
+      });
+      if (!valid()) return [];
+      if (!cols.length) throw new Error("这张表暂时没有可用字段");
+      const names = sqlFieldIdentifiers(cols, state.dialect), detail = `${names.length} 个字段`;
       const statement = splitStatements(state.sql).find(s => s.start <= state.offset && s.end >= state.offset);
-      if (!statement || isPlsql(statement.text)) { toast("请在普通 SQL 语句中生成 INSERT 模板", "info"); return; }
-      const keyword = (text: string) => getSqlFormatPrefs().keywordCase === "lower" ? text.toLowerCase() : text;
-      const values = cols.map((c, i) => "${" + (i + 1) + ":" + snippetEscape(c.name) + "}");
-      const end = statement.end;
-      const template = `${state.sql[end - 1] === ";" ? "" : ";"}\n\n${keyword("INSERT INTO")} ${snippetEscape(verified.tableRef)} (${names.map(snippetEscape).join(", ")})\n${keyword("VALUES")} (${values.join(", ")});$0`;
-      const snippet = editor.getContribution("snippetController2") as unknown as { insert(template: string): void } | null;
-      if (!snippet) { toast("模板编辑暂不可用，请稍后重试", "warning"); return; }
-      editor.setPosition(state.model.getPositionAt(end)); editor.setSelection(rangeOf(state.model, end, end));
-      snippet.insert(template);
-    } else {
-      const token = state.analysis.tokens[wildcard!.token];
-      const prefix = qualifier ? `${qualifier}.` : "";
+      if (insert) {
+        if (!statement || isPlsql(statement.text)) throw new Error("请在普通 SQL 语句中生成 INSERT 模板");
+        const keyword = (text: string) => getSqlFormatPrefs().keywordCase === "lower" ? text.toLowerCase() : text;
+        const values = cols.map((c, i) => "${" + (i + 1) + ":" + snippetEscape(c.name) + "}");
+        const end = statement.end;
+        const template = `${state.sql[end - 1] === ";" ? "" : ";"}\n\n${keyword("INSERT INTO")} ${snippetEscape(verified.tableRef)} (${names.map(snippetEscape).join(", ")})\n${keyword("VALUES")} (${values.join(", ")});$0`;
+        return [{ label: "生成 INSERT 模板", detail, preview: { title, icon, text: sqlPreviewSnippet(template).trim(), note: "追加到当前语句后 · Tab 切换值占位符" }, apply: () => {
+          const snippet = editor.getContribution("snippetController2") as unknown as { insert(template: string): void } | null;
+          if (!snippet) { toast("模板编辑暂不可用，请稍后重试", "warning"); return; }
+          editor.setSelection(rangeOf(state.model, end, end));
+          snippet.insert(template);
+          editor.focus();
+        } }];
+      }
+      const token = state.analysis.tokens[wildcard!.token], prefix = qualifier ? `${qualifier}.` : "";
       // The first qualifier already precedes the replaced star.
       const text = names.map((n, i) => `${i ? prefix : ""}${n}`).join(", ");
-      editor.executeEdits("sql-assist", [{ range: rangeOf(state.model, token.start, token.end), text }]);
-    }
-    editor.pushUndoStop(); editor.focus();
+      const edits = [{ start: token.start, end: token.end, text }];
+      if (keyword) edits.push({ ...keyword, text: "" });
+      const previewText = statement ? sqlPreviewEdits(state.sql, statement.start, statement.end, edits).text : text;
+      return [{ label: "展开 * 为字段列表", detail, preview: { text: previewText, title, icon }, apply: () => {
+        editor.pushUndoStop();
+        editor.executeEdits("sql-assist", edits.map(edit => ({ range: rangeOf(state.model, edit.start, edit.end), text: edit.text })));
+        editor.pushUndoStop(); editor.focus();
+      } }];
+    });
   }
   function memory(forget: boolean) {
     const state = current(editor), source = state && sourceAt(state);

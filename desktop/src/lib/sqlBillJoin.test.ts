@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("./sqlBusiness", () => ({ peekSqlBusinessMetadata: () => null, readSqlBusinessMetadata: async () => null }));
 
-import { billJoinSpecs, billTableOf } from "./sqlBillJoin";
+import { billJoinSpecs, billTableOf, sqlJoinIcon } from "./sqlBillJoin";
 import type { SqlBusinessMetadata } from "./sqlBusiness";
 
 const meta: SqlBusinessMetadata = {
@@ -11,6 +11,16 @@ const meta: SqlBusinessMetadata = {
   enums: [], partial: false, sharedSession: false,
 };
 const available = ["PO_ORDER", "PO_ORDER_B"];
+
+it("图标区分真实视图、关联明细和已知 NC 对象，普通自定义表不按前缀猜", () => {
+  expect(sqlJoinIcon("ORG_STOCKORG_V", "related", true)).toBe("view");
+  expect(sqlJoinIcon("po_order_b", "detail", false)).toBe("detail");
+  expect(sqlJoinIcon("SM_USER", "related", false)).toBe("user");
+  expect(sqlJoinIcon("org_purchaseorg", "related", false)).toBe("org");
+  expect(sqlJoinIcon("bd_supplier", "lookup", false)).toBe("book");
+  expect(sqlJoinIcon("custom_v", "related", false)).toBe("table");
+  expect(sqlJoinIcon("bd_custom", "lookup", false)).toBe("table");
+});
 
 describe("光标前的表名", () => {
   it("打全表名才认，半截前缀不猜", () => {
@@ -30,7 +40,7 @@ describe("光标前的表名", () => {
 describe("表名末尾的 JOIN 片段", () => {
   it("按关联列生成 LEFT JOIN，表名列名统一小写", () => {
     expect(billJoinSpecs("po_order", available, meta)).toEqual([
-      { table: "po_order_b", sql: " LEFT JOIN po_order_b ON po_order_b.pk_order = po_order.pk_order", source: "外键 · FK_ORDER_B", group: "detail" },
+      { table: "po_order_b", sql: " LEFT JOIN po_order_b ON po_order_b.pk_order = po_order.pk_order", source: "外键 · FK_ORDER_B", group: "detail", rootColumns: ["pk_order"], otherColumns: ["pk_order"] },
     ]);
   });
 

@@ -13,6 +13,7 @@ vi.mock("./dbStore", () => ({ connOf: () => h.conn, rtOf: () => h.rt, sqlColumnE
 vi.mock("./sqlModels", () => ({ tabIdOfModel: () => "tab" }));
 vi.mock("./sqlFormat", () => ({ sqlLanguageOf: () => h.dialect }));
 vi.mock("./monacoSql", () => ({ dialectOfSqlModel: () => h.dialect }));
+vi.mock("./monacoSetup", () => ({ monaco: { languages: { CompletionItemKind: { Snippet: 1 } }, Range: { fromPositions: (start: unknown, end: unknown) => [start, end] } } }));
 vi.mock("./sqlFormatPrefs", () => ({ getSqlFormatPrefs: () => ({ keywordCase: "upper" }) }));
 vi.mock("../components/ui/toast", () => ({ toast: h.toast }));
 const cleanups: (() => void)[] = [];
@@ -41,7 +42,7 @@ function fakeEditor(before = "SELECT * FROM bd_material a WHERE a.code IN (", se
     getSelection: () => { const a = model.getPositionAt(start), b = model.getPositionAt(end); return { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column }; },
     onDidChangeCursorSelection: (listener: () => void) => { onSelection = listener; return { dispose() { onSelection = undefined; } }; },
     addAction: (action: { id: string; run: () => Promise<void> }) => { actions.set(action.id, action); return { dispose: () => actions.delete(action.id) }; },
-    executeEdits, pushUndoStop: vi.fn(), focus: vi.fn(),
+    executeEdits, pushUndoStop: vi.fn(), focus: vi.fn(), trigger: vi.fn(),
   };
   return { editor: editor as unknown as monaco.editor.IStandaloneCodeEditor, spy: editor, model, actions, executeEdits,
     change: () => { sql += " "; version++; }, disposeModel: () => { disposed = true; },
@@ -52,14 +53,19 @@ function fakeEditor(before = "SELECT * FROM bd_material a WHERE a.code IN (", se
 }
 async function wire(fake: ReturnType<typeof fakeEditor>) {
   const { wireSqlBatchAssist } = await import("./sqlBatchAssist");
+  const { sqlAssistPickerChoices } = await import("./sqlAssistPicker");
   const handle = wireSqlBatchAssist(fake.editor); cleanups.push(() => handle.dispose());
-  return { handle, run: () => fake.actions.get("ncforge.sql.batchIn")!.run() };
+  const choice = () => sqlAssistPickerChoices(fake.editor.getModel()!, fake.editor.getPosition()!)?.suggestions[0];
+  return { handle, run: () => fake.actions.get("ncforge.sql.batchIn")!.run(), choice, apply: () => choice()?.ncforgeApply?.(fake.editor) };
 }
 
 describe("批量条件的右键动作", () => {
   it("通过 addAction 接入选区并读取当前表字段，仅执行可撤销编辑", async () => {
-    const fake = fakeEditor(), { run } = await wire(fake); await run();
+    const fake = fakeEditor(), { run, choice, apply } = await wire(fake); await run();
     expect(h.columns).toHaveBeenCalledWith("conn", "bd_material");
+    expect(fake.executeEdits).not.toHaveBeenCalled();
+    expect(choice()?.ncforgePreview).toMatchObject({ text: "a.code IN ('001', 'O''Reilly')", note: "2 个不同的值" });
+    apply();
     expect(fake.executeEdits).toHaveBeenCalledTimes(1);
     const [origin, edits] = fake.executeEdits.mock.calls[0];
     expect(origin).toBe("sql-batch-in"); expect(edits[0].text).toBe("a.code IN ('001', 'O''Reilly')");
@@ -70,8 +76,8 @@ describe("批量条件的右键动作", () => {
   });
 
   it("无别名单来源字段也能生成完整表达式", async () => {
-    const fake = fakeEditor("SELECT * FROM bd_material WHERE code ", "001\n002", " ORDER BY code"), { run } = await wire(fake);
-    await run(); expect(fake.executeEdits.mock.calls[0][1][0].text).toBe("code IN ('001', '002')");
+    const fake = fakeEditor("SELECT * FROM bd_material WHERE code ", "001\n002", " ORDER BY code"), { run, apply } = await wire(fake);
+    await run(); apply(); expect(fake.executeEdits.mock.calls[0][1][0].text).toBe("code IN ('001', '002')");
   });
 
   it("空选区、断开连接、未知表和不明确字段均不读取元数据", async () => {
@@ -89,14 +95,14 @@ describe("批量条件的右键动作", () => {
     [{ name: "OTHER", type: "VARCHAR2" }, "无法确认字段"],
     [{ name: "CODE", type: "NUMBER" }, "无效数字"],
   ])("元数据不足或值不符合类型时保留原 SQL：%j", async (column, hint) => {
-    h.columns.mockResolvedValue([column]); const fake = fakeEditor(), { run } = await wire(fake); await run();
-    expect(fake.executeEdits).not.toHaveBeenCalled(); expect(h.toast).toHaveBeenCalledWith(expect.stringContaining(hint), "info");
+    h.columns.mockResolvedValue([column]); const fake = fakeEditor(), { run, choice } = await wire(fake); await run();
+    expect(fake.executeEdits).not.toHaveBeenCalled(); expect(choice()?.ncforgePreview).toMatchObject({ status: "error", text: expect.stringContaining(hint) });
   });
 
   it("带引号字段严格匹配元数据大小写", async () => {
-    const fake = fakeEditor('SELECT * FROM bd_material WHERE "code" ', "001", ""), { run } = await wire(fake);
+    const fake = fakeEditor('SELECT * FROM bd_material WHERE "code" ', "001", ""), { run, apply } = await wire(fake);
     await run(); expect(fake.executeEdits).not.toHaveBeenCalled();
-    h.columns.mockResolvedValue([{ name: "code", type: "VARCHAR2" }]); await run();
+    h.columns.mockResolvedValue([{ name: "code", type: "VARCHAR2" }]); await run(); apply();
     expect(fake.executeEdits.mock.calls[0][1][0].text).toBe('"code" IN (\'001\')');
   });
 
@@ -124,8 +130,8 @@ describe("批量条件的右键动作", () => {
   });
 
   it("读取失败给简短提示，销毁时注销右键动作", async () => {
-    h.columns.mockRejectedValue(new Error("backend trace")); const fake = fakeEditor(), { handle, run } = await wire(fake);
-    await run(); expect(h.toast).toHaveBeenCalledWith("暂时无法读取字段，请刷新表结构后重试", "warning");
+    h.columns.mockRejectedValue(new Error("backend trace")); const fake = fakeEditor(), { handle, run, choice } = await wire(fake);
+    await run(); expect(choice()?.ncforgePreview).toMatchObject({ status: "error", text: "暂时无法读取字段，请刷新表结构后重试" });
     expect(fake.executeEdits).not.toHaveBeenCalled(); handle.dispose(); expect(fake.actions.size).toBe(0);
   });
 });

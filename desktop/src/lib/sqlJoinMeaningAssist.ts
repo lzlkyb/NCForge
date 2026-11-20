@@ -4,6 +4,7 @@ import { getSqlTemplatesEnabled, subscribeSqlTemplates } from "./sqlTemplates";
 import { sqlJoinMeanings, type MeaningEdit } from "./sqlJoinMeaning";
 import type { SqlCodeAction } from "./sqlBillAssist";
 import { splitStatements } from "./sqlSplit";
+import { sqlPreviewEdits } from "./sqlPreviewCode";
 
 let ownerId = 0;
 export function wireSqlJoinMeaningAssist(editor: monaco.editor.IStandaloneCodeEditor): monaco.IDisposable {
@@ -32,9 +33,8 @@ export function wireSqlJoinMeaningAssist(editor: monaco.editor.IStandaloneCodeEd
         const first = Math.min(...edits.map(e => e.start)), last = Math.max(...edits.map(e => e.end));
         const statement = splitStatements(sql).find(s => s.start <= first && s.end >= last);
         const base = statement?.start ?? first;
-        let preview = sql.slice(base, statement?.end ?? last);
-        for (const edit of [...edits].sort((a, b) => b.start - a.start)) preview = preview.slice(0, edit.start - base) + edit.text + preview.slice(edit.end - base);
-        return { title, kind: "quickfix", ncforgePreview: { text: preview.trim() }, edit: { edits: edits.map(e => ({ resource: current.uri, versionId: version,
+        const preview = sqlPreviewEdits(sql, base, statement?.end ?? last, edits);
+        return { title, kind: "quickfix", ncforgePreview: { ...preview, title: "关联修正", icon: edits.length > 1 ? "filter" : "git-compare" }, edit: { edits: edits.map(e => ({ resource: current.uri, versionId: version,
           textEdit: { range: monaco.Range.fromPositions(current.getPositionAt(e.start), current.getPositionAt(e.end)), text: e.text } })) } };
       };
       for (const meaning of sqlJoinMeanings(sql, dialectOfSqlModel(current))) {

@@ -54,6 +54,29 @@ it("四表来源全部提供字段，重名风险使用来源别名限定", asyn
   expect(result.suggestions.map(s => s.insertText)).toContain("d1.d_id");
   expect(h.columns).toHaveBeenCalledTimes(4);
 });
+it("字段角色按真实表与外键方向识别，同等匹配优先键字段", async () => {
+  const column = (name: string, pk = false) => ({ name, full: "NUMBER", pk });
+  h.columns.mockImplementation(async (_conn: string, table: string) => table === "bd_material"
+    ? [column("AAA"), column("ZZ_LINE", true), column("ZZ_PARENT", true), column("ZPARENT_ALT"), column("ZP"), column("NC_REF")]
+    : [column("ZZ_PARENT")]);
+  h.peek.mockImplementation((_conn, _scope, table) => ({ table, relations: [
+    { source: "BD_MATERIAL", target: "BD_PROJECT", kind: "外键", from: ["ZZ_PARENT", "ZPARENT_ALT"], to: ["ID", "ALT_ID"] },
+    { source: "BD_MATERIAL", target: "BD_PROJECT", kind: "NC类引用", from: ["NC_REF"], to: ["ID"] },
+    { source: "BD_PROJECT", target: "BD_MATERIAL", kind: "外键", from: ["OTHER"], to: ["AAA"] },
+  ] }));
+  const sql = "SELECT m. FROM bd_material m JOIN bd_project p ON 1=1";
+  const items = (await complete(sql, 9)).suggestions.sort((a, b) => a.sortText!.localeCompare(b.sortText!));
+  expect(items.slice(0, 4).map(item => item.insertText)).toEqual(["zz_line", "zz_parent", "zparent_alt", "aaa"]);
+  expect(items[1]).toMatchObject({ ncforgeColumnKeys: { primary: true, foreign: true, detail: "联合主键 · ZZ_LINE + ZZ_PARENT\n外键（1/2） · ZZ_PARENT → BD_PROJECT.ID" } });
+  expect(items[2]).toMatchObject({ ncforgeColumnKeys: { primary: false, foreign: true } });
+  expect(items[3]).not.toMatchObject({ ncforgeColumnKeys: expect.anything() });
+  expect(items.find(item => item.insertText === "nc_ref")).toMatchObject({ ncforgeColumnKeys: undefined,
+    documentation: { value: expect.stringContaining("NC类引用 · NC_REF → BD_PROJECT.ID") } });
+  const other = (await complete(sql.replace("m.", "p."), 9)).suggestions;
+  expect(other[0]).toMatchObject({ insertText: "zz_parent", ncforgeColumnKeys: undefined });
+  const exact = (await complete(sql.replace("m.", "m.zp"), 11)).suggestions.sort((a, b) => a.sortText!.localeCompare(b.sortText!));
+  expect(exact[0].insertText).toBe("zp");
+});
 it("schema限定读取完整身份，跨schema表列表不借用当前schema", async () => {
   const sql = "select a. from other.table1 a";
   await complete(sql, 9); expect(h.columns).toHaveBeenLastCalledWith("c", "other.table1");
@@ -328,7 +351,8 @@ it("依据 NC 类引用提供采购主子表模板，插入空引号落点", asy
     const items = (await complete("po_order")).suggestions;
     const bill = items.find(s => typeof s.label !== "string" && s.label.label === "采购订单 · 按单号关联 采购订单子表")!;
     expect(bill).toMatchObject({ insertText: "SELECT a.*, b.*\nFROM po_order a\nLEFT JOIN po_order_b b\n    ON a.pk_order = b.pk_order\nWHERE a.vbillcode = '$0';", insertTextRules: 4, filterText: "po_order",
-      label: { description: "NC类引用" }, documentation: { value: expect.stringContaining("NC类引用 · body_head · a.pk_order = b.pk_order") } });
+      label: { description: "NC类引用" }, documentation: { value: expect.stringContaining("NC类引用 · body_head · a.pk_order = b.pk_order") },
+      ncforgePreview: { text: expect.stringMatching(/LEFT JOIN po_order_b[\s\S]*WHERE a\.vbillcode = '';$/) } });
     expect(h.columns.mock.calls.map(call => call[1])).toEqual(["po_order", "po_order_b"]);
     expect(items.map(s => s.insertText)).toContain("SELECT * FROM po_order;$0");
   });
@@ -480,6 +504,7 @@ it("实际日期字段可选择四类动态时间条件，完整字段重复引�
   const operator = (await complete(conditionSql + "a.created 本月")).suggestions;
   expect(operator).toHaveLength(1); expect(operator[0].insertText).toContain("AND a.created <");
   expect(typeof operator[0].label !== "string" && operator[0].label.label).toBe("时间快捷 · 本月");
+  expect(operator[0]).toMatchObject({ ncforgePreview: { title: "条件模板", text: expect.stringContaining("AND a.created <") } });
 });
 it("直接NOT时隐藏四种复合时间快捷，显式分组时可以选", async () => {
   conditionFields();
@@ -504,6 +529,8 @@ it("SELECT引用字段补全同时替换完整限定字段和增加档案LEFT JO
     expect(item.insertText).toContain("a.pk_item,\n    ref1.item_number AS pk_item_code");
     expect(item.range).toMatchObject({ startColumn: 8, endColumn: 17 });
     expect(item.additionalTextEdits?.[0]).toMatchObject({ range: { startColumn: sql.indexOf("WHERE") + 1, endColumn: sql.indexOf("WHERE") + 1 }, text: expect.stringContaining("LEFT JOIN item_catalog ref1") });
+    expect(item).toMatchObject({ ncforgePreview: { text: expect.stringMatching(/^SELECT a\.pk_item,[\s\S]*LEFT JOIN item_catalog ref1[\s\S]*WHERE 1=1;$/),
+      highlights: [expect.any(Object), expect.any(Object)] } });
     expect(item.insertTextRules).toBeUndefined();
     expect(item.filterText).toBe("a.pk_item");
     expect(items.map(s => s.insertText)).toContain("pk_item");

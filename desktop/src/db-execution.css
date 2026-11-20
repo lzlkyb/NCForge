@@ -1,4 +1,4 @@
-/* 单行命令栏：常用动作靠左，会话与连接靠右；窄栏将辅助操作收入菜单。 */
+/* 命令栏常用动作靠左，会话与连接靠右；窄栏让会话与连接独占下一行。 */
 .dbx-console .dbx-execution-bar {
   display:flex; align-items:center; flex-wrap:nowrap; gap:8px;
   height:40px; min-height:40px; padding:3px 8px;
@@ -81,6 +81,10 @@
   .dbx-execution-bar .dbx-context-connection .dbx-connpick { max-width:min(90px, 100%); }
   .dbx-execution-bar .dbx-schema-chip { max-width:70px; }
   .dbx-execution-bar .dbx-context { gap:3px; }
+}
+@container (max-width:520px) {
+  .dbx-console .dbx-execution-bar { flex-wrap:wrap; height:auto; }
+  .dbx-console .dbx-execution-bar > .dbx-context { flex:0 1 100%; flex-wrap:wrap; justify-content:flex-start; }
 }
 
 /* SQL 命令与结果操作共用同一套轻量按钮表面，不扩大内容区占用。 */

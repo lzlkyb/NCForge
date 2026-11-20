@@ -9,13 +9,15 @@ import { getSqlFormatPrefs } from "./sqlFormatPrefs";
 import { getSqlTemplatesEnabled, querySkeleton, snippetEscape, tableTemplates } from "./sqlTemplates";
 import { billQueryRelations, billQueryTemplates, conditionQueryTemplates, completeQueryTemplates } from "./sqlBillTemplates";
 import { sqlTableDescription } from "./sqlBillHint";
-import { billJoinGroupLabels, billJoinSpecs, billTableOf, rankBillRelations } from "./sqlBillJoin";
+import { billJoinGroupLabels, billJoinSpecs, billTableOf, rankBillRelations, sqlJoinIcon } from "./sqlBillJoin";
+import { applySqlJoinAppend } from "./sqlBillAssist";
+import { sqlJoinAppendChoices, sqlJoinAppendText, sqlJoinInsertion } from "./sqlJoinAppend";
 import { sqlActionsAt, keywordFor, ACTION_COMMANDS } from "./sqlAssistActions";
 import { isPlsql, splitStatements } from "./sqlSplit";
 import { sqlPredicateContext } from "./sqlPredicateContext";
 import { sqlPredicates } from "./sqlPredicates";
 import { sqlTimePresets } from "./sqlTimePresets";
-import { queryCheckChoices } from "./sqlQueryCheckAssist";
+import { sqlAssistPickerChoices } from "./sqlAssistPicker";
 import { buildBillRelationChecks, buildIncomingDetailCountChecks } from "./sqlQueryChecks";
 import { archiveExpansion, archiveProjectionAt, archiveRelations } from "./sqlArchiveExpansion";
 import { completionContext, sqlIdentifier } from "./sqlCompletionContext";
@@ -28,6 +30,7 @@ import { sqlHistoricalJoinSuggestions } from "./sqlJoinHistory";
 import type { ColumnInfo } from "./dbApi";
 import { sqlReferenceKey, sqlWordKind } from "./sqlLex";
 import { sqlExplicit, type SqlCompletionItem } from "./sqlExplicitCompletion";
+import { sqlPreviewEdits, sqlPreviewSnippet } from "./sqlPreviewCode";
 import { verifiedSqlSource } from "./sqlAssistLearning";
 import { recordAssistCall, recordAssistEarly, recordAssistOffers } from "./sqlAssistStats";
 
@@ -59,7 +62,7 @@ const mark = (source: string, item: Item): Item => {
 
 /** A snapshot is returned once. Learning and late metadata never reorder an already selected list. */
 async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: monaco.Position, context: monaco.languages.CompletionContext, token: monaco.CancellationToken): Promise<monaco.languages.CompletionList> {
-  const checks = !token.isCancellationRequested && queryCheckChoices(model, position);
+  const checks = !token.isCancellationRequested && sqlAssistPickerChoices(model, position);
   if (checks) return checks;
   const tabId = tabIdOfModel(model), connId = sqlTabOf(tabId)?.connId;
   const rt = connId ? rtOf(connId) : null, identity = connectionKey(connId ? connOf(connId) : null);
@@ -168,6 +171,7 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range,
         sortText: "!", preselect: true,
         command: { id: "editor.action.triggerSuggest", title: "选择表" },
+        ncforgePreview: { title: "查询模板", icon: "file-code", text: skel.insertText, note: skel.hint },
         documentation: { value: `\`\`\`sql\n${skel.label.trim()}\n\`\`\`` },
       }))];
     }
@@ -196,6 +200,7 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
         // 多命中时整组排在表名（group 4）之后：先让人把表挑完，再往下拿整条查询。
         sortText: single ? (i === 0 ? `!${head}` : `${head}~${i}`) : sqlAssistSort(quality, 9, t.name),
         preselect: single && i === 0,
+        ncforgePreview: { title: "查询模板", icon: "file-code", text: next ? tpl.label : `${tpl.label};`, note: tpl.hint },
         documentation: { value: `\`\`\`sql\n${tpl.label};\n\`\`\`` },
       })));
     });
@@ -227,6 +232,10 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
       insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
       filterText: filter(name), range, sortText: `${head}~8${String(i).padStart(2, "0")}`,
       command: tpl.pickField ? { id: "editor.action.triggerSuggest", title: "选择条件字段" } : undefined,
+      ncforgePreview: { title: "scope" in tpl ? "关联核查" : tpl.pickField ? "条件模板" : "查询模板",
+        icon: "scope" in tpl ? "checklist" : tpl.pickField ? "filter" : "file-code",
+        get text() { return sqlPreviewSnippet(next ? tpl.insertText.slice(0, -1) : tpl.insertText); },
+        note: tpl.hint, current: metadataCurrent },
       documentation: { value: `${tpl.label}\n\n${tpl.hint}\n\n\`\`\`sql\n${tpl.sql}\n\`\`\`` },
     })));
     const related = metadata ? sqlRelatedQueries(metadata, rt.ncNames ?? {}, upper, dialect) : [];
@@ -234,6 +243,7 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
       label: { label: item.label, description: item.reason },
       kind: K.Snippet, filterText: filter(name), range, sortText: `${head}~9${i}`,
       insertText: next ? item.insertText.slice(0, -1) : item.insertText,
+      ncforgePreview: { title: "相关查询", icon: "history", text: next ? item.insertText.slice(0, -1) : item.insertText, note: item.source, current: metadataCurrent },
       documentation: { value: `${item.label}\n\n${item.source}\n\n\`\`\`sql\n${item.insertText}\n\`\`\`` },
     })))];
   };
@@ -262,22 +272,30 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
    * 表名上的「接上子表」。替换范围整词覆盖（词+JOIN 替换词本身），光标在词中间
    * 也不会把 JOIN 塞进标识符；要求光标恰在词末会漏掉「写完一句回看」的常见姿态。
    */
-  const joinedNames = new Set(sources.flatMap(source => [source.table?.toLowerCase(), source.alias?.toLowerCase()]));
   const joinSnippets = () => {
     if (!connId || !scope || rt?.status !== "connected" || dialect !== "plsql" || !identifier || !getSqlTemplatesEnabled()) return;
-    const select = sqlScopeAt(analysis, offset)?.select;
-    if (select === undefined || analysis.tokens[select]?.text.toUpperCase() !== "SELECT") return;
     const name = billHit() || billHit(identifier.text);
     if (!name) return;
     const source = sources[0];
     if (!source || source.table?.toLowerCase() !== name || source.alias || source.quoted || source.schema && source.schema.toLowerCase() !== schema.toLowerCase()) return;
+    const query = sqlScopeAt(analysis, offset);
+    const insertion = query && sqlJoinInsertion(analysis, query, model.getValue());
+    if (!query || !insertion || insertion.chain.some(token => token.text === ",")) return;
     const word = identifier.text, wordRange = monaco.Range.fromPositions(model.getPositionAt(identifier.start), model.getPositionAt(identifier.end));
-    const specs = billJoinSpecs(name, tableNames, peekSqlBusinessMetadata(connId, scope, name), rt?.ncNames).filter(spec => !joinedNames.has(spec.table));
+    const specs = sqlJoinAppendChoices(analysis, query, insertion, source, schema,
+      billJoinSpecs(name, tableNames, peekSqlBusinessMetadata(connId, scope, name), rt?.ncNames))
+      .filter(choice => !choice.added).map(({spec, sql}) => ({ ...spec, sql: " " + sql }));
+    const joinCurrent = () => metadataCurrent() && sqlTabOf(tabId)?.connId === connId && rtOf(connId).status === "connected" && getSqlTemplatesEnabled();
+    const editCurrent = () => !model.isDisposed() && model.getVersionId() === version && joinCurrent();
     const details = specs.filter(spec => spec.group === "detail");
     const suggestions = (details.length ? details.slice(0, 3) : specs.slice(0, 1)).map((spec, i) => mark("billjoin", sqlExplicit({
       label: { label: `追加 LEFT JOIN · ${rt?.ncNames?.[spec.table] || spec.table}`, description: billJoinGroupLabels[spec.group] }, kind: K.Snippet,
       insertText: word + spec.sql, filterText: filter(name), range: wordRange,
       sortText: sqlAssistSort(match(name), 5, `join${String(i).padStart(4, "0")}`),
+      ncforgePreview: { title: "主子表联查", icon: `ncforge-join-${sqlJoinIcon(spec.table, spec.group, tableList.some(t => t.name.toLowerCase() === spec.table && t.kind.toUpperCase().includes("VIEW")))}`,
+        text: sqlJoinAppendText(insertion, [spec.sql.trimStart()]).preview, note: `${spec.table} · ${spec.source}`, current: editCurrent },
+      ncforgeApply: editor => applySqlJoinAppend(editor, model, insertion, analysis.tokens[source.declaration].start,
+        [spec.sql.trimStart()], editCurrent, joinCurrent),
       documentation: { value: `${rt?.ncNames?.[spec.table] || spec.table} · ${spec.source}\n\n\`\`\`sql\nSELECT *\nFROM ${name}\n${spec.sql.trimStart().replace(" ON ", "\n    ON ")}\n\`\`\`` },
     })));
     return { suggestions, recommend: details.length > 0 && prefix.toLowerCase() === name && identifier.text.toLowerCase() === name };
@@ -296,7 +314,14 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
   const relationCount = (name: string): number => {
     if (!connId || !scope) return 0;
     const meta = peekSqlBusinessMetadata(connId, scope, name);
-    return meta ? billJoinSpecs(name, tableNames, meta).filter(spec => bare || !joinedNames.has(spec.table)).length : 0;
+    if (!meta) return 0;
+    const specs = billJoinSpecs(name, tableNames, meta);
+    if (bare || !specs.length) return specs.length;
+    const query = sqlScopeAt(analysis, offset);
+    const source = query?.sources.find(source => source.table?.toLowerCase() === name
+      && analysis.tokens[source.declaration].start <= offset && offset <= analysis.tokens[source.declaration].end + 1);
+    const insertion = source && query && sqlJoinInsertion(analysis, query, model.getValue());
+    return insertion ? sqlJoinAppendChoices(analysis, query, insertion, source, schema, specs).filter(choice => !choice.added).length : 0;
   };
   /**
    * 光标所在语句能不能放 INSERT 模板：得是普通 SQL，不能是 PL/SQL 块。
@@ -331,8 +356,7 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
    *    等于把 Enter 绑给了「展开 31 个字段」；
    * 2. 关键词命中时 **label 必须以关键词打头**：Monaco 拿 `filterText` 去套 `label`
    *    算高亮区间，两者不等长会把中文标题开头几个字涂成高亮色，看着像乱码；
-   * 3. 关键词命中时 `range` 必须吃掉已输入的关键词：动作 `insertText` 是空串，
-   *    不吃掉就会在原地留下一个 `exp`；
+   * 3. `range` 参与关键词匹配。`exp` 在实际展开时和星号一起修改，取消预览时保留输入。
    * 4. 只有「光标真压在 `*` 上」才允许置顶。这是唯一一个「按 Ctrl+空格的第一眼
    *    就该是它」的位置；其余位置置顶只会打乱正常的字段补全。
    */
@@ -366,6 +390,13 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
       });
       // 动作条目已有命令，只计曝光不计接受（口径在设置页明示）。
       item.ncforgeSource = "action";
+      if (keyword && action.id === "star.expand" && direct) {
+        const current = () => !model.isDisposed() && model.getVersionId() === version && metadataCurrent();
+        item.ncforgePreview = { title: "展开字段", icon: "symbol-field", description: true, text: "查看展开后的查询后即可应用。", current };
+        item.ncforgeApply = editor => {
+          if (current() && editor.getModel() === model) editor.trigger("sql-assist", "ncforge.sql.runAction", { id: direct, keyword: { start, end: offset } });
+        };
+      }
       return item;
     });
   };
@@ -376,9 +407,25 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
     const qualifier = wildcard?.qualifier ? `${wildcard.qualifier}.` : "";
     const fields = sqlFieldIdentifiers(columns, dialect).map(name => qualifier + name);
     const item = actionItems().find(item => item.command?.arguments?.[0] === "ncforge.sql.expandStar");
-    if (item && typeof item.label !== "string") {
+    if (item && wildcard && typeof item.label !== "string") {
       item.label.description = `${fields.length} 个字段`;
-      item.documentation = { value: "```sql\n" + fields.join(",\n") + "\n```" };
+      item.kind = K.Field;
+      const token = analysis.tokens[wildcard.token];
+      const sql = model.getValue();
+      const statement = splitStatements(sql).find(s => s.start <= token.start && s.end >= token.end);
+      // The first qualifier, when present, is already part of the statement before the star.
+      const expanded = [fields[0].slice(qualifier.length), ...fields.slice(1)].join(",\n  ");
+      const current = () => !model.isDisposed() && model.getVersionId() === version && sqlTabOf(tabId)?.connId === connId && metadataCurrent();
+      item.ncforgePreview = { title: "展开字段", icon: "symbol-field", current,
+        text: statement ? sql.slice(statement.start, token.start) + expanded + sql.slice(token.end, statement.end) : fields.join(",\n  ") };
+      item.ncforgeApply = editor => {
+        if (!current() || editor.getModel() !== model) return;
+        editor.pushUndoStop();
+        editor.executeEdits("sql-assist", [{ range: monaco.Range.fromPositions(model.getPositionAt(token.start), model.getPositionAt(token.end)),
+          text: [fields[0].slice(qualifier.length), ...fields.slice(1)].join(", ") }]);
+        editor.pushUndoStop(); editor.focus();
+      };
+      item.documentation = undefined;
     }
     return { suggestions: item ? [item] : [] };
   }
@@ -400,31 +447,69 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
       insertText: "", filterText: prefix || "schema", range: monaco.Range.fromPositions(position, position), sortText: "\uffff",
       documentation: { value: "要查其他 schema 的表，请先在连接里切换 schema 或手动写全名。" } }], incomplete: true };
   }
-  const fromColumns = (source: SqlSource, cols: ColumnInfo[], qualified: boolean): Item[] => cols.flatMap(c => {
-    const name = normalized(c.name), quality = match(name, c.zh ?? "");
-    if (quality === 9) return [];
-    qualified ||= predicate?.kind === "field" && ctx.kind !== "column";
-    const q = qualifierText(source), insertText = `${qualified ? q + "." : ""}${sqlIdentifier(sqlWordKind(name, dialect) === "identifier" ? name : c.name, dialect)}`;
-    const key = source.table ? sqlUsageKey(objectKey(source), name, ctx.clause) : undefined, why = key ? reason(key) : "";
-    const base: Item = mark("column", { label: { label: qualified ? `${source.alias ?? source.name}.${name}` : name, detail: ` ${c.full}${c.pk ? " · PK" : ""}`, description: [c.zh, source.tableRef || source.name, why].filter(Boolean).join(" · ") }, kind: c.pk ? K.Property : K.Field,
-      // 主键单独一组排在最前：空前缀点触发时纯字母序会把 pk 埋到 bflag/creationtime 后面，
-      // 而联查条件几乎总是从主键开始打。
-      insertText, filterText: filter(name), range, sortText: sqlAssistSort(quality, c.pk ? 0 : 1, insertText, scope, key, ctx.assigned.includes(name)), command: key ? command(key, false, "column") : undefined,
-      documentation: { value: `${source.tableRef ?? source.name}.${name}\n\n${c.full}${c.zh ? " · " + c.zh : ""}${why ? "\n\n" + why : ""}` } });
-    if (predicate?.kind !== "field") return [base];
-    // A typed alias stays outside the replacement range, but repeated range operands still need it.
-    const conditionPrefix = ctx.kind === "column" ? q + "." : "";
-    const options = [...sqlPredicates(conditionPrefix + insertText, c.full || c.type || "", dialect, getSqlFormatPrefs().keywordCase !== "lower"), ...sqlTimePresets(conditionPrefix + insertText, c.full || c.type || "", dialect, getSqlFormatPrefs().keywordCase !== "lower")];
-    const exact = !!prefix && (prefix.toLowerCase() === name.toLowerCase() || prefix === c.zh);
-    const selected = options.filter(p => (exact || p.operator === "=") && (!predicate.negated || p.operator !== "RANGE" && !p.operator.startsWith("TIME_")));
-    const items = selected.map((p, i): Item => mark(p.operator.startsWith("TIME_") ? "time" : "predicate", { ...base, command: undefined, kind: K.Snippet,
-      label: { label: `${qualified ? q + "." : ""}${name} · ${p.label}`, description: [c.zh, source.tableRef || source.name, p.hint].filter(Boolean).join(" · ") },
-      insertText: p.insertText.slice(snippetEscape(conditionPrefix).length), insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-      sortText: `${base.sortText}~${String(i).padStart(2, "0")}`, documentation: { value: `${source.tableRef ?? source.name}.${name}\n\n${p.hint}\n\n${p.label} · ${c.full}` },
-    }));
-    // Keep the direct field+operator templates below the field-first path.
-    return [{ ...base, insertText: insertText + " ", command: key ? command(key, true, "column") : base.command }, ...items];
-  });
+  const relationTable = (source: SqlSource) => {
+    if (!connId || !scope || rt?.status !== "connected") return;
+    const verified = verifiedSqlSource(connId, source);
+    if (verified && !verified.quoted) return verified.table.toLowerCase();
+  };
+  const warmColumnRelations = async (sources: readonly SqlSource[]) => {
+    if (!connId || !scope || stale()) return;
+    const tables = [...new Set(sources.map(relationTable).filter((table): table is string => !!table))].slice(0, 2);
+    if (!tables.length) return;
+    // Share isolated metadata requests with JOIN suggestions and keep the normal completion budget.
+    await early(Promise.all(tables.filter(table => !peekSqlBusinessMetadata(connId, scope, table))
+      .map(table => readSqlBusinessMetadata(connId, scope, table, metadataCurrent))), null, Math.min(waitBudget, 100));
+  };
+  const fromColumns = (source: SqlSource, cols: ColumnInfo[], qualified: boolean): Item[] => {
+    const table = relationTable(source);
+    const meta = table && connId && scope ? peekSqlBusinessMetadata(connId, scope, table) : null;
+    const byColumn = new Map<string, { foreign: boolean; details: string[] }>();
+    if (table && meta?.table.toLowerCase() === table && !meta.sharedSession && (!meta.schema || meta.schema.toLowerCase() === schema.toLowerCase())) {
+      for (const relation of meta.relations) {
+        if (relation.source.toLowerCase() !== table || relation.kind === "主子表") continue;
+        relation.from.forEach((field, index) => {
+          const target = relation.to[index];
+          if (!target) return;
+          const info = byColumn.get(field) ?? { foreign: false, details: [] };
+          info.foreign ||= relation.kind === "外键";
+          const composite = relation.from.length > 1 ? `（${index + 1}/${relation.from.length}）` : "";
+          const detail = `${relation.kind}${composite} · ${field} → ${relation.target}.${target}`;
+          if (!info.details.includes(detail)) info.details.push(detail);
+          byColumn.set(field, info);
+        });
+      }
+    }
+    const primary = cols.filter(c => c.pk).map(c => c.name);
+    const primaryDetail = primary.length > 1 ? `联合主键 · ${primary.join(" + ")}` : "主键";
+    return cols.flatMap(c => {
+      const name = normalized(c.name), quality = match(name, c.zh ?? "");
+      if (quality === 9) return [];
+      qualified ||= predicate?.kind === "field" && ctx.kind !== "column";
+      const q = qualifierText(source), insertText = `${qualified ? q + "." : ""}${sqlIdentifier(sqlWordKind(name, dialect) === "identifier" ? name : c.name, dialect)}`;
+      const key = source.table ? sqlUsageKey(objectKey(source), name, ctx.clause) : undefined, why = key ? reason(key) : "";
+      const relation = byColumn.get(c.name), foreign = !!relation?.foreign;
+      const details = [...(c.pk ? [primaryDetail] : []), ...(relation?.details ?? [])];
+      const base: Item = mark("column", { label: { label: qualified ? `${source.alias ?? source.name}.${name}` : name, detail: ` ${c.full}`, description: [c.zh, source.tableRef || source.name, why].filter(Boolean).join(" · ") }, kind: K.Field,
+        ncforgeColumnKeys: c.pk || foreign ? { primary: !!c.pk, foreign, detail: details.join("\n") } : undefined,
+        insertText, filterText: filter(name), range, sortText: sqlAssistSort(quality, c.pk ? 0 : foreign ? 1 : 2, insertText, scope, key, ctx.assigned.includes(name)), command: key ? command(key, false, "column") : undefined,
+        documentation: { value: [`${source.tableRef ?? source.name}.${name}`, `${c.full}${c.zh ? " · " + c.zh : ""}`, ...details, why].filter(Boolean).join("\n\n") } });
+      if (predicate?.kind !== "field") return [base];
+      // A typed alias stays outside the replacement range, but repeated range operands still need it.
+      const conditionPrefix = ctx.kind === "column" ? q + "." : "";
+      const options = [...sqlPredicates(conditionPrefix + insertText, c.full || c.type || "", dialect, getSqlFormatPrefs().keywordCase !== "lower"), ...sqlTimePresets(conditionPrefix + insertText, c.full || c.type || "", dialect, getSqlFormatPrefs().keywordCase !== "lower")];
+      const exact = !!prefix && (prefix.toLowerCase() === name.toLowerCase() || prefix === c.zh);
+      const selected = options.filter(p => (exact || p.operator === "=") && (!predicate.negated || p.operator !== "RANGE" && !p.operator.startsWith("TIME_")));
+      const items = selected.map((p, i): Item => mark(p.operator.startsWith("TIME_") ? "time" : "predicate", { ...base, command: undefined, kind: K.Snippet, ncforgeColumnKeys: undefined,
+        label: { label: `${qualified ? q + "." : ""}${name} · ${p.label}`, description: [c.zh, source.tableRef || source.name, p.hint].filter(Boolean).join(" · ") },
+        insertText: p.insertText.slice(snippetEscape(conditionPrefix).length), insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        sortText: `${base.sortText}~${String(i).padStart(2, "0")}`, documentation: { value: `${source.tableRef ?? source.name}.${name}\n\n${p.hint}\n\n${p.label} · ${c.full}` },
+        ncforgePreview: { title: "条件模板", icon: p.operator.startsWith("TIME_") ? "history" : "filter", note: p.hint,
+          get text() { return sqlPreviewSnippet(p.insertText); }, current: metadataCurrent },
+      }));
+      // Keep the direct field+operator templates below the field-first path.
+      return [{ ...base, insertText: insertText + " ", command: key ? command(key, true, "column") : base.command }, ...items];
+    });
+  };
   if (predicate?.kind === "operator") {
     const cols = await early(readColumns(predicate.source), null, waitBudget);
     const fieldKey = sqlReferenceKey(predicate.field, predicate.fieldRef, dialect);
@@ -436,6 +521,8 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
       label: { label: `${p.operator.startsWith("TIME_") ? "时间快捷" : p.operator === "RANGE" ? ">= … AND < …" : p.operator} · ${p.label}`, description: p.hint }, kind: K.Snippet,
       insertText: p.suffix, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, filterText: filter(p.label),
       range: monaco.Range.fromPositions(model.getPositionAt(predicate.start), model.getPositionAt(predicate.end)), sortText: String(i).padStart(2, "0"),
+      ncforgePreview: { title: "条件模板", icon: p.operator.startsWith("TIME_") ? "history" : "filter", note: p.hint,
+        get text() { return sqlPreviewSnippet(p.insertText); }, current: metadataCurrent },
     })), incomplete: true };
   }
   const derived = (source: SqlSource, qualified: boolean): Item[] => (source.columns ?? []).filter(name => match(name) < 9).map(name => mark("derived", { label: { label: qualified ? `${source.alias ?? source.name}.${name}` : name, description: "查询输出 · " + (source.alias ?? source.name) }, kind: K.Field,
@@ -456,11 +543,18 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
       const expansion = archiveExpansion(analysis, projection, source, field, columns, relation, targetColumns, getSqlFormatPrefs().keywordCase !== "lower");
       if (!expansion) return;
       const key = sqlUsageKey(objectKey(source), normalized(field.name), "select");
+      const sql = model.getValue();
+      const statement = splitStatements(sql).find(s => s.start <= projection.start && s.end >= projection.end);
+      const edits = [{ start: projection.start, end: projection.end, text: expansion.insertText }];
+      if (expansion.join) edits.push({ start: expansion.join.offset, end: expansion.join.offset, text: expansion.join.text });
       return mark("archive", { label: { label: `${qualifierText(source)}.${normalized(field.name)} · 展开档案编码和名称`, description: `${rt.ncNames?.[table] || table} · ${relation.kind}` },
         kind: K.Snippet, insertText: expansion.insertText, filterText: model.getValueInRange(monaco.Range.fromPositions(model.getPositionAt(projection.start), model.getPositionAt(offset))),
         range: monaco.Range.fromPositions(model.getPositionAt(projection.start), model.getPositionAt(projection.end)),
         additionalTextEdits: expansion.join ? [{ range: monaco.Range.fromPositions(model.getPositionAt(expansion.join.offset), model.getPositionAt(expansion.join.offset)), text: expansion.join.text }] : undefined,
         ncforgeExplicit: true as const,
+        ncforgePreview: { title: "引用字段展开", icon: "references", note: `${table} · 增加 ${expansion.code}、${expansion.name}`,
+          current: () => !model.isDisposed() && model.getVersionId() === version && metadataCurrent(),
+          ...(statement ? sqlPreviewEdits(sql, statement.start, statement.end, edits) : { text: edits.map(edit => edit.text).join("\n") }) },
         sortText: `${sqlAssistSort(match(normalized(field.name), field.zh ?? ""), 1, normalized(field.name))}~archive`, command: command(key, false, "archive"),
         documentation: { value: `保留引用主键，增加 ${table}.${expansion.code} 与 ${table}.${expansion.name}。\n\n已确认完整目标主键，LEFT JOIN 保留原行数。\n\n\`\`\`sql\n${expansion.insertText}${expansion.join?.text ?? ""}\n\`\`\`` } });
     }));
@@ -469,12 +563,16 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
   if (ctx.kind === "column") {
     const resolved = resolveSqlQualifier(analysis, offset, ctx.qualifier!, ctx.qualifierRef);
     const source = resolved && ctx.clause === "on" && analysis.tokens[resolved.declaration].start >= offset ? undefined : resolved;
-    const columns = source?.table ? await early(readColumns(source), null, waitBudget) : undefined;
+    const [columns] = source?.table ? await Promise.all([
+      early(readColumns(source), null, waitBudget), !prefix || context?.triggerKind === monaco.languages.CompletionTriggerKind.Invoke ? warmColumnRelations([source]) : undefined,
+    ]) : [];
     const suggestions = !source ? [] : columns === null ? [loadingItem] : columns ? [...fromColumns(source, columns, false), ...await archives(source, columns)] : derived(source, false);
     return { suggestions: stale() ? [] : suggestions.length ? suggestions : connectionNotice(), incomplete: true };
   }
   const businessItem = (s: BusinessSuggestion, source: string, targetRange = range): Item => mark(source, { label: { label: s.label, detail: ctx.clause === "on" && ctx.kind !== "value" ? `  ${s.insertText}` : undefined, description: s.reason }, kind: K.Snippet, insertText: s.insertText, range: targetRange,
     insertTextRules: s.snippet ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
+    ncforgePreview: source === "enum" ? undefined : { title: source === "condition" ? "条件模板" : "关联条件", icon: source === "condition" ? "filter" : source === "joinhistory" ? "history" : "references",
+      text: s.snippet ? sqlPreviewSnippet(s.insertText) : s.insertText, note: s.source, current: metadataCurrent },
     filterText: filter(s.label), sortText: `${match(s.label, s.insertText)}00${s.label}`, documentation: { value: s.documentation + "\n\n来源：" + s.source } });
   const physical = visible.filter(s => s.table && !s.quoted && (!s.schema || s.schema.toLowerCase() === schema.toLowerCase()));
   const metadata = async (source: SqlSource) => {
@@ -493,7 +591,10 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
   let next = 0;
   const budget = visible.slice(0, 32);
   const load = async () => { while (next < budget.length && !stale()) { const source = budget[next++]; if (source.table) loaded.set(source, await readColumns(source)); } };
-  const fieldsReady = await early(Promise.all([load(), load()]).then(() => true), false, waitBudget);
+  const [fieldsReady] = await Promise.all([
+    early(Promise.all([load(), load()]).then(() => true), false, waitBudget),
+    !prefix && context?.triggerKind === monaco.languages.CompletionTriggerKind.Invoke ? warmColumnRelations(visible) : undefined,
+  ]);
   if (stale()) return { suggestions: [] };
   const cols = visible.flatMap(s => s.table ? fromColumns(s, loaded.get(s) ?? [], sources.length > 1) : derived(s, sources.length > 1));
   const archiveItems = (await Promise.all(visible.slice(0, 4).map(s => archives(s, loaded.get(s) ?? [])))).flat();
@@ -503,7 +604,12 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
   const functions: Item[] = sqlAssistFunctionsFor(dialect, ctx.clause, !!prefix).filter(f => match(f.name) < 9 && !["set", "order", "group"].includes(ctx.clause)).map(f => mark("function", { label: { label: f.name, detail: f.args.length ? `(${f.args.join(", ")})` : "", description: f.description }, kind: K.Function,
     insertText: f.snippet ?? (f.args.length ? `${f.name}(${f.args.map((arg, i) => `\${${i + 1}:${arg}}`).join(", ")})` : f.name), insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, filterText: filter(f.name), range, sortText: sqlAssistSort(match(f.name), 6, f.name), documentation: f.description }));
   const keywords: Item[] = sqlAssistKeywords(ctx.clause, dialect).filter(k => match(k) < 9).map(k => mark("keyword", { label: k, kind: K.Keyword, insertText: k, filterText: filter(k), range, sortText: sqlAssistSort(match(k), 7, k) }));
-  const snippets: Item[] = prefix ? filterSnippets(listSnippets(connId ?? null), prefix).map(s => mark("snippet", { label: { label: s.name, description: "已保存 SQL 片段" }, kind: K.Snippet, insertText: sqlSnippetText(s.sql), insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, filterText: filter(s.name), range, sortText: sqlAssistSort(match(s.name, s.sql), 5, s.name), documentation: { value: s.sql } })) : [];
+  const snippets: Item[] = prefix ? filterSnippets(listSnippets(connId ?? null), prefix).map(s => {
+    const insertText = sqlSnippetText(s.sql);
+    return mark("snippet", { label: { label: s.name, description: "已保存 SQL 片段" }, kind: K.Snippet, insertText, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      filterText: filter(s.name), range, sortText: sqlAssistSort(match(s.name, s.sql), 5, s.name), documentation: { value: s.sql },
+      ncforgePreview: { title: "SQL 片段", icon: "bookmark", note: s.name, get text() { return sqlPreviewSnippet(insertText); } } });
+  }) : [];
   const projections: Item[] = ctx.projections.filter(name => match(name) < 9).map(name => mark("projection", { label: { label: name, description: "当前 SELECT 输出" }, kind: K.Field, insertText: sqlIdentifier(name, dialect), filterText: filter(name), range, sortText: sqlAssistSort(match(name), 0, name) }));
   const business: Item[] = [];
   // Later JOIN tables exist in the parsed query, but are unavailable in this ON condition.

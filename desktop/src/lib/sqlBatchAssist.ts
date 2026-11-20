@@ -9,6 +9,7 @@ import { sqlReferenceKey } from "./sqlLex";
 import { getSqlFormatPrefs } from "./sqlFormatPrefs";
 import { sqlBatchCondition, sqlBatchTarget, sqlBatchValues } from "./sqlBatchConditions";
 import { toast } from "../components/ui/toast";
+import { openSqlAssistPicker } from "./sqlAssistPicker";
 
 type Editor = monaco.editor.IStandaloneCodeEditor;
 class SqlBatchFieldReadError extends Error {}
@@ -35,7 +36,14 @@ export async function prepareSqlBatchEdit(connId: string, sql: string, selection
   const matches = columns.filter(c => dialect === "plsql" || dialect === "postgresql" ? c.name === key : c.name.toLowerCase() === key.toLowerCase());
   if (matches.length !== 1) throw new Error("无法确认字段，请刷新表结构并检查字段名");
   const values = sqlBatchValues(sql.slice(selection.start, selection.end), matches[0].type ?? "");
-  return { start: target.start, end: target.end, text: sqlBatchCondition(target.fieldRef, values, dialect, getSqlFormatPrefs().keywordCase) };
+  return { start: target.start, end: target.end, text: sqlBatchCondition(target.fieldRef, values, dialect, getSqlFormatPrefs().keywordCase), count: values.length };
+}
+
+export function applySqlBatchEdit(editor: Editor, model: monaco.editor.ITextModel, edit: NonNullable<Awaited<ReturnType<typeof prepareSqlBatchEdit>>>) {
+  editor.pushUndoStop();
+  editor.executeEdits("sql-batch-in", [{ range: rangeOf(model, edit.start, edit.end), text: edit.text }]);
+  editor.pushUndoStop();
+  editor.focus();
 }
 
 export function wireSqlBatchAssist(editor: Editor): monaco.IDisposable {
@@ -60,15 +68,12 @@ export function wireSqlBatchAssist(editor: Editor): monaco.IDisposable {
           && sqlTabOf(tabIdOfModel(model))?.connId === connId && dialectOfSqlModel(model) === dialect
           && !!currentPosition && model.getOffsetAt(currentPosition) === offset && currentSelection?.start === selection.start && currentSelection.end === selection.end;
       };
-      try {
-        const edit = await prepareSqlBatchEdit(connId, sql, selection, dialect, stillCurrent);
-        if (!edit || !stillCurrent()) return;
-        editor.pushUndoStop();
-        editor.executeEdits("sql-batch-in", [{ range: rangeOf(model, edit.start, edit.end), text: edit.text }]);
-        editor.pushUndoStop(); editor.focus();
-      } catch (error) {
-        if (stillCurrent()) toast((error as Error).message, error instanceof SqlBatchFieldReadError ? "warning" : "info");
-      }
+      await openSqlAssistPicker(editor, "批量条件", "list-flat", stillCurrent, async current => {
+        const edit = await prepareSqlBatchEdit(connId, sql, selection, dialect, current);
+        return edit ? [{ label: "转为 IN 条件", detail: `${edit.count} 个值`,
+          preview: { title: "批量条件", icon: "list-flat", text: edit.text, note: `${edit.count} 个不同的值` },
+          apply: () => applySqlBatchEdit(editor, model, edit) }] : [];
+      });
     } });
   return { dispose() { if (disposed) return; disposed = true; generation++; selectionListener.dispose(); action.dispose(); } };
 }

@@ -84,6 +84,8 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
       ...codeDisplayOptionsOf(getEditorPrefs()),
       ariaLabel: "SQL 查询编辑器",
       padding: { top: 8, bottom: 8 },
+      // Reserve a SQL action slot beside the line number, separate from Monaco's glyph margin.
+      lineDecorationsWidth: 30,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       renderLineHighlight: "none",
@@ -172,11 +174,14 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
       });
     };
     refreshScope.current = highlight;
+    const host = hostRef.current;
+    const updateEmptyHint = () => host?.toggleAttribute("data-sql-has-text", !!editor.getModel()?.getValueLength());
     const subs = [wireSqlEditorAssist(editor), wireSqlSuggestLayout(editor), wireSqlActionMenu(editor, overflow),
-      editor.onDidChangeModel(applyRunTrace),
+      editor.onDidChangeModel(() => { applyRunTrace(); updateEmptyHint(); }),
       editor.onDidChangeCursorPosition(highlight),
       editor.onDidChangeCursorSelection(highlight),
       editor.onDidChangeModelContent(() => {
+        updateEmptyHint();
         const model = editor.getModel();
         const id = model && tabIdOfModel(model);
         if (model && id) setSqlDraft(id, model.getValue());

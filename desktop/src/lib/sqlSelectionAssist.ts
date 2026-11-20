@@ -3,7 +3,7 @@ import { rtOf, sqlColumnEpoch, sqlTabOf } from "./dbStore";
 import { tabIdOfModel } from "./sqlModels";
 import { dialectOfSqlModel, SQL_LANGUAGE_IDS } from "./monacoSql";
 import { sqlSelectionActions, type SqlSelectionAction } from "./sqlSelectionActions";
-import { prepareSqlBatchEdit } from "./sqlBatchAssist";
+import { applySqlBatchEdit, prepareSqlBatchEdit } from "./sqlBatchAssist";
 import { sqlAssistScope } from "./sqlAssistLearning";
 import type { SqlCodeAction } from "./sqlBillAssist";
 
@@ -38,23 +38,34 @@ export function wireSqlSelectionAssist(editor: Editor): monaco.IDisposable {
       const { start, end, version, connId, dialect } = selection;
       const sql = model.getValue(), scope = sqlAssistScope(connId), epoch = sqlColumnEpoch(connId);
       return {
-        actions: selection.actions.map((action): SqlCodeAction => ({
-          title: action.title,
-          kind: "refactor.rewrite",
-          command: { id: "ncforge.sql.runAction", title: action.title, arguments: [action.actionId] },
-          ncforgePreview: action.id === "batch.in" ? {
-            async read(isOpen) {
-              const current = () => {
-                if (disposed || !isOpen() || sqlAssistScope(connId) !== scope || sqlColumnEpoch(connId) !== epoch) return false;
-                const latest = sqlEditorSelectionActions(editor);
-                return latest?.model === model && latest.version === version && latest.connId === connId
-                  && latest.dialect === dialect && latest.start === start && latest.end === end;
-              };
-              if (!current()) return "选区已变化，请重新打开操作菜单";
-              return (await prepareSqlBatchEdit(connId, sql, { start, end }, dialect, current))?.text ?? "选区已变化，请重新打开操作菜单";
+        actions: selection.actions.map((action): SqlCodeAction => {
+          const base = { title: action.title, kind: "refactor.rewrite" };
+          if (action.id !== "batch.in") return { ...base,
+            command: { id: "ncforge.sql.runAction", title: action.title, arguments: [action.actionId] },
+            ncforgePreview: { icon: action.id === "check.summary" ? "graph" : "checklist", description: true,
+              text: `${action.detail}\n所选字段 ${sql.slice(start, end)}` },
+          };
+          const current = () => {
+            if (disposed || sqlAssistScope(connId) !== scope || sqlColumnEpoch(connId) !== epoch) return false;
+            const latest = sqlEditorSelectionActions(editor);
+            return latest?.model === model && latest.version === version && latest.connId === connId
+              && latest.dialect === dialect && latest.start === start && latest.end === end;
+          };
+          let prepared: Awaited<ReturnType<typeof prepareSqlBatchEdit>>;
+          return { ...base,
+            ncforgeApply: () => {
+              if (!prepared || !current()) return false;
+              applySqlBatchEdit(editor, model, prepared);
+              return true;
             },
-          } : { description: true, text: `${action.detail}\n所选字段 ${sql.slice(start, end)}\n选择关联主表后可查看生成的 SQL` },
-        })),
+            ncforgePreview: { title: "批量条件", icon: "list-flat", current, async read(isOpen) {
+              const edit = await prepareSqlBatchEdit(connId, sql, { start, end }, dialect, isOpen);
+              if (!edit || !isOpen()) throw new Error("选区已变化，请重新打开操作菜单");
+              prepared = edit;
+              return { text: edit.text, note: `${edit.count} 个不同的值` };
+            } },
+          };
+        }),
         dispose() {},
       };
     },

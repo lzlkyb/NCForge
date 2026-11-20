@@ -12,7 +12,8 @@ vi.mock("./monacoSql", () => ({ dialectOfSqlModel: () => h.dialect }));
 vi.mock("./sqlFormat", () => ({ sqlLanguageOf: () => h.dialect }));
 vi.mock("./sqlFormatPrefs", () => ({ getSqlFormatPrefs: () => ({ keywordCase: "upper" }) }));
 vi.mock("../components/ui/toast", () => ({ toast: h.toast }));
-import { queryCheckChoices, wireSqlQueryCheckAssist } from "./sqlQueryCheckAssist";
+import { wireSqlQueryCheckAssist } from "./sqlQueryCheckAssist";
+import { dismissSqlAssistPicker, markSqlAssistPickerShown, sqlAssistPickerChoices } from "./sqlAssistPicker";
 import { splitStatements } from "./sqlSplit";
 const cleanups: (() => void)[] = [];
 const col = (name: string, type = "VARCHAR2", pk = false) => ({ name, type, full: type, pk } as ColumnInfo);
@@ -37,23 +38,29 @@ function fake(sql = "SELECT b.ORG, b.CODE FROM LINES b WHERE b.QTY>10;", selecte
     setPosition: (p: { lineNumber: number; column: number }) => { caret = model.getOffsetAt(p); start = end = caret; emit("selection"); },
     trigger: vi.fn(), focus: vi.fn(), pushUndoStop: vi.fn() };
   const handle = wireSqlQueryCheckAssist(editor as unknown as monaco.editor.IStandaloneCodeEditor); cleanups.push(() => handle.dispose());
+  const items = () => sqlAssistPickerChoices(model as unknown as monaco.editor.ITextModel, editor.getPosition() as monaco.Position)?.suggestions;
   return { model: model as unknown as monaco.editor.ITextModel, spy: editor, handle, run: (summary = false) => actions.get(summary ? "ncforge.sql.detailSummary" : "ncforge.sql.checkDuplicates")!.run(),
+    items, apply: (index = 0) => items()?.[index].ncforgeApply?.(editor as unknown as monaco.editor.IStandaloneCodeEditor),
     moveAwayBack() { emit("selection"); emit("selection"); }, change() { value += " "; version++; emit("content"); }, actions };
 }
 describe("检查与汇总选区动作", () => {
   it("追加全表重复检查，保留原WHERE，两个撤销边界", async () => {
     const original = "SELECT b.ORG, b.CODE FROM LINES b WHERE b.QTY>10;", f = fake(original); await f.run();
+    expect(f.model.getValue()).toBe(original); expect(f.items()?.[0].ncforgePreview).toMatchObject({ note: "全表范围 · 不带入原 WHERE 条件" });
+    f.apply();
     expect(f.model.getValue().startsWith(original + "\n\n-- ")).toBe(true);
     expect(f.model.getValue()).toContain("GROUP BY a.ORG, a.CODE\nHAVING COUNT(*) > 1;");
     expect(f.spy.pushUndoStop).toHaveBeenCalledTimes(2); expect(h.toast).toHaveBeenLastCalledWith(expect.stringContaining("全表"), "success");
   });
   it("选中数字明细字段，生成父表预聚合汇总，无明细为0", async () => {
     const f = fake("SELECT b.QTY FROM LINES b;", "b.QTY"); await f.run(true);
+    f.apply();
     expect(f.model.getValue()).toContain("SUM(c.QTY)"); expect(f.model.getValue()).toContain("NVL(d.DETAIL_COUNT, 0)");
     expect(f.model.getValue()).toContain("FROM HEAD p"); expect(f.model.getValue()).toContain("GROUP BY c.PARENT_ID");
   });
   it.each([" -- keep", " -- keep;", "\n/", "\n/   ", "\n/   \n", "\n/\nSELECT 1 FROM dual;"])("原查询以注释或斜杠结束仍分成独立查询：%s", async suffix => {
     const original = "SELECT b.ORG, b.CODE FROM LINES b" + suffix, f = fake(original); await f.run();
+    f.apply();
     const all = splitStatements(f.model.getValue());
     expect(all).toHaveLength(suffix.includes("SELECT 1") ? 3 : 2);
     expect(all[0].text).toContain("SELECT b.ORG, b.CODE FROM LINES b");
@@ -67,6 +74,7 @@ describe("检查与汇总选区动作", () => {
     metadata.relations.unshift(...children.map(source => ({ ...metadata.relations[0], source, target: "LINES", id: `外键:${source}` })));
     h.metadata.mockResolvedValue(metadata);
     const f = fake("SELECT b.QTY FROM LINES b;", "b.QTY"); await f.run(true);
+    f.apply();
     expect(f.model.getValue()).toContain("FROM HEAD p");
     expect(h.columns.mock.calls.map(call => call[1])).toEqual(["lines", "head"]);
   });
@@ -74,29 +82,39 @@ describe("检查与汇总选区动作", () => {
     const metadata = await h.metadata(); metadata.relations.push({ ...metadata.relations[0], id: "外键:other", target: "ALT_HEAD" });
     h.metadata.mockResolvedValue(metadata);
     const f = fake("SELECT b.QTY FROM LINES b;", "b.QTY", eol); await f.run(true);
-    const items = queryCheckChoices(f.model, f.spy.getPosition() as monaco.Position)!.suggestions;
+    const items = f.items()!;
     expect(items).toHaveLength(2); expect(items.every(t => t.insertText === "")).toBe(true);
-    const command = items[1].command!; h.commands.get(command.id)!(undefined, ...command.arguments!);
+    expect(f.spy.executeEdits).not.toHaveBeenCalled();
+    f.apply(1);
     expect(f.model.getValue()).toContain("FROM ALT_HEAD p");
     expect(f.model.getValue()).toContain(eol + "SELECT p.*,");
     expect(f.model.getOffsetAt(f.spy.getPosition() as monaco.Position)).toBe(f.model.getValue().length);
-    expect(f.spy.trigger).toHaveBeenCalledWith("sql-query-check", "editor.action.triggerSuggest", {});
-    f.moveAwayBack(); expect(queryCheckChoices(f.model, f.spy.getPosition() as monaco.Position)).toBeUndefined();
+    expect(f.spy.trigger).toHaveBeenCalledWith("sql-assist", "editor.action.triggerSuggest", {});
+    f.moveAwayBack(); expect(f.items()).toBeUndefined();
   });
   it.each(["schema", "epoch", "connection", "disconnect", "dialect"])("候选展示后%s单独变化不允许插入旧候选", async kind => {
     const metadata = await h.metadata(); metadata.relations.push({ ...metadata.relations[0], id: "外键:other", target: "ALT_HEAD" }); h.metadata.mockResolvedValue(metadata);
     const f = fake("SELECT b.QTY FROM LINES b;", "b.QTY"); await f.run(true);
-    const position = f.spy.getPosition() as monaco.Position;
-    const items = queryCheckChoices(f.model, position)!.suggestions, old = items[1].command!;
+    const items = f.items()!, old = items[1].ncforgeApply!;
     expect(items).toHaveLength(2); const original = f.model.getValue();
     if (kind === "schema") h.schema = "OTHER";
     if (kind === "epoch") h.epoch++;
     if (kind === "connection") h.conn.url = "jdbc:oracle:thin:@other";
     if (kind === "disconnect") h.connected = false;
     if (kind === "dialect") h.dialect = "tsql";
-    h.commands.get(old.id)!(undefined, ...old.arguments!);
-    expect(f.model.getValue()).toBe(original); expect(f.spy.executeEdits).toHaveBeenCalledTimes(1);
-    expect(queryCheckChoices(f.model, position)).toBeUndefined();
+    old(f.spy as unknown as monaco.editor.IStandaloneCodeEditor);
+    expect(f.model.getValue()).toBe(original); expect(f.spy.executeEdits).not.toHaveBeenCalled();
+    expect(f.items()).toBeUndefined();
+  });
+  it("关闭加载中的汇总选择后，迟到的数据不会重新打开弹框", async () => {
+    let finish!: (value: ColumnInfo[]) => void;
+    h.columns.mockImplementation(() => new Promise(r => { finish = r; }));
+    const f = fake(), pending = f.run();
+    expect(f.items()?.[0].ncforgePreview).toMatchObject({ status: "loading" });
+    markSqlAssistPickerShown(f.model);
+    dismissSqlAssistPicker(f.model);
+    finish([col("ORG"), col("CODE")]); await pending;
+    expect(f.items()).toBeUndefined(); expect(f.spy.executeEdits).not.toHaveBeenCalled();
   });
   it.each(["schema", "epoch", "model", "selection", "connection", "dispose", "disconnect", "dialect"])("读取期间%s变化不追加旧查询", async kind => {
     let finish!: (value: ColumnInfo[]) => void;

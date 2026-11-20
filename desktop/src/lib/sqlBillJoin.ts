@@ -22,8 +22,23 @@ export function billTableOf(prefix: string, names: readonly string[], ncNames: R
 }
 
 export type BillJoinGroup = "detail" | "related" | "lookup";
+export type SqlJoinIcon = "detail" | "user" | "org" | "view" | "table" | "book";
 export const billJoinGroupLabels: Record<BillJoinGroup, string> = { detail: "单据明细", related: "其他关联", lookup: "档案与字典" };
 const priority: Record<BillJoinGroup, number> = { detail: 0, related: 1, lookup: 2 };
+const ncOrganizations = new Set(["org_orgs", "org_group", "org_dept", "org_purchaseorg", "org_stockorg", "org_salesorg", "org_financeorg", "org_hrorg"]);
+const ncRecords = new Set(["bd_supplier", "bd_customer", "bd_material", "bd_psndoc", "bd_bankdoc", "bd_billtype",
+  "bd_busitype", "bd_transporttype", "bd_channeltype", "bd_freecustom"]);
+
+/** The row's icon identifies the object. A naming prefix alone cannot classify a custom table. */
+export function sqlJoinIcon(table: string, group: BillJoinGroup, isView: boolean): SqlJoinIcon {
+  if (isView) return "view";
+  if (group === "detail") return "detail";
+  const name = plainName(table);
+  if (name === "sm_user") return "user";
+  if (ncOrganizations.has(name)) return "org";
+  if (ncRecords.has(name)) return "book";
+  return "table";
+}
 
 export function rankBillRelations(table: string, relations: readonly BillQueryRelation[], names: Readonly<Record<string, string>> = {}) {
   const root = table.toLowerCase(), rootName = names[root];
@@ -38,7 +53,7 @@ export function rankBillRelations(table: string, relations: readonly BillQueryRe
   }).sort((a, b) => priority[a.group] - priority[b.group]);
 }
 
-export interface BillJoinSpec { table: string; sql: string; source: string; group: BillJoinGroup }
+export interface BillJoinSpec { table: string; sql: string; source: string; group: BillJoinGroup; rootColumns: readonly string[]; otherColumns: readonly string[] }
 
 /**
  * 主表能接上的子表 JOIN 片段。
@@ -50,6 +65,6 @@ export function billJoinSpecs(table: string, available: readonly string[], meta:
   names?: Readonly<Record<string, string>>, qualifier = table): BillJoinSpec[] {
   return rankBillRelations(table, billQueryRelations(table, available, meta), names).map(({ relation: rel, group }) => {
     const on = rel.otherColumns.map((column, i) => `${rel.table}.${column} = ${qualifier}.${rel.rootColumns[i]}`).join(" AND ");
-    return { table: rel.table, sql: ` LEFT JOIN ${rel.table} ON ${on}`, source: rel.source, group };
+    return { table: rel.table, sql: ` LEFT JOIN ${rel.table} ON ${on}`, source: rel.source, group, rootColumns: rel.rootColumns, otherColumns: rel.otherColumns };
   });
 }

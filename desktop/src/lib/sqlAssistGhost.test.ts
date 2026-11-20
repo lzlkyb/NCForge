@@ -4,11 +4,11 @@ import type { monaco } from "./monacoSetup";
 
 const h = vi.hoisted(() => ({
   rt: { status: "connected", currentSchema: "APP", tables: [{ name: "BD_MATERIAL", kind: "TABLE" }, { name: "BD_PROJECT", kind: "TABLE" }] } as Record<string, unknown>,
-  peek: vi.fn(), read: vi.fn(), templates: true,
+  peek: vi.fn(), read: vi.fn(), markers: vi.fn(), templates: true,
 }));
 vi.mock("./monacoSetup", () => ({ monaco: {
   Range: class { constructor(readonly a: number, readonly b: number, readonly c: number, readonly d: number) {} },
-  editor: { ContentWidgetPositionPreference: { EXACT: 0 } },
+  editor: { getModelMarkers: h.markers, onDidChangeMarkers: () => ({ dispose() {} }) },
 } }));
 vi.mock("./dbStore", () => ({ sqlTabOf: () => ({ connId: "c" }), rtOf: () => h.rt, connOf: () => ({ id: "c", url: "jdbc:oracle:thin:@host" }) }));
 vi.mock("./dbResultContext", () => ({ connectionKey: () => "k" }));
@@ -22,7 +22,7 @@ vi.mock("./sqlBusiness", async importOriginal => ({
   ...await importOriginal<typeof import("./sqlBusiness")>(),
   peekSqlBusinessMetadata: h.peek, readSqlBusinessMetadata: h.read,
 }));
-vi.mock("./sqlTemplates", () => ({ getSqlTemplatesEnabled: () => h.templates }));
+vi.mock("./sqlTemplates", () => ({ getSqlTemplatesEnabled: () => h.templates, subscribeSqlTemplates: () => () => {} }));
 
 const billMeta = {
   table: "bd_material", schema: "APP",
@@ -30,7 +30,7 @@ const billMeta = {
   enums: [], partial: false, sharedSession: false,
 };
 const cleanups: { dispose(): void }[] = [];
-beforeEach(() => { h.peek.mockReset(); h.read.mockReset().mockResolvedValue(null); h.templates = true; });
+beforeEach(() => { h.peek.mockReset(); h.read.mockReset().mockResolvedValue(null); h.markers.mockReset().mockReturnValue([]); h.templates = true; });
 afterEach(() => { cleanups.splice(0).forEach(d => d.dispose()); });
 
 function fakeEditor(sql: string) {
@@ -38,28 +38,32 @@ function fakeEditor(sql: string) {
   const handlers = new Map<string, () => void>();
   const model = {
     getValue: () => sql, getVersionId: () => 1, isDisposed: () => false,
+    getLineMaxColumn: (line: number) => sql.split("\n")[line - 1].length + 1,
     getPositionAt: (at: number) => { const lines = sql.slice(0, at).split("\n"); return { lineNumber: lines.length, column: lines[lines.length - 1].length + 1 }; },
     getOffsetAt: (p: { lineNumber: number; column: number }) => sql.split("\n").slice(0, p.lineNumber - 1).reduce((n, line) => n + line.length + 1, 0) + p.column - 1,
   };
   const listen = (id: string) => (fn: () => void) => { handlers.set(id, fn); return { dispose: () => handlers.delete(id) }; };
-  let widget: monaco.editor.IContentWidget | null = null;
-  const decorations: { options?: { after?: { content?: string } } }[] = [];
+  let widget: monaco.editor.IOverlayWidget | null = null;
+  const layout = { height: 250, contentLeft: 64, contentWidth: 350, verticalScrollbarWidth: 10, decorationsLeft: 34 };
   const actions = new Map<string, () => void>();
   const editor = {
     getModel: () => model, getPosition: () => model.getPositionAt(offset),
-    getSelection: () => null,
+    getSelection: () => null, getDomNode: () => null,
+    getLayoutInfo: () => layout, getScrollLeft: () => 0,
+    getVisibleRanges: () => [{ startLineNumber: 1, endLineNumber: 2 }],
+    getScrolledVisiblePosition: ({ lineNumber, column }: monaco.IPosition) => ({ top: (lineNumber - 1) * 22, left: layout.contentLeft + (column - 1) * 7, height: 22 }),
     setPosition: (p: { lineNumber: number; column: number }) => { offset = model.getOffsetAt(p); },
-    focus: vi.fn(), trigger: vi.fn(), layoutContentWidget: vi.fn(), removeContentWidget: vi.fn(),
+    focus: vi.fn(), trigger: vi.fn(), layoutOverlayWidget: vi.fn(), removeOverlayWidget: vi.fn(),
     getAction: (id: string) => { const run = actions.get(id); return run ? { run } : null; },
-    addContentWidget: (w: monaco.editor.IContentWidget) => { widget = w; },
-    createDecorationsCollection: () => ({ set: (d: typeof decorations) => { decorations.splice(0, decorations.length, ...d); }, clear: () => decorations.splice(0) }),
-    onDidChangeCursorPosition: listen("cursor"), onDidChangeCursorSelection: listen("selection"), onDidChangeModelContent: listen("content"), onDidChangeModel: listen("model"),
+    addOverlayWidget: (w: monaco.editor.IOverlayWidget) => { widget = w; },
+    onDidChangeCursorSelection: listen("selection"), onDidChangeModelContent: listen("content"), onDidChangeModel: listen("model"),
+    onDidScrollChange: listen("scroll"), onDidLayoutChange: listen("layout"), onDidChangeConfiguration: listen("config"), onDidChangeHiddenAreas: listen("fold"),
   };
   return {
-    editor: editor as unknown as monaco.editor.IStandaloneCodeEditor, spy: editor, model, decorations, actions,
+    editor: editor as unknown as monaco.editor.IStandaloneCodeEditor, spy: editor, model, layout,
     chip: () => (widget?.getDomNode() as HTMLButtonElement | undefined),
     position: () => widget?.getPosition() ?? null,
-    move: (at: number) => { offset = at; handlers.get("cursor")?.(); },
+    move: (at: number) => { offset = at; handlers.get("selection")?.(); },
     offset: () => offset,
   };
 }
@@ -70,12 +74,14 @@ async function wire(fake: ReturnType<typeof fakeEditor>) {
 }
 
 describe("SQL 行内提示", () => {
-  it("光标停在表名上且关系已知时，表名后挂出可点的联查 chip", async () => {
+  it("光标停在表名上且关系已知时，在别名之后显示联查入口", async () => {
     h.peek.mockReturnValue(billMeta);
-    const fake = await wire(fakeEditor("SELECT * FROM bd_material m"));
+    const sql = "SELECT * FROM bd_material m WHERE 1=1;";
+    const fake = await wire(fakeEditor(sql));
     expect(fake.position()).toBeNull();
     fake.move(14);
-    expect(fake.position()).toEqual({ position: { lineNumber: 1, column: 26 }, preference: [0] });
+    expect(fake.position()?.preference).toMatchObject({ left: fake.layout.contentLeft + sql.length * 7 });
+    expect(fake.chip()!.dataset.placement).toBe("end");
     expect(fake.chip()!.hidden).toBe(false);
     expect(fake.chip()!.title).toContain("支持主子表联查");
   });
@@ -122,13 +128,27 @@ describe("SQL 行内提示", () => {
     fake.move(13);
     expect(fake.position()).toBeNull();
   });
-  it("LEFT JOIN 后的 WHERE 条件在光标所在行给出人话说明，换行就不挂", async () => {
-    const sql = "SELECT a.* FROM head a LEFT JOIN lines b ON a.id=b.head_id WHERE b.qty > 1;\nSELECT 1 FROM dual";
+  it("空间不足时在行号旁显示图标，仍然打开原通配字段", async () => {
+    const sql = "SELECT * FROM bd_material m WHERE " + "1=1 AND ".repeat(20) + "1=1;";
     const fake = await wire(fakeEditor(sql));
-    expect(fake.decorations).toHaveLength(1);
-    expect(fake.decorations[0].options?.after?.content).toContain("排除无匹配主表行");
+    fake.move(sql.indexOf("*"));
+    expect(fake.chip()!.dataset.placement).toBe("gutter");
+    expect(fake.position()?.preference).toMatchObject({ left: fake.layout.decorationsLeft });
+    fake.chip()!.click();
+    expect(fake.offset()).toBe(sql.indexOf("*") + 1);
+  });
+  it("关联修正入口复用诊断说明，并把操作交给对应条件", async () => {
+    const sql = "SELECT a.* FROM head a LEFT JOIN lines b ON a.id=b.head_id WHERE b.qty > 1 AND a.id > 0;\nSELECT 1 FROM dual";
+    const start = sql.indexOf("b.qty");
+    h.markers.mockReturnValue([{ code: "left-join-where", startLineNumber: 1, startColumn: start + 1,
+      endLineNumber: 1, endColumn: start + 10, message: "排除无匹配主表行" }]);
+    const fake = await wire(fakeEditor(sql));
+    expect(fake.chip()?.textContent).toBe("关联修正");
+    expect(fake.chip()?.title).toContain("排除无匹配主表行");
+    fake.chip()?.click();
+    expect(fake.offset()).toBe(start);
     fake.move(sql.indexOf("SELECT 1"));
-    expect(fake.decorations).toHaveLength(0);
+    expect(fake.position()).toBeNull();
   });
   it("模板总开关关闭时不提供任何行内提示", async () => {
     h.templates = false; h.peek.mockReturnValue(billMeta);

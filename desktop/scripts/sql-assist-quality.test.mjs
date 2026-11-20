@@ -150,7 +150,7 @@ test("补全质量探针", async () => {
     await page.keyboard.press("Control+a"); await page.keyboard.press("Delete");
     await type(page, "SELECT * FROM po_arriveorder");
     await page.keyboard.press("Escape");
-    const chip = page.locator(".monaco-editor .contentWidgets").getByText("主子表联查", { exact: true });
+    const chip = page.getByRole("button", { name: /^主子表联查 ·/ });
     await chip.waitFor({ timeout: 20000 });
     await chip.click();
     await page.locator(".dbx-sql-action-view").waitFor();

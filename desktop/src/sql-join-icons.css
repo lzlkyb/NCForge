@@ -1,0 +1,41 @@
+/* Monaco owns virtual rows. Namespaced glyphs let both panes share the reviewed artwork. */
+.dbx-sql-action-view [class*="codicon-ncforge-join-"] {
+  display:inline-flex;
+  flex:none;
+  width:16px;
+  height:16px;
+}
+.dbx-sql-action-view [class*="codicon-ncforge-join-"]::before,
+.dbx-suggest-fit [class*="codicon-ncforge-join-"]::before,
+.dbx-suggest-fit[data-sql-expanded-fields] .codicon-symbol-field::before {
+  content:"";
+  width:100%;
+  height:100%;
+  background:currentColor;
+  mask:var(--sql-join-glyph) center / contain no-repeat;
+  forced-color-adjust:none;
+}
+.dbx-suggest-fit :is([class*="codicon-ncforge-join-"], [data-sql-expanded-fields] .codicon-symbol-field)::before {
+  display:inline-block;
+  width:16px;
+  height:16px;
+  vertical-align:middle;
+}
+
+.codicon-ncforge-join-detail { --sql-join-glyph: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2016%2016'%20fill%3D'none'%20stroke%3D'black'%20stroke-width%3D'1.35'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M3%203.5h10M3%207h3v5.5h2M10%207h3M10%2010h3M10%2013h3'%2F%3E%3C%2Fsvg%3E"); }
+.codicon-ncforge-join-user { --sql-join-glyph: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2016%2016'%20fill%3D'none'%20stroke%3D'black'%20stroke-width%3D'1.35'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M10.5%205a2.5%202.5%200%201%201-5%200%202.5%202.5%200%200%201%205%200ZM3%2013a5%204%200%200%201%2010%200'%2F%3E%3C%2Fsvg%3E"); }
+.codicon-ncforge-join-org { --sql-join-glyph: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2016%2016'%20fill%3D'none'%20stroke%3D'black'%20stroke-width%3D'1.35'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M6.25%202h3.5v3H6.25zM8%205v3m-5%203V8h10v3m-11%200h3v3H2zm9%200h3v3h-3z'%2F%3E%3C%2Fsvg%3E"); }
+.codicon-ncforge-join-view { --sql-join-glyph: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2016%2016'%20fill%3D'none'%20stroke%3D'black'%20stroke-width%3D'1.35'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M1.5%208s2.35-4%206.5-4%206.5%204%206.5%204-2.35%204-6.5%204-6.5-4-6.5-4ZM9.6%208a1.6%201.6%200%201%201-3.2%200%201.6%201.6%200%200%201%203.2%200Z'%2F%3E%3C%2Fsvg%3E"); }
+.codicon-ncforge-join-table,
+.dbx-suggest-fit[data-sql-expanded-fields] .codicon-symbol-field { --sql-join-glyph: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2016%2016'%20fill%3D'none'%20stroke%3D'black'%20stroke-width%3D'1.35'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M2.5%203h11v10h-11zM2.5%206.5h11m-11%203.25h11M7%206.5v6.5'%2F%3E%3C%2Fsvg%3E"); }
+.codicon-ncforge-join-book { --sql-join-glyph: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2016%2016'%20fill%3D'none'%20stroke%3D'black'%20stroke-width%3D'1.35'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M8%204.5C6.5%203.4%204.5%203%202%203.5v8c2.5-.5%204.5-.1%206%201%201.5-1.1%203.5-1.5%206-1v-8c-2.5-.5-4.5-.1-6%201ZM8%204.5v8'%2F%3E%3C%2Fsvg%3E"); }
+
+@media (forced-colors: active) {
+  .dbx-sql-action-view .monaco-list-row.action.focused:not(.option-disabled) {
+    forced-color-adjust:none;
+    background:Highlight!important;
+    color:HighlightText!important;
+  }
+  .dbx-sql-action-view [class*="codicon-ncforge-join-"]::before { background:CanvasText; }
+  .dbx-sql-action-view .monaco-list-row.focused [class*="codicon-ncforge-join-"]::before { background:HighlightText; }
+}
