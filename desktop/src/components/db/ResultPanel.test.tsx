@@ -159,7 +159,7 @@ describe("ResultPanel 多结果集", () => {
       expect(host.querySelector(".dbx-output")?.textContent).toContain("第 1 条 · 500 行");
       expect(host.querySelector<HTMLElement>(".dbx-result-keep")?.hidden).toBe(true);
       await act(async () => resultTab.click());
-      expect(host.querySelector(".dbx-output")).toBeNull();
+      expect(host.querySelector<HTMLElement>(".dbx-output-view")?.hidden).toBe(true);
       expect(host.querySelector<HTMLElement>(".dbx-result-keep")?.hidden).toBe(false);
     } finally {
       await act(async () => { closeTab(id); });
@@ -191,11 +191,11 @@ describe("ResultPanel 多结果集", () => {
     expect(host.querySelector(".dbx-rtab")?.textContent).toContain("2 个结果集");
 
     await click("结果集 2");
-    const heads = [...host.querySelectorAll(".dbx-gh .nm")].map((e) => e.textContent);
+    const heads = [...host.querySelectorAll(".dbx-result-set-view:not([hidden]) .dbx-gh .nm")].map((e) => e.textContent);
     // 切到第二个结果集要换成它的列（不是同一张表换个标题）
     expect(heads).toEqual(["s"]);
     expect(host.querySelector('[role="tablist"][aria-label="结果集"] [aria-selected="true"]')?.textContent).toContain("结果集 2");
-    expect(host.querySelector('.dbx-rfoot')?.textContent).toContain("已加载 2 行");
+    expect(host.querySelector('.dbx-result-set-view:not([hidden]) .dbx-rfoot')?.textContent).toContain("已加载 2 行");
   });
 
   it("只有一个结果集：不出小标签，按普通结果处理", async () => {

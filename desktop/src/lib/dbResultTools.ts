@@ -21,7 +21,8 @@ export function selectionText(rows: Cell[][], order: number[], visible: number[]
 }
 export interface GridLayout { order: string[]; hidden: string[]; frozen: string[]; widths: Record<string, number>; decoded: string[]; raw?: string[]; wrap: boolean }
 export const defaultLayout = (): GridLayout => ({ order: [], hidden: [], frozen: [], widths: {}, decoded: [], wrap: false });
-export function loadLayout(key?: string): GridLayout {
+export function loadLayout(key?: string, fallbackKey?: string): GridLayout {
+  if (!key) return fallbackKey ? loadLayout(fallbackKey) : defaultLayout();
   try {
     const v = JSON.parse(localStorage.getItem(`ncforge-db-grid:${key}`) ?? "null");
     if (key && v && [v.order,v.hidden,v.frozen].every(a=>Array.isArray(a) && a.every(n=>typeof n==="string")) && v.widths && typeof v.widths==="object" && Object.values(v.widths).every(w=>typeof w==="number" && Number.isFinite(w) && w>=40 && w<=900))
@@ -31,7 +32,7 @@ export function loadLayout(key?: string): GridLayout {
         raw: Array.isArray(v.raw) ? v.raw.filter((n: unknown) => typeof n === "string") : undefined,
         wrap: typeof v.wrap === "boolean" ? v.wrap : false };
   } catch { /* 不影响结果读取。 */ }
-  return defaultLayout();
+  return fallbackKey && key !== fallbackKey ? loadLayout(fallbackKey) : defaultLayout();
 }
 export function saveLayout(key: string | undefined, value: GridLayout) { if(key) localStorage.setItem(`ncforge-db-grid:${key}`,JSON.stringify(value)); }
 export function gridColumns(columns: ColumnMeta[], layout: GridLayout): number[] {

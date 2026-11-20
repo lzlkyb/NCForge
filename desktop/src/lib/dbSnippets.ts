@@ -16,9 +16,15 @@ export interface Snippet {
   /** `null` = 全局。 */
   connId: string | null;
   schema?: string;
+  parameterTypes?: Record<string, QueryParameterType>;
   /** 最后修改时间（毫秒），列表按它倒序。 */
   at: number;
 }
+export type QueryParameterType = "text" | "number" | "null";
+const parameterTypesOf = (value: unknown): Record<string, QueryParameterType> | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  return Object.fromEntries(Object.entries(value).filter(([, type]) => type === "text" || type === "number" || type === "null"));
+};
 
 const KEY = "ncforge-db-snippets";
 const MAX = 200;
@@ -34,7 +40,8 @@ function readAll(): Snippet[] {
   try {
     const raw = localStorage.getItem(KEY);
     const v = raw ? (JSON.parse(raw) as unknown) : null;
-    cache = Array.isArray(v) ? v.filter(isSnippet) : [];
+    cache = Array.isArray(v) ? v.filter(isSnippet).map(snippet => snippet.parameterTypes
+      ? { ...snippet, parameterTypes: parameterTypesOf(snippet.parameterTypes) } : snippet) : [];
   } catch {
     cache = [];
   }
@@ -110,14 +117,14 @@ function newId(): string {
 }
 
 /** 存一条。名字留空时用 SQL 第一行兜底，免得列表里出现一堆空标题。 */
-export function addSnippet(input: { name: string; sql: string; connId: string | null; schema?: string }): Snippet {
+export function addSnippet(input: { name: string; sql: string; connId: string | null; schema?: string; parameterTypes?: Record<string, QueryParameterType> }): Snippet {
   const name = input.name.trim() || defaultName(input.sql);
   const s: Snippet = { ...input, id: newId(), name, at: Date.now() };
   writeAll([s, ...readAll().filter((x) => x.id !== s.id)].slice(0, MAX));
   return s;
 }
 
-export function updateSnippet(id: string, patch: { name?: string; sql?: string; connId?: string | null }): void {
+export function updateSnippet(id: string, patch: { name?: string; sql?: string; connId?: string | null; parameterTypes?: Record<string, QueryParameterType> }): void {
   const all = readAll();
   const i = all.findIndex((s) => s.id === id);
   if (i < 0) return;
@@ -129,6 +136,13 @@ export function updateSnippet(id: string, patch: { name?: string; sql?: string; 
     at: Date.now(),
   };
   writeAll(all.map((s, k) => (k === i ? next : s)));
+}
+
+/** Match an explicitly saved query. Ignore the editor's optional trailing terminator. */
+export function querySnippet(connId: string | null, schema: string | undefined, sql: string): Snippet | undefined {
+  const canonical = (text: string) => text.trim().replace(/;\s*$/, "").trimEnd();
+  const key = canonical(sql);
+  return listSnippets(connId).find(snippet => (snippet.schema === undefined || snippet.schema === schema) && canonical(snippet.sql) === key);
 }
 
 export function removeSnippet(id: string): void {

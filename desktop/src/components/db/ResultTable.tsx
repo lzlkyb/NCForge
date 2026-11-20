@@ -32,6 +32,8 @@ import { ResultSource } from "./ResultSource";
 import { loadLayout, saveLayout, gridColumns, type Selection, type GridLayout, type ResultSnapshot } from "../../lib/dbResultTools";
 import { rowActionItems } from "../../lib/dbRowActions";
 
+import { thousands } from "../../lib/db";
+import type { ResultFilterMatch } from "../../lib/dbResultFollowup";
 /**
  * 取大文本完整值需要的上下文。结果集只带 8K 预览，用户点「加载完整值」时
  * 后端按 `sql` 重查第 `row_index` 行、取 `column` 那一列。
@@ -51,11 +53,11 @@ export interface LobSource {
   sqlForRow?: (row: number) => string | null;
   binarySqlForRow?: (row: number, column: number) => string | null;
 }
-
-export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, snapshot, onRelated, lob, hasMore, loadingMore, onLoadMore, editOwner, queryCell }: {
+export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, templateLayoutKey, snapshot, onRelated, lob, hasMore, loadingMore, onLoadMore, editOwner, requery }: {
   columns: ColumnMeta[];
   layoutKey?:string; snapshot?:ResultSnapshot; connId?:string|null; onRelated?:(row:Cell[])=>void; editOwner?:string;
-  queryCell?: (column: number, row: number) => (() => void) | undefined;
+  templateLayoutKey?: string;
+  requery?: (match: ResultFilterMatch) => void;
   /** 大文本「加载完整值」的上下文；不传 = 这个结果不支持（表页 / 非查询结果）。 */
   lob?: LobSource;
   rows: Cell[][];
@@ -92,14 +94,16 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
 
   const [sort, setSort] = useState<SortState | null>(null);
   /** 「以此值筛选」：只在一列里做整值相等，和关键字筛选可以叠加。 */
-  const [valueFilter, setValueFilter] = useState<ValueFilter | null>(null);
+  const [valueFilter, setValueFilter] = useState<(ValueFilter & { original?: Cell }) | null>(null);
   /** 关键字筛选 / 排序 / 值筛选一起清掉：状态条与「计算失败」两处都要，别写成两份。 */
   const clearView = () => { setFilter(""); setSort(null); setValueFilter(null); };
   const [selection,setSelection] = useState<Selection|null>(null);
   const sel=selection?.end ?? null;
-  const querySelected = sel && selection?.anchor.r === sel.r && selection.anchor.c === sel.c ? queryCell?.(sel.c, sel.r) : undefined;
-  const [layout,setLayout] = useState(()=>loadLayout(layoutKey));
-
+  const singleCell = sel && selection?.anchor.r === sel.r && selection.anchor.c === sel.c ? sel : null;
+  const chosenValue = singleCell && !edit?.isDraftRow?.(singleCell.r) ? rows[singleCell.r]?.[singleCell.c] : undefined;
+  const currentMatch = valueFilter?.original !== undefined ? { column: valueFilter.col, value: valueFilter.original, keyword: filter }
+    : filter.trim() ? { keyword: filter } : singleCell && chosenValue !== undefined ? { column: singleCell.c, value: chosenValue } : null;
+  const [layout,setLayout] = useState(()=>loadLayout(templateLayoutKey, layoutKey));
   const visible=useMemo(() => gridColumns(columns,layout), [columns,layout]);
   const setColumns=(value:GridLayout)=>{setLayout(value);setSelection(null);try{saveLayout(layoutKey,value);}catch{toast("列布局未能保存，当前布局仍可使用","error");}};
   // 宽度 / 换行 / 解码只影响显示，不该把用户正选着的区域扔掉——于是不走 `setColumns`。
@@ -118,12 +122,10 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
   const setHead=(head:typeof ui.head)=>setUi(v=>({...v,head}));
   const { order, pending, error: orderError, retry } = useResultOrder(rows, columns, filter, sort, valueFilter);
   const bounds = selectionBounds(order,visible,selection);
-
   const valueAt=(r:number,c:number)=>edit?.changed.has(`${r}:${c}`) ? edit.changed.get(`${r}:${c}`)! : rows[r][c];
   const frame: TransferFrame = { data: { columns, rows }, order, visible, selection,
     labels: columns.map(c => zh?.[c.name.toLowerCase()] || c.name),
     source: transferSource ?? { connId: null, resultId: layoutKey || "result", sql: snapshot?.sql ?? "", source: snapshot?.source ?? "当前结果", complete: snapshot?.complete ?? true, table, canRequery: false } };
-  const copySelection = () => void quickCopyTransfer(frame,"tsv",false,edit?.changed);
   /** 选区里的可编辑格；没有选区就是当前格。 */
   const selectedCells = () => edit && bounds ? selectedEditableCells(bounds, order, visible, edit.canEdit) : [];
   const cellMenu = (r:number,c:number,x:number,y:number) => {
@@ -135,7 +137,8 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
       // 「以此值筛选」读的是 `rows` 里的原值，不是未写回的编辑草稿：本地筛选只作用于
       // 已取到的数据，拿编辑后的值去筛会立刻筛出 0 行。
       {label: (() => { const v = rows[r]?.[c] ?? null; return v === null ? "只看这一列为空" : `只看「${cellBrief(v)}」`; })(),
-        icon:"filter", hint: columns[c]?.name, onSelect: () => { const v = rows[r]?.[c] ?? null; setValueFilter({ col: c, value: v === null ? null : String(v) }); }},
+        icon:"filter", hint: columns[c]?.name, onSelect: () => { const v = rows[r]?.[c] ?? null; setValueFilter({ col: c, original: v, value: v === null ? null : String(v) }); }},
+      ...(requery && rows[r]?.[c] !== undefined && !edit?.isDraftRow?.(r) ? [{ label: "按此值重新查询", icon: "database" as const, onSelect: () => requery({ column: c, value: rows[r][c] }) }] : []),
       {label:"复制原始值",icon:"copy",separator:true,onSelect:()=>void quickCopyTransfer(cell,"tsv",true,edit?.changed)},
       {label:"复制列名",onSelect:()=>void navigator.clipboard.writeText(columns[c].name).then(()=>toast("列名已复制","success"),e=>toast(`复制失败：${String(e)}`,"error"))},
       {label:"复制唯一值（当前筛选列）",onSelect:()=>{const seen=new Set<Cell>();const order=column.order.filter(i=>{const key=valueAt(i,c);if(seen.has(key)) return false;seen.add(key);return true;});void quickCopyTransfer({...column,order},"tsv",false,edit?.changed);}},
@@ -189,7 +192,6 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
     raw: [...(layout.raw ?? []).filter(name => name !== headName), ...(mode === "raw" ? [headName] : [])],
   });
   const headDecodable = useMemo(() => head ? rows.slice(0,50).some(r=>decodeCell(r[head.col],{auto:true})) : false, [head, rows]);
-
   return (
     <div className="dbx-result-table" data-result-edit-owner={editOwner} onKeyDown={event=>{
       if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase()==="f" &&
@@ -202,7 +204,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
         <button type="button" className="dbx-btn ghost dbx-filter-trigger" data-on={filterOpen || !!filter || !!valueFilter || undefined}
           title="筛选已加载行 · 网格中 Ctrl+F" aria-label="筛选已加载行" aria-expanded={filterOpen || !!filter}
           onClick={()=>setFilterOpen(v=>!v)}><Icon name="search" size={14} /><span>筛选已加载行</span></button>
-        {querySelected && <button type="button" className="dbx-btn ghost" onClick={querySelected}>按此值查整表</button>}
+        {requery && currentMatch && <button type="button" className="dbx-btn ghost" onClick={() => requery(currentMatch)}>数据库重查</button>}
         {(filterOpen || filter) && <input ref={filterInput} className="dbx-inp sm dbx-result-filter" value={filter}
           placeholder="输入关键字" aria-label="在结果中筛选" onChange={e=>{setFilter(e.target.value);setValueFilter(null);}} autoFocus={filterOpen}
           onKeyDown={e=>{if(e.key==="Escape"){e.preventDefault();setFilter("");setFilterOpen(false);gridApi.current?.focusActive();}}} />}
@@ -210,12 +212,17 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
           const box = event.currentTarget.getBoundingClientRect();
           setMenu({ x: box.left, y: box.bottom + 4, items: [
             { label: "结果列布局", icon: "visibleColumns", hint: `${visible.length} / ${columns.length} 列`, onSelect: () => setColumnOpen(true) },
+            ...(templateLayoutKey ? [{ label: "保存布局到查询模板", icon: "pin" as const, onSelect: () => {
+              try { saveLayout(templateLayoutKey, layout); toast("列布局已保存到查询模板", "success"); }
+              catch { toast("列布局未能保存，当前布局仍可使用", "error"); }
+            } }] : []),
             { label: "长文本自动换行", icon: "wrapText", checked: layout.wrap, onSelect: () => setLayoutOnly({...layout,wrap:!layout.wrap}) },
             { label: "自适应列宽", icon: "fitColumns", onSelect: fitAll },
           ] });
         }}><Icon name="visibleColumns" size={14} /><span className="dbx-action-label">显示</span><Icon name="chevronDown" size={12} /></button>
-        {snapshot && <ResultCompare snapshot={snapshot} related={onRelated ? {label:"关联记录",icon:"external",disabled:!sel,onSelect:()=>sel && onRelated(rows[sel.r])} : undefined} />}
-        {!snapshot && onRelated && <button type="button" className="dbx-btn ghost" disabled={!sel} onClick={()=>sel && onRelated(rows[sel.r])}>关联记录</button>}
+        {snapshot && <ResultCompare snapshot={snapshot} related={onRelated && !requery ? {label:"关联记录",icon:"external",disabled:!sel,onSelect:()=>sel && onRelated(rows[sel.r])} : undefined} />}
+        {onRelated && (requery || !snapshot) && <button type="button" className="dbx-btn ghost" disabled={!sel || !!edit?.isDraftRow?.(sel.r)}
+          onClick={() => sel && onRelated(rows[sel.r])}>关联记录</button>}
         <span className="dbx-sp" />
         {!snapshot && <span className="meta">{meta}</span>}
         {tools}
@@ -235,7 +242,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
           apiRef={gridApi} idPrefix={transferSource ? `dbx-cell-${transferSource.resultId.replace(/[^\w-]/g,"_")}` : undefined}
           columns={columns}
           rows={rows}
-          empty={pending ? "正在计算结果…" : orderError ? "结果计算失败" : <><strong>{filter || valueFilter ? "筛选后没有匹配的行" : "没有匹配的行"}</strong><span>{filter || valueFilter ? "结果筛选只作用于已读取的数据。" : "可调整查询条件后重新执行。"}</span>{(filter || valueFilter) && <button type="button" className="dbx-btn ghost" onClick={()=>{setFilter("");setValueFilter(null);}}>清除结果筛选</button>}</>}
+          empty={pending ? "正在计算结果…" : orderError ? "结果计算失败" : <><strong>{filter || valueFilter ? "筛选后没有匹配的行" : "没有匹配的行"}</strong><span>{filter || valueFilter ? `已读取 ${thousands(rows.length)} 行，当前范围无匹配。` : "可调整查询条件后重新执行。"}</span>{(filter || valueFilter) && <button type="button" className="dbx-btn ghost" onClick={()=>{setFilter("");setValueFilter(null);}}>清除结果筛选</button>}</>}
           order={order}
           sort={sort}
           onSort={(c) => setSort(nextSort(sort, c))}
@@ -244,7 +251,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
           // 详情是「看一眼就走」的检查器：点到别的格子就收起，不守着 340px 等手动关。
           onSel={(p, extend) => { if (detail && (!sel || sel.r !== p.r || sel.c !== p.c)) setDetail(false); select(p, extend); }}
           selection={selection}
-          onCopy={copySelection}
+          onCopy={() => void quickCopyTransfer(frame,"tsv",false,edit?.changed)}
           onCellMenu={cellMenu}
           visible={visible}
           frozen={layout.frozen}

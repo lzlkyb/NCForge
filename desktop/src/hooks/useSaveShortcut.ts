@@ -14,7 +14,7 @@ export function useSaveShortcut(save: () => void, enabled: boolean, owner: strin
       if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
       if (event.key.toLowerCase() !== "s") return;
       const target = event.target instanceof HTMLElement ? event.target : null;
-      if (!target?.closest(".dbx-result-table")) return;
+      if (!target?.closest(".dbx-result-table") || target.closest("[hidden]")) return;
       // 多份结果保活/双栏时，只有焦点所属的结果能接管写回快捷键。
       if (target.closest("[data-result-edit-owner]")?.getAttribute("data-result-edit-owner") !== owner) return;
       // 捕获阶段就要拦：编辑器与浏览器的默认「保存页面」都在冒泡阶段之前生效。

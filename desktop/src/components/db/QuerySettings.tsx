@@ -10,7 +10,7 @@ import { DEFAULT_MAX_ROWS, DEFAULT_TIMEOUT, patchTab, type SqlTab } from "../../
  * 这两个值启动时不会改，却一直占着结果区底栏的两个输入框。收进齿轮后底栏只剩
  * 「已取 N 行 / 加载下 N 行」，需要调的时候再点开。
  */
-export function QuerySettings({ tab }: { tab: SqlTab }) {
+export function QuerySettings({ tab }: { tab: Pick<SqlTab, "id" | "maxRows" | "timeoutSec"> }) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);

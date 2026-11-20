@@ -124,6 +124,7 @@ const paths = {
   cellInspect: "M3 3h13v5M3 3v13h5M3 9h5M9 3v5M19 19l3 3M20 15a5 5 0 1 1-10 0 5 5 0 0 1 10 0z",
   querySource: "M11 3H4v18h16V10M11 3v7h9M11 3l9 7M8 14h8M8 17h5",
   locateSql: "M11 5h9M11 12h9M11 19h9M3 12h5m-3-3 3 3-3 3",
+  pin: "M8 4h8M9 4v5l-3 4v2h12v-2l-3-4V4m-3 11v6",
   visibleColumns: "M3 4h18v16H3zM9 4v16M15 4v16",
   fitColumns: "M3 4v16M21 4v16M6 12h12M9 9l-3 3 3 3m6-6 3 3-3 3",
   wrapText: "M3 5h18M3 19h7M3 12h14a3 3 0 0 1 0 6h-3m2-2-2 2 2 2",

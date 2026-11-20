@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "../ui/toast";
 import { ResultTable } from "./ResultTable";
-import { friendlyDbError, isLobPreview, parseDbError, qualifyTable, thousands, type DbError } from "../../lib/db";
+import { friendlyDbError, parseDbError, qualifyTable, thousands, type DbError } from "../../lib/db";
 import { dbApi, type BoundCell, type Cell, type ColumnInfo } from "../../lib/dbApi";
 import { reconnectSession } from "../../lib/dbConfirm";
 import { askDiscardEdits } from "../../lib/tableDiscard";
-import { claimCursor, connOf, DEFAULT_TABLE_TIMEOUT, patchTab, rtOf, setTx, type TableTab } from "../../lib/dbStore";
+import { claimCursor, connOf, DEFAULT_TABLE_TIMEOUT, openTableFollowup, patchTab, rtOf, setTx, type TableTab } from "../../lib/dbStore";
 import { beginOperation, useOperationActive } from "../../lib/operations";
 import { dbCancelled, dbTaskSpec } from "../../lib/dbOperations";
 import { PAGE, pageSql, tableQuerySql, stripPage } from "../../lib/tableEdit";
 import { seekPage, type PageAnchor, type TablePage as Page } from "../../lib/tablePaging";
-import { captureResultContext } from "../../lib/dbResultContext";
+import { captureResultContext, resultTargetIssue } from "../../lib/dbResultContext";
 import { useCompareBaseline } from "../../lib/dbCompareState";
 import { ResultBaselineSummary } from "./ResultCompare";
 import { ResultContextNotice } from "./ResultContextNotice";
@@ -35,6 +35,9 @@ import { hasViewState, loadTableView, saveTableView } from "../../lib/dbTableVie
 import { tableBlockedHint, tableCellEditable, tableFootHint } from "../../lib/tableEditGuard";
 import { TableRestoreNotice } from "./TableRestoreNotice";
 import { TableChangePreview } from "./TableChangePreview";
+import { resultFilterQuery } from "../../lib/dbResultFollowup";
+import { ResultFollowupDialog } from "./ResultFollowupDialog";
+import { useViewActive } from "../../lib/viewActivity";
 
 /**
  * 表页·数据：WHERE / ORDER BY + 分页（每页 200 行，默认按主键排）。
@@ -43,6 +46,7 @@ import { TableChangePreview } from "./TableChangePreview";
  */
 export function TableData({ tab, cols, isView, zh, onImport, importBlocked }: { tab: TableTab; cols: ColumnInfo[] | null; isView: boolean; zh: Record<string, string>; /** 从文件导入入口；`importBlocked` 非空 = 禁用并说明原因。空表 / 未查询时筛选栏照样渲染，入口不消失。 */ onImport?: () => void; importBlocked?: string }) {
   const baseline = useCompareBaseline();
+  const active = useViewActive();
   const pk = useMemo(() => (cols ?? []).filter((c) => c.pk).map((c) => c.name), [cols]);
   // 打开表页时的 schema 固化在标签上：之后切默认 schema，这一页的查询、写回、
   // 结构读取仍指向原来的表，不会悄悄改到另一个 schema 的同名表。
@@ -50,15 +54,16 @@ export function TableData({ tab, cols, isView, zh, onImport, importBlocked }: { 
   const [q, setQ] = useState<{where:string;order:string;params:BoundCell[];page:number} | null>(null);
   // 上次看到的页码 / 条件：切走再回来接着看；常用筛选改过（指纹不同）就让新条件生效。
   const filterKey = JSON.stringify(loadFilter(tab.connId, tab.table));
-  const tableView = useRef(loadTableView(tab.connId, tableRef, filterKey));
-  const filterBar = useRef<{ queryValue: (column: string, value: string | null) => void }>(null);
+  const tableView = useRef<ReturnType<typeof loadTableView>>();
+  if (tableView.current === undefined) tableView.current = tab.query ? { ...tab.query, page: 0 } : loadTableView(tab.connId, tableRef, filterKey);
   /**
    * 「恢复了上次的查看条件」这个状态本身要显式记住：不提示的话，用户看到的是一张
    * 只有几十行的表，而库里其实有几万行——这类「数据看起来丢了」的误会代价最高。
    */
-  const [restored, setRestored] = useState(() => hasViewState(tableView.current));
-  const [ui,setUi] = useState({loading:false,conflict:"",preview:false,saving:false,relationRow:null as Cell[]|null, conflictValues:[] as {name:string;before:Cell;current:Cell;after:Cell}[]});
-  const {loading,conflict,preview,saving}=ui;
+  const [restored, setRestored] = useState(() => hasViewState(tableView.current ?? null));
+  const [ui,setUi] = useState({loading:false,conflict:"",preview:false,saving:false,followup:null as ReturnType<typeof resultFilterQuery>,relationRow:null as Cell[]|null, conflictValues:[] as {name:string;before:Cell;current:Cell;after:Cell}[]});
+  const {loading,conflict,preview,saving,followup}=ui;
+  const setFollowup=(followup:ReturnType<typeof resultFilterQuery>)=>setUi(v=>({...v,followup}));
   const setLoading=(loading:boolean)=>setUi(v=>({...v,loading}));
   const setConflict=(conflict:string)=>setUi(v=>({...v,conflict}));
   const setPreview=(preview:boolean)=>setUi(v=>({...v,preview}));
@@ -116,7 +121,7 @@ export function TableData({ tab, cols, isView, zh, onImport, importBlocked }: { 
       anchor.current = {key,page:q.page,columns:result.columns,rows:result.rows};
       setData({ ...result, context, ms: r.ms, at:Date.now(), sql, pageNumber:q.page+1, exportSql:tableQuerySql(tableRef.toLowerCase(),q.where,order), params:q.params.map(p=>p && typeof p === "object" ? {...p} : p) });
       tableView.current = q;
-      saveTableView(tab.connId, tableRef, { ...q, filterKey: JSON.stringify(loadFilter(tab.connId, tab.table)) }); // 存盘时的常用筛选指纹：改了筛选后旧视图自动作废
+      if (!tab.trail?.length) saveTableView(tab.connId, tableRef, { ...q, filterKey: JSON.stringify(loadFilter(tab.connId, tab.table)) }); // 追查键只在当前路径中生效
       setConnectionError(null);
       setChanged(new Map());resetDrafts();
       task?.finish("success",`已读取 ${Math.min(r.rows.length,PAGE)} 行${r.rows.length>PAGE ? "，可继续翻页" : ""}`);
@@ -132,7 +137,7 @@ export function TableData({ tab, cols, isView, zh, onImport, importBlocked }: { 
       setData({ error: friendlyDbError(e) });
       setChanged(new Map());resetDrafts();
     } finally { if(my===gen.current) {reading.current=null;setLoading(false);} }
-  }, [tab.id, tab.connId, tab.schema, tab.table, tableRef, q, order, isView, cols, pk, resetDrafts]);
+  }, [tab.id, tab.connId, tab.schema, tab.table, tab.trail, tableRef, q, order, isView, cols, pk, resetDrafts]);
 
   // 等字段（主键）读到再查，否则默认排序会先空后有，多查一次
   useEffect(() => {
@@ -177,7 +182,7 @@ export function TableData({ tab, cols, isView, zh, onImport, importBlocked }: { 
   const clearRestored = async () => {
     if (!(await navTo({ where: "", order: "", params: [], page: 0 }))) return;
     setRestored(false);
-    if (tab.connId) saveTableView(tab.connId, tableRef, { where: "", order: "", params: [], page: 0, filterKey });
+    if (tab.connId && !tab.trail?.length) saveTableView(tab.connId, tableRef, { where: "", order: "", params: [], page: 0, filterKey });
   };
   // 大文本「加载完整值」按主键定位这一行；没有主键 / 主键为 NULL 时不给入口。
   const lob = tab.connId && page ? tableLobSource({ connId: tab.connId, tableRef, page, pk }) : undefined;
@@ -203,7 +208,7 @@ export function TableData({ tab, cols, isView, zh, onImport, importBlocked }: { 
     setConnectionError, load,
   });
   // Ctrl+S = 写回（DBeaver 语义）。没有待写回内容时不接管这个键，免得挡住别处。
-  useSaveShortcut(save, editable && changes.length > 0, tab.id);
+  useSaveShortcut(save, active && editable && changes.length > 0, tab.id);
 
   /** 复核表里的「撤销」：改格子清掉那一格，增删行还原草稿。 */
   const undoChange = (change: RowChange) => {
@@ -213,8 +218,16 @@ export function TableData({ tab, cols, isView, zh, onImport, importBlocked }: { 
 
   return (
     <>
-      {ui.relationRow && page && <TableRelations tab={tab} columns={page.columns} row={ui.relationRow} onClose={()=>setUi(v=>({...v,relationRow:null}))} />}
-      {cols && <TableFilterBar ref={filterBar} connId={tab.connId} table={tab.table} filterScope={tableRef}
+      {active && ui.relationRow && page && <TableRelations tab={tab} columns={page.columns} row={ui.relationRow} onClose={()=>setUi(v=>({...v,relationRow:null}))} />}
+      {active && followup && page && <ResultFollowupDialog query={followup} target={`${page.context.source} · ${tableRef}`}
+        onClose={() => setFollowup(null)} onRun={() => {
+          const rt = rtOf(tab.connId);
+          const issue = resultTargetIssue(page.context, connOf(tab.connId), rt.currentSchema ?? rt.info?.schema);
+          if (issue) { toast(issue, "warning"); return; }
+          openTableFollowup(tab, tab.table, { where: followup.predicate, params: followup.params, order });
+          setFollowup(null);
+        }} />}
+      {cols && <TableFilterBar connId={tab.connId} table={tab.table} filterScope={tableRef}
         appliedQuery={page ? tableView.current : null} cols={cols} disabled={saving || loading || txLocked} busy={loading}
         timeoutSec={timeoutSec} onTimeout={n=>patchTab(tab.id,{timeoutSec:n})}
         onImport={onImport} importBlocked={importBlocked}
@@ -239,13 +252,12 @@ export function TableData({ tab, cols, isView, zh, onImport, importBlocked }: { 
           snapshot={{source:`${page.context.source} · ${tableRef} · 第 ${page.pageNumber} 页`,schema:page.context.schema,originTabId:tab.id,sql:page.sql,at:page.at,complete:page.pageNumber===1 && !page.hasNext,columns:page.columns,rows:page.rows}}
           connId={tab.connId}
           transferSource={{connId:tab.connId,resultId:`${tab.id}:${page.at}`,tabId:tab.id,sql:page.exportSql,params:page.params,source:page.context.source,schema:page.context.schema,connectionKey:page.context.connectionKey,complete:page.pageNumber===1 && !page.hasNext,table:tableRef,keys:pk,timeoutSec}}
-          onRelated={row=>setUi(v=>({...v,relationRow:row}))}
-          queryCell={saving || loading || txLocked || connectionError ? undefined : (column, row) => {
-            const value = page.rows[row]?.[column];
-            const col = cols?.find(c => c.name.toLowerCase() === page.columns[column]?.name.toLowerCase());
-            if (!col || value === undefined || isLobPreview(value)
-              || (value !== null && !/^(NUMBER|INTEGER|FLOAT|DECIMAL|DOUBLE|N?VARCHAR2?|N?CHAR)\b/i.test(col.type))) return;
-            return () => filterBar.current?.queryValue(col.name, value === null ? null : String(value));
+          onRelated={!resultTargetIssue(page.context, connOf(tab.connId), rtOf(tab.connId).currentSchema ?? rtOf(tab.connId).info?.schema)
+            ? row=>setUi(v=>({...v,relationRow:row})) : undefined}
+          requery={saving || loading || txLocked || connectionError ? undefined : match => {
+            const query = resultFilterQuery(tableQuerySql(tableRef, "", ""), page.columns, match);
+            if (!query) { toast("此列无法生成数据库筛选条件，可换一个普通字段。", "info"); return; }
+            setFollowup({ ...query, title: "按条件查整表", sql: tableQuerySql(tableRef, query.predicate, order) });
           }}
           zh={zh}
           lob={lob}

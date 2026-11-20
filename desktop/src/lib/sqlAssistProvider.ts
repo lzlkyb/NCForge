@@ -9,7 +9,7 @@ import { getSqlFormatPrefs } from "./sqlFormatPrefs";
 import { getSqlTemplatesEnabled, querySkeleton, snippetEscape, tableTemplates } from "./sqlTemplates";
 import { billQueryRelations, billQueryTemplates, conditionQueryTemplates, completeQueryTemplates } from "./sqlBillTemplates";
 import { sqlTableDescription } from "./sqlBillHint";
-import { billJoinGroupLabels, billJoinSpecs, billTableOf, rankBillRelations, sqlJoinIcon } from "./sqlBillJoin";
+import { billJoinGroupLabels, billJoinSpecs, rankBillRelations, sqlJoinIcon } from "./sqlBillJoin";
 import { applySqlJoinAppend } from "./sqlBillAssist";
 import { sqlJoinAppendChoices, sqlJoinAppendText, sqlJoinInsertion } from "./sqlJoinAppend";
 import { sqlActionsAt, keywordFor, ACTION_COMMANDS } from "./sqlAssistActions";
@@ -33,6 +33,8 @@ import { sqlExplicit, type SqlCompletionItem } from "./sqlExplicitCompletion";
 import { sqlPreviewEdits, sqlPreviewSnippet } from "./sqlPreviewCode";
 import { verifiedSqlSource } from "./sqlAssistLearning";
 import { recordAssistCall, recordAssistEarly, recordAssistOffers } from "./sqlAssistStats";
+import { rankedDbFavorites } from "./dbObjectRanking";
+import { favoriteKey } from "./dbFavorites";
 
 type Item = SqlCompletionItem;
 const K = monaco.languages.CompletionItemKind;
@@ -40,6 +42,16 @@ const fieldCache = new Map<string, { columns: ColumnInfo[]; at: number }>();
 const scopesSeen = new Map<string, string>();
 const mixed = (name: string) => /[a-z]/.test(name) && /[A-Z]/.test(name);
 const normalized = (name: string) => mixed(name) ? name : name.toLowerCase();
+const tableCatalogCache = new WeakMap<readonly object[], ReturnType<typeof buildTableCatalog>>();
+function buildTableCatalog(list: readonly { name: string; kind: string }[], names: Readonly<Record<string, string>> | undefined) {
+  const entries = list.map(table => ({
+    ...table, normalized: normalized(table.name), zh: names?.[table.name.toLowerCase()] ?? "",
+  }));
+  const exact = new Set(entries.map(table => table.normalized));
+  const chinese = new Map<string, string>();
+  for (const table of entries) if (table.zh && !chinese.has(table.zh.toLowerCase())) chinese.set(table.zh.toLowerCase(), table.normalized);
+  return { entries, tableNames: entries.map(table => table.name), exact, chinese, names };
+}
 async function early<T>(promise: Promise<T>, fallback: T, budget = 120): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let timedOut = false;
@@ -122,18 +134,25 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
   // 🔴 判据不能用 `analysis.scopes.length === 0`：脚本里前面写过语句就永远不为 0。
   const bare = !sqlScopeAt(analysis, offset);
   const tableList = rt?.tables ?? Object.keys(rt?.schema?.tables ?? {}).map(name => ({ name, kind: "TABLE" }));
-  const tableNames = tableList.map(t => t.name);
+  let catalog = tableCatalogCache.get(tableList);
+  if (!catalog || catalog.names !== rt?.ncNames) {
+    catalog = buildTableCatalog(tableList, rt?.ncNames);
+    tableCatalogCache.set(tableList, catalog);
+  }
+  const { entries: tableEntries, tableNames, exact: exactTables, chinese: chineseTables } = catalog;
   const tables = (): Item[] => {
     if (!connId || ctx.kind === "schema" && ctx.schema?.toLowerCase() !== schema.toLowerCase()) return [];
     const shadowed = new Set(ctes.map(c => sqlReferenceKey(c.name, c.nameRef, dialect)));
-    return tableList.flatMap(t => {
-      const name = normalized(t.name), zh = rt?.ncNames?.[name.toLowerCase()] ?? "", quality = match(name, zh);
+    const favorites = rankedDbFavorites(connOf(connId), schema);
+    return tableEntries.flatMap(t => {
+      const name = t.normalized, zh = t.zh, quality = match(name, zh);
       if (quality === 9) return [];
       const insertText = sqlIdentifier(sqlWordKind(name, dialect) === "identifier" ? name : t.name, dialect);
       if (shadowed.has(sqlReferenceKey(name, insertText, dialect))) return [];
-      const key = sqlUsageKey(insertText), why = reason(key);
+      const key = sqlUsageKey(insertText), favorite = favorites.size > 0 && favorites.has(favoriteKey(connId, "table", t.name));
+      const why = favorite ? "已收藏" : reason(key);
       return [mark("table", { label: { label: name, description: sqlTableDescription({ zh, view: t.kind === "VIEW", why, connId, scope, prefix, name, available: tableNames }) }, kind: t.kind === "VIEW" ? K.Interface : K.Struct,
-        insertText, filterText: filter(name), range, sortText: sqlAssistSort(quality, 4, name, scope, key), command: command(key, false, "table"),
+        insertText, filterText: filter(name), range, sortText: sqlAssistSort(quality, 4, name, scope, key, false, favorite), command: command(key, false, "table"),
         documentation: { value: `${schema ? schema + "." : ""}${name}${zh ? "\n\n" + zh : ""}${why ? "\n\n推荐依据：" + why : ""}` } })];
     });
   };
@@ -176,7 +195,7 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
       }))];
     }
     const typed = prefix.toLowerCase();
-    const named = tableList.map(t => ({ raw: t.name, name: normalized(t.name) }));
+    const named = tableEntries.map(t => ({ raw: t.name, name: t.normalized }));
     const exact = named.filter(t => t.name.toLowerCase() === typed);
     const chineseExact = named.filter(t => rt?.ncNames?.[t.name.toLowerCase()]?.toLowerCase() === typed);
     const candidates = exact.length ? exact : chineseExact.length ? chineseExact : named.filter(t => t.name.toLowerCase().startsWith(typed) || match(t.name, rt?.ncNames?.[t.name.toLowerCase()]) === 2);
@@ -215,13 +234,13 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
     if (stale()) return items;
     // Keep one completion within its original time budget and bound cold metadata reads.
     const relations = rootColumns.length
-      ? rankBillRelations(name, billQueryRelations(name, tableList.map(t => t.name), metadata), rt.ncNames)
+      ? rankBillRelations(name, billQueryRelations(name, tableNames, metadata), rt.ncNames)
         .slice(0, 8).map(item => item.relation) : [];
     const billColumns = await Promise.all([...new Set(relations.map(r => r.table))].map(async table =>
       [table, await early(readColumns({ table, tableRef: table, name: table, declaration: 0 }), [], Math.max(0, deadline - Date.now()))] as const));
     if (stale()) return items;
     const columns = { [name]: rootColumns, ...Object.fromEntries(billColumns) };
-    const checkContext = { tables: tableList.map(t => t.name), columns, names: rt.ncNames, schema, upper };
+    const checkContext = { tables: tableNames, columns, names: rt.ncNames, schema, upper };
     const checkTemplates = [...buildBillRelationChecks(name, relations, checkContext), ...buildIncomingDetailCountChecks(name, metadata, checkContext)]
       .map(t => ({ ...t, insertText: snippetEscape(t.sql).slice(0, -1) + "$0;", pickField: false }));
     const queries = [...conditionQueryTemplates(name, rt.ncNames ?? {}, columns, relations, upper, dialect), ...billQueryTemplates(name, rt.ncNames ?? {}, columns, relations, upper, dialect), ...completeQueryTemplates(name, rt.ncNames ?? {}, columns, relations, upper), ...checkTemplates];
@@ -248,7 +267,11 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
     })))];
   };
   /** 光标前词精确命中的表；半截前缀、或必须加引号才成立的标识符返回空。 */
-  const billHit = (text = prefix) => billTableOf(text, tableNames, rt?.ncNames, name => !mixed(name) && sqlIdentifier(name, dialect) === name);
+  const billHit = (text = prefix) => {
+    if (!text) return "";
+    const typed = text.toLowerCase(), name = exactTables.has(typed) ? typed : chineseTables.get(typed);
+    return name && !mixed(name) && sqlIdentifier(name, dialect) === name ? name : "";
+  };
   /**
    * 表位置（`SELECT * FROM po_order`）精确命中时预读一次业务关系。
    *
@@ -536,7 +559,7 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
     const remaining = () => Math.max(0, archiveDeadline - Date.now());
     const meta = await early(readSqlBusinessMetadata(connId, scope, source.table, metadataCurrent), null, remaining());
     if (stale()) return [];
-    const relations = fields.flatMap(field => archiveRelations(source, field.name, tableList.map(t => t.name), meta).map(relation => ({ field, relation }))).slice(0, 4);
+    const relations = fields.flatMap(field => archiveRelations(source, field.name, tableNames, meta).map(relation => ({ field, relation }))).slice(0, 4);
     const items = await Promise.all(relations.map(async ({ field, relation }): Promise<Item | undefined> => {
       const table = relation.target.toLowerCase(), targetColumns = await early(readColumns({ name: table, table, tableRef: table, declaration: 0 }), [], remaining());
       if (stale()) return;

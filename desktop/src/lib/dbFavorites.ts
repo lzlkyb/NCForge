@@ -19,6 +19,7 @@ export interface FavoriteItem {
   name: string;
   /** `object` 的 Oracle 类型（PACKAGE / PROCEDURE …）；表收藏没有。 */
   otype?: string;
+  schema?: string;
   /** 收藏时间，超过上限时淘汰最旧的。 */
   at: number;
 }
@@ -39,7 +40,7 @@ export function favoriteKey(connId: string, kind: FavoriteKind, name: string, ot
 
 function normalize(f: FavoriteItem): FavoriteItem {
   const name = f.name.trim().toUpperCase();
-  const base = { connId: f.connId, kind: f.kind, name, at: f.at };
+  const base = { connId: f.connId, kind: f.kind, name, at: f.at, ...(typeof f.schema === "string" ? { schema: f.schema } : {}) };
   return f.kind === "object" && f.otype?.trim()
     ? { ...base, otype: f.otype.trim().toUpperCase() }
     : base;
@@ -144,7 +145,7 @@ export function useAllFavorites(): FavoriteItem[] {
 }
 
 /** 切换收藏，返回切换后的状态（true = 现在已收藏）。 */
-export function toggleFavorite(connId: string, kind: FavoriteKind, name: string, otype?: string): boolean {
+export function toggleFavorite(connId: string, kind: FavoriteKind, name: string, otype?: string, schema?: string): boolean {
   const clean = name.trim();
   if (!connId || !clean) return false;
   const key = favoriteKey(connId, kind, clean, otype);
@@ -154,6 +155,7 @@ export function toggleFavorite(connId: string, kind: FavoriteKind, name: string,
     kind,
     name: clean.toUpperCase(),
     ...(kind === "object" && otype?.trim() ? { otype: otype.trim().toUpperCase() } : {}),
+    ...(schema !== undefined ? { schema } : {}),
     at: Date.now(),
   };
   all = exists ? all.filter((f) => keyOf(f) !== key) : [next, ...all].slice(0, MAX);

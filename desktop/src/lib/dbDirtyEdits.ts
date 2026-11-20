@@ -31,6 +31,13 @@ export function pendingEdits(key: string) {
   return counts.get(key) ?? 0;
 }
 
+export function pendingResultEdits(tabId: string, resultId: string) {
+  const key = resultEditKey(tabId, resultId);
+  let total = pendingEdits(key);
+  for (const [owner, count] of counts) if (owner.startsWith(`${key}:set:`)) total += count;
+  return total;
+}
+
 export function clearEdits(key: string) {
   if (!counts.delete(key)) return;
   notify();

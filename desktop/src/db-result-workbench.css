@@ -2,6 +2,8 @@
 .dbx-document-host { display:flex;flex-direction:column;flex:1;min-height:0;min-width:0; }
 .dbx-document-host[hidden] { display:none; }
 .dbx-result-table,.dbx-result-view { display:flex;flex-direction:column;flex:1;min-width:0;min-height:0; }
+.dbx-result-set-view[hidden],.dbx-output-view[hidden] { display:none; }
+.dbx-output-view { display:flex;flex:1;min-height:0;min-width:0;flex-direction:column; }
 /* 保活的结果视图要接住高度链：块盒会让 .dbx-rset 的 flex:1 失效，滚动条外溢到控制台外框。 */
 .dbx-result-keep { display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;container:sql-result-pane / inline-size; }
 .dbx-result-keep[hidden] { display:none; }
@@ -14,6 +16,9 @@
 .dbx-result-layout > button { display:grid;place-items:center;width:28px;height:28px;border-radius:var(--r-control);color:hsl(var(--muted-foreground)); }
 .dbx-result-layout > button[aria-pressed="true"] { background:hsl(var(--accent));color:hsl(var(--accent-foreground)); }
 .dbx-result-panes { display:flex;flex:1;min-width:0;min-height:0;overflow:hidden; }
+.dbx-result-panes[data-layout="tabs"] { position:relative; }
+/* Keep visited grids at the same viewport size when switching tabs, without adding a second flex child. */
+.dbx-result-panes[data-layout="tabs"] > .dbx-result-keep[hidden] { display:flex;position:absolute;inset:0;visibility:hidden;pointer-events:none; }
 .dbx-result-panes[data-layout="dual"] > .dbx-result-keep { flex:1 1 0; }
 .dbx-result-panes[data-layout="dual"] > .dbx-result-keep { border-right:1px solid hsl(var(--border)); }
 .dbx-result-pane-heading { display:flex;align-items:center;gap:8px;padding:5px 10px;min-height:34px;flex:none;border-bottom:1px solid hsl(var(--border)); }

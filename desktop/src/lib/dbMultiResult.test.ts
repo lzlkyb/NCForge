@@ -6,7 +6,7 @@ vi.mock("./sqlModels", () => ({ disposeSqlModel: vi.fn() }));
 vi.mock("./dbConfirm", () => ({ ensureConnected: vi.fn(async () => true), confirmProdWrite: vi.fn(async () => true), ask: mocks.ask }));
 import { dbApi, type DbConn } from "./dbApi";
 import { runStatements } from "./dbActions";
-import { __resetDbForTest, closeTab, execOne, loadMore, openSqlTab, ownsCursor, patchTab, setConns, sqlTabOf, type SqlTab } from "./dbStore";
+import { __resetDbForTest, clearSlots, closeTab, execOne, loadMore, openSqlTab, ownsCursor, patchTab, setConns, sqlTabOf, type SqlTab } from "./dbStore";
 import { clearCompletedOperations } from "./operations";
 import { pendingForTab, reportEditCount, resultEditKey, __resetEditsForTest } from "./dbDirtyEdits";
 import { pendingResultId, resultPairOf } from "./dbResultLayout";
@@ -48,6 +48,18 @@ it("两份结果交错续取携带独立 resultId，行不混在一起", async (
   expect(sqlTabOf(id)!.results.map(r => r.rows)).toEqual([[[1], [11], [11]], [[2], [22]]]);
   expect(mocks.invoke.mock.calls.filter(([command]) => command === "db_more_result").map(([, args]) => args.resultId)).toEqual([first.id, second.id, first.id]);
   expect(ownsCursor("c", "1", second.id)).toBe(false);
+});
+
+it("断线时保留已经读取的结果和选中页，旧游标禁止续取", async () => {
+  const id = openSqlTab("c"); await runStatements(id, statements.slice(0, 1));
+  const first = sqlTabOf(id)!.results[0];
+  clearSlots("c");
+  expect(sqlTabOf(id)?.view).toBe(first.id);
+  expect(sqlTabOf(id)?.results[0]).toMatchObject({ id: first.id, archived: true, disconnected: true, hasMore: true, rows: [[1]] });
+  expect(sqlTabOf(id)?.slot).toBeNull();
+  expect(ownsCursor("c", "1", first.id)).toBe(false);
+  await loadMore(id, first.id);
+  expect(mocks.invoke.mock.calls.some(([command]) => command === "db_more_result")).toBe(false);
 });
 
 it("第二条失败保留成功结果与焦点，后续语句标为未执行", async () => {

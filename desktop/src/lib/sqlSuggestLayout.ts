@@ -156,6 +156,13 @@ export function wireSqlSuggestLayout(editor: Editor): monaco.IDisposable {
       editorNode?.toggleAttribute("data-sql-suggest-open", model.items.length > 0);
       setPreview(selected);
       show.call(widget, model, index, frozen, auto, noFocus);
+      // Monaco 0.52 waits 100 ms before marking the list visible. Plain completions
+      // can show immediately; explicit previews follow the widget's usual focus/layout lifecycle.
+      if (selected && !selected.ncforgePreview && !selected.ncforgeExplicit
+        && !node.classList.contains("message") && !node.classList.contains("visible")) {
+        node.classList.add("visible");
+        if (needsMeasurement && !isSplit()) widget._layout(widget.element.size);
+      }
     } finally { showing = false; }
   };
   const geometry = view.virtualDelegate;

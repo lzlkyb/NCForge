@@ -72,6 +72,17 @@ describe("dbSnippets", () => {
     expect(m.snippetsSnapshot("c1")).toBe(b);
   });
 
+  it("查询模板只在实际连接和 Schema 匹配时恢复已存参数类型", async () => {
+    const m = await fresh();
+    const sql = "select * from po_order where bill_no = :bill_no";
+    const saved = m.addSnippet({ name: "采购查单", sql, connId: "c1", schema: "NC", parameterTypes: { bill_no: "text" } });
+    m.updateSnippet(saved.id, { parameterTypes: { bill_no: "number" } });
+    const loaded = await fresh();
+    expect(loaded.querySnippet("c1", "NC", `${sql}; `)?.parameterTypes).toEqual({ bill_no: "number" });
+    expect(loaded.querySnippet("c1", "OTHER", sql)).toBeUndefined();
+    expect(loaded.querySnippet("c2", "NC", sql)).toBeUndefined();
+  });
+
   it("localStorage 里是坏数据时当空库处理，不抛", async () => {
     localStorage.setItem("ncforge-db-snippets", "{ not json");
     let m = await fresh();

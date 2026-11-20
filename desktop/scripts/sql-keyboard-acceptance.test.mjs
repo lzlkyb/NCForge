@@ -51,6 +51,7 @@ const bootstrap = matched[1]
   .replace("if(cmd==='get_autostart')", "if(cmd==='check_update') return null; if(cmd==='get_autostart')")
   .replace("return {url:conn.url,user:conn.user,autoCommit:false};", "return {url:conn.url,user:conn.user,schema:'NC_TEST',autoCommit:false};")
   .replace("if(cmd==='db_tx') return {tx:tx()};", "if(cmd==='db_slot_acquire') return {slot:'sql-keyboard-1',tx:tx()}; if(cmd==='db_slot_release') return null; if(cmd==='db_tx') return {tx:tx()};")
+  .replace("if(cmd==='db_exec_bound')", "if(cmd==='db_result_close') return null; if(cmd==='db_exec_result') return {kind:'rows',columns,rows:[[1,'A','甲']],hasMore:false,ms:10,tx:tx(),output:[]}; if(cmd==='db_exec_bound')")
   .replace("[{name:'TEST_TABLE',kind:'TABLE'},{name:'TEST_CHILD',kind:'TABLE'}]", JSON.stringify(Object.keys(tables).map(name => ({ name: name.toUpperCase(), kind: "TABLE" }))))
   .replace("{test_table:'测试主表',test_child:'测试子表'}", JSON.stringify(tables))
   .replace("if(args.kind==='tables')", "if(args.kind==='schemas') return {schemas:['NC_TEST'],current:'NC_TEST',user:'NC_TEST'}; if(args.kind==='tables')")
@@ -63,11 +64,11 @@ const bootstrap = matched[1]
     notes:[],sharedSession:false};`)
   .replace("{kind:'table',id:'acceptance-table',connId:'c',table:'TEST_TABLE',sub:'data'}", "{kind:'sql',id:'acceptance-table',connId:'c',title:'SQL 1',sql:'',results:[],output:[]}");
 
-async function openEditor(page) {
+async function openEditor(page, source = bootstrap, tableCount = Object.keys(schemaColumns).length) {
   page.setDefaultTimeout(8500);
   await page.route(origin+"/",async route=>{
     const response=await route.fetch();
-    const body=(await response.text()).replace(/<script type="module" src="\/src\/main\.tsx[^"]*"><\/script>/,()=>'<script type="module">'+bootstrap+'</script>');
+    const body=(await response.text()).replace(/<script type="module" src="\/src\/main\.tsx[^"]*"><\/script>/,()=>'<script type="module">'+source+'</script>');
     await route.fulfill({response,body});
   });
   await page.goto(origin,{waitUntil:"domcontentloaded",timeout:60000});
@@ -80,7 +81,8 @@ async function openEditor(page) {
     window.billDb = await import(store?.name ?? path);
     window.billMonaco = (await import("/src/lib/monacoSetup.ts")).monaco;
   });
-  await page.waitForFunction(n=>window.billDb.rtOf("c").tables?.length===n,Object.keys(schemaColumns).length);
+  await page.waitForFunction(n=>window.billDb.rtOf("c").tables?.length===n,tableCount);
+  await page.getByRole("button",{name:"选择连接：NC测试库",exact:true}).waitFor();
 }
 
 test("SQL editing stays keyboard-driven and uses explicit previews", async () => {
@@ -485,6 +487,200 @@ test("SQL assist entries and previews leave the active code visible", async () =
 async function primaryLabels(row) {
   return (await row.locator(".dbx-sql-key-badges > span:visible").allTextContents()).join("");
 }
+
+test("Large NC workbench keeps search, follow-up results and disconnected snapshots usable", async () => {
+  const browser = await chromium.launch({headless:true,channel:"msedge"});
+  const page = await browser.newPage({viewport:{width:1440,height:900}});
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const fixtureTables = JSON.stringify(Object.keys(tables).map(name => ({name:name.toUpperCase(),kind:"TABLE"})));
+  const stress = bootstrap.replace(`return {tables:${fixtureTables}}`,
+    `return {tables:[...${fixtureTables},...Array.from({length:${15000 - Object.keys(tables).length}},(_,i)=>({name:'FIXTURE_TABLE_'+i,kind:'TABLE'}))]}`)
+    .replace("if(cmd==='db_exec_result') return",
+      `if(cmd==='db_disconnect') return null;
+       if(cmd==='db_exec_result' && /slow_probe/i.test(args.sql)) return new Promise(resolve=>{window.finishSlow=()=>resolve({kind:'rows',columns,rows:[[1,'A','甲']],hasMore:false,ms:100,tx:tx(),output:[]});});
+       if(cmd==='db_exec_result' && /^select \\* from po_order/i.test(args.sql)) {
+         const wide=['PK_ORDER','VBILLCODE',...Array.from({length:148},(_,i)=>'FIELD_'+i)].map(name=>({name,type:'VARCHAR2',precision:0,scale:0}));
+         return {kind:'rows',columns:wide,rows:Array.from({length:500},(_,r)=>wide.map((_,c)=>c===0?'PO-'+r:c===1?'BILL-'+r:'value-'+r+'-'+c)),hasMore:true,ms:12,tx:tx(),output:[]};
+       }
+       if(cmd==='db_exec_bound') return {kind:'rows',columns:[{name:'PK_ORDER',type:'VARCHAR2'}],rows:[['PO-0']],hasMore:false,ms:12,tx:tx(),output:[]};
+       if(cmd==='db_exec_result') return`);
+  const grid = page.getByRole("grid", {name:"查询结果网格"});
+  const primary = page.locator(".dbx-result-keep:not([hidden])").first();
+  const timings = [];
+  const editor = sql => page.evaluate(sql => {
+    const e = window.billMonaco.editor.getEditors()[0];
+    e.setValue(sql); e.setPosition({lineNumber:1,column:3}); e.focus();
+  }, sql);
+  const run = () => page.getByRole("button",{name:"执行当前语句",exact:true}).click();
+  try {
+    await openEditor(page, stress, 15000);
+    await editor("SELECT * FROM po_order;");
+    await run();
+    await primary.getByText("已加载 500 行",{exact:true}).waitFor();
+    assert.equal(await primary.locator("[role=grid]").getAttribute("aria-colcount"),"151");
+    await page.getByRole("button",{name:"查找数据库对象",exact:true}).click();
+    const search = page.getByRole("combobox",{name:"查找表名或中文名"});
+    await search.fill("po_");
+    assert.match(await page.getByRole("listbox",{name:"数据库对象结果"}).getByRole("option",{selected:true}).textContent(),/po_order.*NC_TEST/);
+    await page.keyboard.press("Escape");
+
+    await primary.getByRole("button",{name:"筛选已加载行"}).click();
+    const filter = primary.getByRole("textbox",{name:"在结果中筛选"});
+    await filter.fill("BILL-0");
+    await primary.getByText("PO-0",{exact:true}).first().waitFor();
+    await primary.getByText("PO-0",{exact:true}).first().click();
+    const originalSelection = await primary.locator("[role=grid]").getAttribute("aria-activedescendant");
+    assert.ok(originalSelection);
+    await primary.getByRole("button",{name:"关联记录",exact:true}).click();
+    const related = page.getByRole("dialog",{name:"追查关联记录"});
+    await related.locator(".dbx-relation").filter({hasText:"PO_ORDER_B"}).getByRole("button",{name:"查看 SQL"}).click();
+    const relationPreview = page.getByRole("dialog",{name:"追查 PO_ORDER_B"});
+    assert.match(await relationPreview.getByLabel("SQL 预览",{exact:true}).innerText(),/NC_TEST\.PO_ORDER_B[\s\S]*PK_ORDER = :1/);
+    await relationPreview.getByRole("button",{name:"执行查询"}).click();
+    const back = page.getByRole("button",{name:"返回来源结果"});
+    await back.waitFor();
+    assert.deepEqual(await page.evaluate(()=>window.dbCalls.filter(call=>call.cmd==="db_exec_bound").slice(-1)[0].args.params),["PO-0"]);
+    await back.click();
+    assert.equal(await filter.inputValue(),"BILL-0");
+    assert.equal(await primary.locator("[role=grid]").getAttribute("aria-activedescendant"),originalSelection);
+
+    await filter.fill("not-loaded-42");
+    await primary.getByText("已读取 500 行，当前范围无匹配。").waitFor();
+    await primary.getByRole("button",{name:"数据库重查"}).click();
+    const preview = page.getByRole("dialog",{name:"按条件重新查询"});
+    assert.match(await preview.getByLabel("SQL 预览",{exact:true}).innerText(),/INSTR\(LOWER\(PK_ORDER\), LOWER\(:1\)\)/);
+    await preview.getByRole("button",{name:"执行查询"}).click();
+    await back.waitFor();
+    await back.click();
+    assert.equal(await filter.inputValue(),"not-loaded-42");
+    await filter.fill("");
+
+    // Measure the first frame with the selected result laid out. An extra frame
+    // after the panel is ready would measure the display interval twice.
+    const switches = await page.evaluate(async () => {
+      const bar = window.document.querySelector(".dbx-result-head [role=tablist]");
+      const tabs = [...bar.querySelectorAll("[role=tab]")].slice(0,2);
+      const durations = [];
+      for (let i = 0; i < 26; i++) {
+        const start = window.performance.now();
+        const next = (i + 1) % 2;
+        tabs[next].click();
+        const ready = await new Promise((resolve, reject) => {
+          const frame = () => {
+            const grid = window.document.querySelector(".dbx-result-panes > .dbx-result-keep:not([hidden]) [role=grid]");
+            if (tabs[next].getAttribute("aria-selected") === "true" && grid?.getAttribute("aria-colcount") === (next ? "2" : "151") && grid.clientHeight > 0) {
+              resolve(window.performance.now());
+            } else if (window.performance.now() - start > 2000) reject(Error("result tab did not switch"));
+            else window.requestAnimationFrame(frame);
+          };
+          window.requestAnimationFrame(frame);
+        });
+        if (i >= 2) durations.push(ready - start);
+      }
+      return durations;
+    });
+    timings.push(...switches);
+    timings.sort((a,b)=>a-b);
+    const p95 = timings[Math.ceil(timings.length * .95)-1];
+    assert.ok(p95 <= 100, `warm result tab P95 ${p95.toFixed(1)}ms exceeds 100ms`);
+    console.log(`15000 tables, 500×150 rows, warm result tab P95 ${p95.toFixed(1)}ms`);
+
+    await editor("SELECT * FROM po_");
+    const completionTimes = await page.evaluate(async () => {
+      const e = window.billMonaco.editor.getEditors()[0];
+      const model = e.getModel();
+      e.setPosition(model.getPositionAt(model.getValueLength()));
+      const pane = window.document.querySelector(".dbx-sql-overflow");
+      const controller = e.getContribution("editor.contrib.suggestController");
+      const times = [];
+      for (let i = 0; i < 26; i++) {
+        controller.cancelSuggestWidget();
+        const start = window.performance.now();
+        e.trigger("acceptance", "editor.action.triggerSuggest", {});
+        await new Promise((resolve, reject) => {
+          const timeout = window.setTimeout(() => { observer.disconnect(); reject(Error("SQL completion was not shown")); }, 2000);
+          const check = () => {
+            if (!pane.querySelector(".suggest-widget.visible .monaco-list-row")?.textContent.includes("po_")) return;
+            window.clearTimeout(timeout); observer.disconnect();
+            window.requestAnimationFrame(resolve);
+          };
+          const observer = new window.MutationObserver(check);
+          observer.observe(pane, { attributes:true, childList:true, subtree:true });
+          check();
+        });
+        if (i >= 2) times.push(window.performance.now() - start);
+      }
+      controller.cancelSuggestWidget();
+      return times.sort((a,b)=>a-b);
+    });
+    const completionP95 = completionTimes[Math.ceil(completionTimes.length * .95)-1];
+    assert.ok(completionP95 <= 100, `visible completion P95 ${completionP95.toFixed(1)}ms exceeds 100ms`);
+    console.log(`15000 tables, visible table completion P95 ${completionP95.toFixed(1)}ms`);
+
+    await page.evaluate(() => window.billDb.openSqlTab("c","SELECT 1 AS slow_probe FROM dual;"));
+    await run();
+    await page.waitForFunction(() => !!window.finishSlow);
+    await page.evaluate(() => window.billDb.activateTab("acceptance-table"));
+    await primary.getByText("PO-0",{exact:true}).first().click();
+    await page.keyboard.press("ArrowDown");
+    await primary.getByText("PO-1",{exact:true}).first().waitFor();
+    assert.ok(await grid.count() || await primary.locator("[role=grid]").count());
+    await page.evaluate(() => window.finishSlow());
+
+    await page.evaluate(() => window.billDb.disconnect("c"));
+    await primary.getByText("连接中断 · 只读快照",{exact:true}).waitFor();
+    await primary.getByText("PO-0",{exact:true}).first().waitFor();
+    assert.equal(await primary.getByRole("button",{name:/加载下/}).count(),0);
+    await primary.getByRole("button",{name:"重新执行查询",exact:true}).click();
+    const replay = page.getByRole("dialog",{name:"重新执行查询"});
+    await replay.getByRole("button",{name:"执行查询"}).click();
+    await back.waitFor();
+    assert.deepEqual(errors,[]);
+  } finally { await browser.close(); }
+});
+
+test("Saved SQL templates restore parameter types and explicit result column layouts", async () => {
+  const browser = await chromium.launch({headless:true,channel:"msedge"});
+  const page = await browser.newPage({viewport:{width:1280,height:800}});
+  const source = bootstrap.replace("if(cmd==='db_exec_bound') {", "if(cmd==='db_exec_bound') return {kind:'rows',columns:[{name:'PK_ORDER',type:'VARCHAR2'},{name:'VBILLCODE',type:'VARCHAR2'}],rows:[['P-1','B-1']],hasMore:false,ms:10,tx:tx(),output:[]}; if(cmd==='db_exec_bound') {");
+  try {
+    await openEditor(page, source);
+    const sql = "SELECT * FROM po_order WHERE pk_order = :order_id";
+    await page.evaluate(async sql => {
+      const { addSnippet } = await import("/src/lib/dbSnippets.ts");
+      addSnippet({ name:"按单号查采购订单",sql,connId:"c",schema:"NC_TEST",parameterTypes:{order_id:"number"} });
+      const editor = window.billMonaco.editor.getEditors()[0];
+      editor.setValue(sql); editor.setPosition({lineNumber:1,column:3});
+    }, sql);
+    const activeResult = page.locator(".dbx-result-keep:not([hidden])").first();
+    const run = async () => {
+      const prior = await page.evaluate(() => window.billDb.sqlTabOf("acceptance-table").results[0]?.id);
+      await page.getByRole("button",{name:"执行当前语句",exact:true}).click();
+      const dialog = page.getByRole("dialog",{name:"填写查询参数"});
+      assert.equal(await dialog.getByLabel("参数 order_id 类型").inputValue(),"number");
+      await dialog.getByRole("textbox").fill("42");
+      await dialog.getByRole("button",{name:"执行查询"}).click();
+      await page.waitForFunction(previous => {
+        const entry = window.billDb.sqlTabOf("acceptance-table").results[0];
+        return entry?.kind === "rows" && entry.id !== previous;
+      }, prior);
+      await activeResult.getByText("已加载 1 行",{exact:true}).waitFor();
+    };
+    await run();
+    const display = activeResult.getByRole("button",{name:"显示选项"});
+    await display.click();
+    await page.getByRole("menuitem",{name:/结果列布局/}).click();
+    const columns = page.getByRole("dialog",{name:"结果列布局"});
+    await columns.getByRole("checkbox",{name:"vbillcode",exact:true}).uncheck();
+    await columns.getByRole("button",{name:"完成",exact:true}).click();
+    await display.click();
+    await page.getByRole("menuitem",{name:"保存布局到查询模板",exact:true}).click();
+    await page.evaluate(() => window.localStorage.removeItem("ncforge-db-grid:c:po_order"));
+    await run();
+    assert.equal(await activeResult.locator("[role=grid]").getAttribute("aria-colcount"),"2");
+  } finally { await browser.close(); }
+});
 
 test("SQL batch JOIN previews, appends, continues from a joined source and undoes in one step", async () => {
   await mkdir(artifacts, {recursive:true});

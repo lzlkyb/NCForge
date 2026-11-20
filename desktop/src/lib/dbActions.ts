@@ -42,11 +42,12 @@ import {
 } from "./dbStore";
 import { disposeSqlModel } from "./sqlModels";
 import { isWrite, stmtKind } from "./sqlSplit";
-import { captureResultContext, type SqlRunTarget } from "./dbResultContext";
+import { captureResultContext, connectionKey, type SqlRunTarget } from "./dbResultContext";
 import { dbTabLabel } from "./dbPendingSessions";
 import { clearEditsForTab, pendingForTab } from "./dbDirtyEdits";
 import { closeTabResultCursors } from "./dbResultCursors";
 import { pendingResultId } from "./dbResultLayout";
+import { rememberDbObject } from "./dbObjectRanking";
 
 /**
  * 数据库页的用户动作：把 store（状态）与 dbConfirm（要问一句的地方）串起来。
@@ -101,10 +102,20 @@ export async function newConsole(connId: string | null = defaultConnId(), sql = 
   return id;
 }
 
-export async function openTable(connId: string, table: string, sub: TableSub = "data") {
-  if (!(await confirmDiscardEdits(getDb().active, "打开表页"))) return;
-  if (!(await ensureConnected(connId))) return;
-  openTableTab(connId, table, sub);
+export async function openTable(connId: string, table: string, sub: TableSub = "data", objectType?: string) {
+  const conn = connOf(connId);
+  const schemaOf = () => { const runtime = rtOf(connId); return runtime.currentSchema ?? runtime.info?.schema; };
+  const schema = schemaOf();
+  if (!(await confirmDiscardEdits(getDb().active, "打开表页"))) return false;
+  if (!(await ensureConnected(connId))) return false;
+  const live = connOf(connId);
+  if (conn && connectionKey(conn) !== connectionKey(live) || schema !== undefined && schema !== schemaOf()) {
+    toast("连接或 Schema 已变化，请重新选择对象。", "warning");
+    return false;
+  }
+  openTableTab(connId, table, sub, objectType, schemaOf());
+  rememberDbObject(live, schemaOf(), { name: table, kind: objectType ?? "TABLE" });
+  return true;
 }
 
 /** 打开数据字典（会切走当前文档）。 */
@@ -211,8 +222,6 @@ export async function disconnectConn(connId: string): Promise<boolean> {
   // 只问 primary 会漏掉槽里的未提交写入——后端断开时会把槽一起收掉。
   if (!(await guardAllSessions(connId, "断开连接"))) return false;
   await disconnect(connId);
-  // 后端已经把槽一并收掉；前端要把标签上的槽名清掉，否则下次执行会打到不存在的会话
-  clearSlots(connId);
   forgetColumns(connId);
   forgetColumnZh(connId);
   // 重连后过程参数可能已经改过（现场改包体很常见），签名帮助的缓存一起丢
@@ -471,6 +480,7 @@ export async function runStatements(
     return outcome;
   }
   const previousResults = tab.results;
+  const pinnedResults = previousResults.filter(result => result.pinned).map(result => ({ ...result, archived: true }));
   const runConn = connOf(connId), runSchema = rtOf(connId).currentSchema ?? rtOf(connId).info?.schema;
   const contexts = stmts.map(statement => captureResultContext(connId, runConn, runSchema, statement.text, statement));
   setTxNotice(connId, tab.slot, tab.id);
@@ -526,7 +536,10 @@ export async function runStatements(
         kept.push(r);
         const selected = sqlTabOf(tabId)?.view;
         const pendingId = pendingResultId(task.id, i + 1);
-        const view = selected === pendingId || firstResult && !selected?.startsWith(`pending:${task.id}:`) ? r.id : selected;
+        if (firstResult && !restoredPrevious) kept.push(...pinnedResults);
+        const watchingPin = pinnedResults.some(result => result.id === selected);
+        const watchingOutput = selected === "output" && previousResults.length > 0;
+        const view = selected === pendingId || firstResult && !watchingPin && !watchingOutput && !selected?.startsWith(`pending:${task.id}:`) ? r.id : selected;
         const pair = sqlTabOf(tabId)?.resultPair?.map(id => id === pendingId ? r.id : id) as [string, string] | undefined;
         patchTab<SqlTab>(tabId, { results: [...kept], view, resultPair: pair });
         // 结果集**真的被新结果替换**了，这一刻才清「未写回改动」登记（用户此前已同意丢弃）。
@@ -561,7 +574,8 @@ export async function runStatements(
     // 但如果 `run.id` 已经换成别人的，说明新执行占着它，不能碰。
     if (sqlTabOf(tabId)?.run?.id === token.id) {
       const batch = sqlTabOf(tabId)?.batch;
-      patchTab<SqlTab>(tabId, { run: undefined, batch: batch && { ...batch, activeIndex: null, status: outcome.stoppedByUser ? "stopped" : outcome.failures.length || interrupted ? "failed" : "done" }, ...(kept.length === 0 && !outcome.stoppedByUser ? { results: [], view: "output" } : {}) });
+      const activeView = sqlTabOf(tabId)?.view;
+      patchTab<SqlTab>(tabId, { run: undefined, batch: batch && { ...batch, activeIndex: null, status: outcome.stoppedByUser ? "stopped" : outcome.failures.length || interrupted ? "failed" : "done" }, ...(kept.length === 0 && !outcome.stoppedByUser ? { results: pinnedResults, view: pinnedResults.some(result => result.id === activeView) ? activeView : "output" } : {}) });
     }
   }
   // 建表 / 改表之后侧栏与补全要跟上；DDL 缓存也要丢，否则再打开这张表看到的还是旧结构

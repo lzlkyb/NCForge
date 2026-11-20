@@ -15,12 +15,13 @@ export function sqlMatchQuality(prefix: string, name: string, zh = ""): number {
   }
   if (z.includes(p)) return 4;
   if (n.includes(p)) return 5;
+  if (!n.includes(p[0])) return 9;
   let at = 0;
   for (const char of n) if (char === p[at]) at++;
   return at === p.length ? 6 : 9;
 }
-export function sqlAssistSort(quality: number, group: number, name: string, scope?: string | null, key?: string, lower = false): string {
-  const score = scope && key ? sqlUsageRank(scope, key) : 0;
+export function sqlAssistSort(quality: number, group: number, name: string, scope?: string | null, key?: string, lower = false, favorite = false): string {
+  const score = (favorite ? 2e12 : 0) + (scope && key ? sqlUsageRank(scope, key) : 0);
   return `${quality}${lower ? 8 : group}${String(999999999999999 - Math.min(999999999999999, Math.round(score * 100))).padStart(15, "0")}${name.toLowerCase()}`;
 }
 /** Saved SQL is literal unless it contains explicit {{parameter}} slots. Escape Monaco metacharacters. */

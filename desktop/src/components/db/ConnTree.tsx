@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Icon } from "../ui/icon";
 import { EmptyState } from "../ui/EmptyState";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
@@ -13,6 +13,7 @@ import { isImeComposing } from "../../lib/utils";
 import { ensureConnected } from "../../lib/dbConfirm";
 import { deleteConn, disconnectConn, duplicateConn, moveConn, newConsole, openDict, openTable, refreshMeta } from "../../lib/dbActions";
 import { defaultConnId, loadConns, openConnDialog, rtOf, showObjectFinder, useDbConns, useDbRt, useDbSelector } from "../../lib/dbStore";
+import { rankDbObjects } from "../../lib/dbObjectRanking";
 
 /**
  * 侧栏：连接列表 + 已连上连接下的对象（收藏 / 表 / 视图）。
@@ -20,7 +21,7 @@ import { defaultConnId, loadConns, openConnDialog, rtOf, showObjectFinder, useDb
  * 单击连接 = 展开并连上；双击 = 在这个连接上新开 SQL 控制台；右键管理；拖动排序。
  * 筛选框同时筛连接名与表名（含 NC 中文名）。连接按「分组」折成一类，组头可收起。
  */
-export function ConnTree() {
+export const ConnTree = memo(function ConnTree() {
   // 只订阅连接树用到的切片：SQL 执行、结果写回标签不再把整棵连接树重画。
   // rt 整表要订：每个连接行都显示自己的状态（下面用 rtOf 读的就是这一份）。
   useDbRt();
@@ -47,10 +48,8 @@ export function ConnTree() {
   const openMatch = () => {
     const connId = activeConn ?? defaultConnId();
     if (!q || !connId) return;
-    const { tables, ncNames } = rtOf(connId);
-    const hits = (tables ?? []).filter(t => t.name.toLowerCase().includes(q) || (ncNames?.[t.name.toLowerCase()] ?? "").includes(q));
-    const match = hits.find(t => t.name.toLowerCase() === q)
-      ?? hits.find(t => ncNames?.[t.name.toLowerCase()] === q) ?? hits[0];
+    const rt = rtOf(connId);
+    const [match] = rankDbObjects(rt.tables ?? [], q, rt.ncNames ?? {}, db.conns.find(c => c.id === connId) ?? null, rt.currentSchema ?? rt.info?.schema, 1);
     if (match) void openTable(connId, match.name);
   };
 
@@ -256,4 +255,4 @@ export function ConnTree() {
       {resetConn && <PasswordResetDialog connId={resetConn} onClose={() => setResetConn(null)} />}
     </div>
   );
-}
+});

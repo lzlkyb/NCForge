@@ -8,10 +8,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { DangerItem } from "../components/db/SqlDangerDialog";
 import type { RunStmt, SqlRunMode } from "../lib/sqlEditorTarget";
 import type { BoundCell } from "../lib/dbApi";
+import type { Snippet } from "../lib/dbSnippets";
 
 /** 用户确认后要跑的那一次（语句已从编辑器取出，不能等确认时再取一遍）。 */
 export interface PendingRun { tabId: string; mode: SqlRunMode; stmts: RunStmt[]; collectStats: boolean }
-export interface ParameterRequest { names: string[]; target: string; submit: (values: Map<string, BoundCell>) => void }
+export interface ParameterRequest { names: string[]; target: string; snippet?: Snippet; submit: (values: Map<string, BoundCell>) => void }
 
 export function useSqlRunConfirm(tabId: string, connId: string | null | undefined) {
   /** 待确认的危险语句；非空即弹框。 */

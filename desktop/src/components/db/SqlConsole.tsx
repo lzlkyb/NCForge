@@ -12,7 +12,7 @@ import { ValueSearchDialog } from "./ValueSearchDialog";
 import { ScriptReplayDialog } from "./ScriptReplayDialog";
 import { SqlDangerDialog } from "./SqlDangerDialog";
 import { SqlOutlineBar } from "./SqlOutlineBar";
-import { explain, runStatements } from "../../lib/dbActions";
+import { explain, newConsole, runStatements } from "../../lib/dbActions";
 import { dangerousStatements } from "../../lib/sqlDanger";
 import { cancelOperation, getOperations } from "../../lib/operations";
 import { dbApi, dbSourceOf } from "../../lib/dbApi";
@@ -26,8 +26,8 @@ import { changeSchema, closeSessionPanel, columnsOf, connOf, isRunning, openSess
 import { useSqlConsoleSplit, type SqlConsoleFocus } from "../../hooks/useSqlConsoleSplit";
 import { useSqlRunConfirm } from "../../hooks/useSqlRunConfirm";
 import { useViewActive } from "../../lib/viewActivity";
+import { querySnippet, updateSnippet } from "../../lib/dbSnippets";
 import "../../db-execution.css";
-
 /** SQL 控制台：工具条 / 事务条 / 编辑器 / 可拖高度的结果区 / 历史与会话抽屉。 */
 
 export function SqlConsole({ tab }: { tab: SqlTab }) {
@@ -95,6 +95,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
           (schema === undefined || currentSchema() === schema);
         setParameters({
           names, target: [dbSourceOf(conn), schema ?? conn?.user].filter(Boolean).join(" · "),
+          snippet: querySnippet(connId, schema, stmts[0].text),
           submit: values => {
             setParameters(null);
             if (!targetCurrent()) return toast("执行目标已变化，请重新发起查询。", "warning");
@@ -171,7 +172,6 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         resultTargetIssue(entry.context, connOf(current.connId), runtime.currentSchema ?? runtime.info?.schema)) return null;
     return { connId: current.connId, editorSql: target.editorSql, offset: target.startOffset, tables: runtime.tables?.map(t => t.name) ?? [] };
   };
-
   return (
     <div className="dbx-console">
       <SqlToolbar
@@ -200,7 +200,8 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
       {danger && tab.connId && (
         <SqlDangerDialog items={danger.items} total={danger.total} connId={tab.connId} slot={tab.slot ?? null} onCancel={cancelDanger} onConfirm={confirmDanger} />
       )}
-      {parameters && <SqlParameterDialog names={parameters.names} target={parameters.target} onClose={() => setParameters(null)} onRun={parameters.submit} />}
+      {parameters && <SqlParameterDialog names={parameters.names} target={parameters.target} onClose={() => setParameters(null)} onRun={parameters.submit}
+        initialTypes={parameters.snippet?.parameterTypes} onSaveTypes={parameters.snippet ? parameterTypes => updateSnippet(parameters.snippet!.id, { parameterTypes }) : undefined} />}
       {exp && tab.connId && (
         <InsertExportDialog tabId={tab.id}
           connId={tab.connId}
@@ -237,13 +238,13 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
             aria-valuemax={split.max}
             aria-valuenow={split.height}
             onKeyDown={split.onKeyDown}
-            onPointerDown={(e) => {
+            onPointerDown={e => {
               if (!e.isPrimary || e.button !== 0) return;
               e.preventDefault();
               split.startDrag(e.clientY);
             }}
           />
-          <ResultPanel tab={tab} height={split.resultHeight} fixes={{
+          <ResultPanel tab={tab} height={split.resultHeight} onReviewOriginal={sql => void newConsole(tab.connId, sql)} fixes={{
             find: async entry => {
               const current = repairContext(entry);
               return current ? sqlQuickFixes(entry.error ?? "", entry.sql, current.tables,
@@ -285,8 +286,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         {side === "snips" && tab.connId && (
           <SnippetDrawer
             connId={tab.connId}
-            // 取「光标处那条（有选中则是选中部分）」——与执行、导出 INSERT 同一口径，
-            // 免得存下来的片段里混着编辑器里另外十个不相关的查询
+            // 与执行当前语句、导出 INSERT 一样，优先使用选区或光标处的语句。
             getSql={() => (api.current?.target("current") ?? []).map((s) => s.text).join("\n\n")}
             onClose={() => setSide(null)}
             onPick={(sql) => api.current?.setText(sql)}

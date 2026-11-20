@@ -82,6 +82,12 @@ export interface ConnRuntime {
 export type TxNotice = { kind: "error" | "lost"; text: string; verify?: boolean };
 
 export interface ResultEntry {
+  pinned?: boolean;
+  archived?: boolean;
+  /** A derived query leaves its parent result mounted for return navigation. */
+  parentResultId?: string;
+  disconnected?: boolean;
+  replayBindings?: { sql: string; params: import("./dbApi").BoundCell[] };
   boundQuery?: boolean;
   context?: ResultExecutionContext;
   completedAt?:number;
@@ -433,7 +439,7 @@ export const useConnOf = (id: string | null | undefined) => useDbSelector((s) =>
 export const useDbConns = () => useDbSelector((s) => s.conns);
 /** 各连接运行态的整张表：列表里每行都显示状态的组件用（任一连接变了都要重画）。 */
 export const useDbRt = () => useDbSelector((s) => s.rt);
-export const useActiveDbTab = () => useDbSelector((s) => s.tabs.find((t) => t.id === s.active) ?? null);
+export const useActiveDbTab = (equal?: (a: DbTabItem | null, b: DbTabItem | null) => boolean) => useDbSelector((s) => s.tabs.find((t) => t.id === s.active) ?? null, equal);
 
 /**
  * 新开控制台 / 数据字典时默认用哪个连接：当前标签的 → 已连上的 → 第一个。
@@ -548,15 +554,7 @@ export async function disconnect(id: string): Promise<void> {
   metadataFlights.delete(id);
   metadataVersions.set(id, (metadataVersions.get(id) ?? 0) + 1);
   setRt(id, { status: "idle", info: undefined, tx: undefined, txNotice: undefined, error: undefined, tablesLoading: false });
-  // 连接已失效：清掉这条连接上所有标签的执行反馈与旧结果，避免「执行已停止」一直挂着。
-  // `run` 必须一起清：执行中的标签被断开时，`runStatements` 那边即使自己不收尾，
-  // 这里也要把「在跑」这个事实抹掉，否则标签永久停在「正在执行」、执行按钮全灰。
-  const tabs = state.tabs.map((t) =>
-    t.kind === "sql" && t.connId === id
-      ? { ...t, run: undefined, results: [], plan: null, view: null }
-      : t,
-  );
-  set({ tabs });
+  clearSlots(id);
 }
 
 /** 连上之后拉表清单、NC 中文名、本地表结构缓存（补全用）。任一失败不影响其它。 */
@@ -753,6 +751,7 @@ export function openTableTab(connId: string, table: string, sub: TableSub = "dat
   const hit = state.tabs.find(
     (t) =>
       t.kind === "table" &&
+      !t.trail?.length &&
       t.connId === connId &&
       t.table.toUpperCase() === table.toUpperCase() &&
       (t.otype ?? "") === (otype ?? "") &&
@@ -763,6 +762,14 @@ export function openTableTab(connId: string, table: string, sub: TableSub = "dat
     return hit.id;
   }
   const tab: TableTab = { kind: "table", id: newId("t"), connId, table: table.toUpperCase(), sub, ...(otype ? { otype } : {}), ...(fixed ? { schema: fixed } : {}) };
+  set({ tabs: [...state.tabs, tab], active: tab.id });
+  return tab.id;
+}
+
+export function openTableFollowup(origin: TableTab, table: string, query: NonNullable<TableTab["query"]>): string | null {
+  if (!state.tabs.some(tab => tab.id === origin.id && tab.kind === "table" && tab.connId === origin.connId && tab.schema === origin.schema)) return null;
+  const tab: TableTab = { kind: "table", id: newId("t"), connId: origin.connId, schema: origin.schema, table: table.toUpperCase(), sub: "data",
+    query, trail: [...(origin.trail ?? []), { tabId: origin.id, label: origin.table }] };
   set({ tabs: [...state.tabs, tab], active: tab.id });
   return tab.id;
 }
@@ -1050,9 +1057,7 @@ export async function releaseSlot(connId: string | null, slot: string | null | u
  */
 export function clearSlots(connId: string): void {
   invalidateResultCursors(connId);
-  // 结果一并清掉是有意的：断开 / 删除连接后，槽与游标在后端已经收掉，
-  // 留着旧结果会让「加载更多」「转移到表」打到不存在的会话上（报 ORA-01000 那一类），
-  // 而把它们标成「已完整」又是对导出数据的谎报。宁可让用户重跑一次。
+  // Keep rows already in memory. The disconnected marker prevents cursor reads or writes after reconnect.
   const tabs = state.tabs.map((t) =>
     t.kind === "sql" && t.connId === connId
       ? {
@@ -1061,9 +1066,9 @@ export function clearSlots(connId: string): void {
           tx: undefined,
           txNotice: undefined,
           run: undefined,
-          results: [],
+          results: archiveDisconnectedResults(t.results),
           plan: null,
-          view: null,
+          view: t.view === "plan" ? null : t.view,
           batch: undefined,
           resultPair: undefined,
         }
@@ -1071,6 +1076,12 @@ export function clearSlots(connId: string): void {
   );
   for (const k of [...cursorOwner.keys()]) if (k.startsWith(`${connId}#`)) cursorOwner.delete(k);
   set({ tabs });
+}
+
+function archiveDisconnectedResults(results: ResultEntry[]): ResultEntry[] {
+  return results.map(result => result.kind === "rows"
+    ? { ...result, archived: true, disconnected: true, loadingMore: false, moreRetryable: false }
+    : result);
 }
 
 /** 执行一条语句，结果记进标签、事务状态更新到连接（或标签的槽）、写入历史。不抛异常。 */
@@ -1177,6 +1188,9 @@ export async function execOne(tabId: string, sql: string, index: number, context
     // primary 的事务计数不再可信（会话都没了），一并清掉；槽的留着——那是另一条会话的。
     if (isConnLost(e)) {
       setRt(connId, { status: "error", error: message, ...(slot ? {} : { tx: undefined }) });
+      invalidateResultCursors(connId);
+      set({ tabs: state.tabs.map(tab => tab.kind === "sql" && tab.connId === connId
+        ? { ...tab, results: archiveDisconnectedResults(tab.results) } : tab) });
     }
     entry = { ...base, kind: "error", error: friendlyDbError(e), errorCode: code, cancelled:dbCancelled(e), ms: Date.now() - t0 };
   }
@@ -1198,7 +1212,7 @@ export async function execOne(tabId: string, sql: string, index: number, context
 export async function loadMore(tabId: string, resultId: string): Promise<void> {
   const tab = sqlTabOf(tabId);
   const res = tab?.results.find((r) => r.id === resultId);
-  if (!tab?.connId || !res || !res.hasMore || res.moreError && !res.moreRetryable || res.loadingMore || isRunning(tab)) return;
+  if (!tab?.connId || !res || res.archived || !res.hasMore || res.moreError && !res.moreRetryable || res.loadingMore || isRunning(tab)) return;
   const upd = (p: Partial<ResultEntry>) => {
     const cur = sqlTabOf(tabId);
     if (cur) patchTab<SqlTab>(tabId, { results: cur.results.map((r) => (r.id === resultId ? { ...r, ...p } : r)) });
@@ -1235,7 +1249,8 @@ export async function loadMore(tabId: string, resultId: string): Promise<void> {
     const message = code === "cursor-closed"
       ? "游标已关闭，已加载的行仍可查看。请重新执行查询。"
       : expired ? "旧结果游标已失效，已加载的行仍可查看。请重新执行查询。" : friendlyDbError(e);
-    upd({ loadingMore: false, moreError: message, moreRetryable: !expired });
+    upd({ loadingMore: false, moreError: message, moreRetryable: !expired,
+      ...(isConnLost(e) ? { archived: true, disconnected: true } : {}) });
     appendOutput(tabId, [{ at: Date.now(), text: `[${now()}] 加载更多失败：${message}`, tone: "bad" }]);
   }
 }

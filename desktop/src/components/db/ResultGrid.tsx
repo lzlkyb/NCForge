@@ -87,15 +87,17 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
 
   const colKey = columns.map((c) => c.name).join("|");
   const colKeyRef = useRef(colKey);
-
   useLayoutEffect(() => {
     const el = boxRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setScroll(s => s.height === el.clientHeight && s.width === el.clientWidth ? s : ({ ...s, height: el.clientHeight, width: el.clientWidth })));
+    const ro = new ResizeObserver(() => {
+      const height = el.clientHeight, width = el.clientWidth;
+      // A hidden result keeps its last real viewport. Zeroing it would rebuild the virtual rows twice per tab switch.
+      if (height && width) setScroll(s => s.height === height && s.width === width ? s : ({ ...s, height, width }));
+    });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-
   // 新结果的第一帧里 effect 还没重算列宽：先按新列现算一份，避免宽度对不上
   const ws = useMemo(() => widths.length === columns.length ? widths : initialWidths(columns, rows), [widths, columns, rows]);
   // 换行时行高不固定：行高按 rows 下标测、偏移按 order 累加；拖列宽期间冻结测量，pointerup 后再重算一次。
@@ -113,15 +115,13 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     columnViewport(visible,ws,new Set(visible.filter(c=>frozen.includes(columns[c].name))),scroll.left,scroll.width,rnW)), [visible, ws, frozen, columns, scroll.left, scroll.width, rnW]);
   const viewportByColumn = new Map(viewport.map(col => [col.column, col]));
   const cellStyle = (c:number) => { const col=viewportByColumn.get(c)!; return {width:col.width,position:col.frozen ? "sticky" as const : "absolute" as const,left:col.frozen ? col.sticky : col.left,...(col.frozen ? {zIndex:2} : {})}; };
-  const range = layout.range(scroll.top, scroll.height, OVERSCAN);
-  const { first, last } = range;
+  const { first, last } = layout.range(scroll.top, scroll.height, OVERSCAN);
   const selIndex = useMemo(() => sel ? order.indexOf(sel.r) : -1, [order, sel]);
   // 活动格滚出可视区时 aria-activedescendant 会指向不存在的 id
   const activeCell = sel && viewport.some(c=>c.column===sel.c) && selIndex >= first && selIndex < last ? `${idPrefix}-${sel.r}-${sel.c}` : undefined;
-
   const scrollFrame = useScrollFrame(() => {
     const el = boxRef.current;
-    if (!el) return;
+    if (!el || el.closest("[hidden]")) return;
     preciseTop.current=el.scrollTop;
     const next = { top: el.scrollTop, left: el.scrollLeft, height: el.clientHeight, width: el.clientWidth };
     setScroll(s => retainViewport(s, next, layout.average * OVERSCAN, 200));

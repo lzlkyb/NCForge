@@ -1,6 +1,6 @@
 import { QueryField } from "./QueryField";
 import { useOperationById } from "../../lib/operations";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { SqlExecutionFeedback } from "./SqlExecutionFeedback";
 import { DbErrorBox } from "./DbErrorBox";
@@ -11,11 +11,11 @@ import { ResultPaneHeading } from "./ResultPaneHeading";
 import { ResultBaselineSummary } from "./ResultCompare";
 import { thousands } from "../../lib/db";
 import { statsText, statsTitle } from "../../lib/dbStats";
-import { isRunning, ownsCursor, patchTab, rtOf, summaryOf, type ResultEntry, type SqlTab } from "../../lib/dbStore";
+import { isRunning, ownsCursor, patchTab, rtOf, summaryOf, useDbSelector, type ResultEntry, type SqlTab } from "../../lib/dbStore";
 import { ask } from "../../lib/dbConfirm";
 import { useTxEpoch } from "../../lib/dbTxEpoch";
 import { txStateText } from "../../lib/txResultState";
-import { clearEditsForTab, pendingEdits, pendingForTab, resultEditKey, useEditRevision } from "../../lib/dbDirtyEdits";
+import { clearEditsForTab, pendingResultEdits, pendingForTab, useEditRevision } from "../../lib/dbDirtyEdits";
 import { pendingResults, resultPairOf } from "../../lib/dbResultLayout";
 import { guessTable } from "../../lib/resultExport";
 import { statementTitle } from "../../lib/sqlStatementTitle";
@@ -23,13 +23,22 @@ import type { SqlQuickFix } from "../../lib/sqlQuickFix";
 type FixActions = { find: (entry: ResultEntry) => Promise<SqlQuickFix[]>; apply: (entry: ResultEntry, fix: SqlQuickFix) => void };
 
 /** SQL 控制台下半：每条语句一个结果标签 + 执行计划 + 输出。 */
-export function ResultPanel({ tab, height, onLocate, onFillSql, fixes }: { tab: SqlTab; height: number; onLocate?:(line:number)=>void; onFillSql?:(sql:string)=>void; fixes?: FixActions }) {
+export function ResultPanel({ tab: seed, height, onLocate, onFillSql, fixes, onReviewOriginal }: { tab: SqlTab; height: number; onLocate?:(line:number)=>void; onFillSql?:(sql:string)=>void; fixes?: FixActions; onReviewOriginal?:(sql:string)=>void }) {
+  const tab = useDbSelector(state => {
+    const live = state.tabs.find(candidate => candidate.id === seed.id);
+    return live?.kind === "sql" ? live : seed;
+  });
+  const { id, connId, slot, run, maxRows, timeoutSec } = tab;
+  const rowTab = useMemo(() => ({ id, connId, slot, run, maxRows, timeoutSec }), [id, connId, slot, run, maxRows, timeoutSec]);
   const [motionHost, setMotionHost] = useState<HTMLDivElement | null>(null);
   /** 看过的结果视图保活：切标签回来时本地筛选、排序、滚动与单元格选择都还在。 */
   const [kept, setKept] = useState<string[]>([]);
   const operation = useOperationById(tab.run?.id);
   const active = !!operation && operation.endedAt === undefined;
-  const pending = useMemo(() => pendingResults({ batch: tab.batch }), [tab.batch]);
+  // A single replacement query has its status in the header. Keep the old result tabs fixed until it returns.
+  const hasResults = tab.results.length > 0;
+  const pending = useMemo(() => hasResults && tab.batch?.statements.length === 1 ? [] : pendingResults({ batch: tab.batch }),
+    [hasResults, tab.batch]);
   const options = useMemo(() => [...tab.results, ...pending], [tab.results, pending]);
   const valid = tab.view === "output" || tab.view === "plan" && tab.plan || options.some(r => r.id === tab.view);
   const view = valid ? tab.view! : tab.results[0]?.id ?? pending[0]?.id ?? "output";
@@ -38,6 +47,9 @@ export function ResultPanel({ tab, height, onLocate, onFillSql, fixes }: { tab: 
   const visible = useMemo(() => options.some(r => r.id === view) ? layout === "dual" ? pair : [view] : [], [options, view, layout, pair]);
   const cur = tab.results.find((r) => r.id === view);
   const selectedResult = options.find(r => r.id === view);
+  const [outputVisited, setOutputVisited] = useState(view === "output");
+  useEffect(() => { if (view === "output") setOutputVisited(true); }, [view]);
+  const showOutput = view === "output" || view !== "plan" && !selectedResult;
   const previous = !!cur && active && (!cur.completedAt || cur.completedAt < operation.startedAt);
   const motionState = active ? operation.state : operation?.state ?? "idle";
   useEditRevision();
@@ -55,11 +67,11 @@ export function ResultPanel({ tab, height, onLocate, onFillSql, fixes }: { tab: 
     patchTab<SqlTab>(tab.id, { resultPair: next, view: id });
   };
   const rt = rtOf(tab.connId);
-  const tables = (rt.tables ?? []).map((t) => t.name);
+  const tables = useMemo(() => (rt.tables ?? []).map(t => t.name), [rt.tables]);
   const prefix = `dbx-results-${tab.id}`;
   const items = [
     ...tab.results.map(r => {
-      const dirty = r.kind === "rows" ? pendingEdits(resultEditKey(tab.id, r.id)) : 0;
+      const dirty = r.kind === "rows" ? pendingResultEdits(tab.id, r.id) : 0;
       const table = r.kind === "rows" ? guessTable(r.sql) : null;
       // 紧贴语句的那行注释就是它的名字（`-- 物料主档`）；没有注释才退回序号。
       const name = statementTitle(r.sql);
@@ -67,6 +79,7 @@ export function ResultPanel({ tab, height, onLocate, onFillSql, fixes }: { tab: 
       return { id: r.id, title: r.sql, label: <>
         {dirty > 0 && <span className="dbx-dirty-dot" role="img" aria-label={`有 ${dirty} 处未写回的改动`} title={`有 ${dirty} 处未写回的改动`} />}
         <Icon name={r.cancelled ? "stop" : r.kind === "error" ? "alert" : r.kind === "rows" ? "database" : "check"} size={13} />
+        {r.pinned && <span className="dbx-cnt">已固定</span>}
         {name ? <><span className="dbx-result-tab-name">{name}</span><span className="dbx-cnt">{kindLabel}</span></> : kindLabel}
         {table && <span className="dbx-result-tab-table">{table}</span>}
         {r.kind === "rows" && (r.sets?.length ?? 0) > 1 && <span className="dbx-cnt">{r.sets!.length} 个结果集</span>}
@@ -103,6 +116,14 @@ export function ResultPanel({ tab, height, onLocate, onFillSql, fixes }: { tab: 
         <span id={`${prefix}-region`} className="dbx-region-label">结果区</span>
         <ResultTabList prefix={prefix} label="查询结果" items={items} value={view} onSelect={setView} />
         <ResultBaselineSummary /><SqlExecutionFeedback executionId={tab.run?.id} previousAt={cur ? cur.completedAt ?? 0 : undefined} />
+        {cur?.parentResultId && options.some(result => result.id === cur.parentResultId) &&
+          <button type="button" className="dbx-lk" onClick={() => setView(cur.parentResultId!)}>返回来源结果</button>}
+        {cur?.kind === "rows" && <button type="button" className="dbx-ibtn" aria-pressed={!!cur.pinned}
+          aria-label={cur.pinned ? "取消固定结果" : "固定结果"}
+          title={pendingResultEdits(tab.id, cur.id) ? "写回或撤销改动后可固定结果" : cur.pinned ? "取消固定结果" : "固定已读取的查询结果"}
+          disabled={isRunning(tab) || cur.loadingMore || pendingResultEdits(tab.id, cur.id) > 0}
+          onClick={() => patchTab<SqlTab>(tab.id, { results: tab.results.map(result => result.id === cur.id ? { ...result, pinned: !result.pinned } : result) })}>
+          <Icon name="pin" size={14} /></button>}
         {layout === "tabs" && selectedResult && onLocate && <button type="button" className="dbx-ibtn"
           aria-label={`定位 SQL 第 ${selectedResult.startLine ?? 1} 行`} title={`定位 SQL 第 ${selectedResult.startLine ?? 1} 行`}
           onClick={() => onLocate(selectedResult.startLine ?? 1)}><Icon name="locateSql" size={14} /></button>}
@@ -117,7 +138,7 @@ export function ResultPanel({ tab, height, onLocate, onFillSql, fixes }: { tab: 
       <div className="dbx-result-panes" data-layout={layout}>
       {rowViews.map(r => <section key={r.id} className="dbx-result-keep" hidden={!visible.includes(r.id)} style={{ order: visible.indexOf(r.id) }} aria-label={`查询 ${r.index} 结果`}>
         {paneHeading(r)}
-        <RowsEntryView tab={tab} entry={r} isLast={ownsCursor(tab.connId, tab.slot, r.id)} onLocate={onLocate} onFillSql={onFillSql} />
+        <RowsEntryView tab={rowTab} entry={r} isLast={ownsCursor(tab.connId, tab.slot, r.id)} onLocate={onLocate} onFillSql={onFillSql} onReviewOriginal={onReviewOriginal} />
       </section>)}
       {pending.filter(r => visible.includes(r.id)).map(r => <section key={r.id} className="dbx-result-keep" style={{ order: visible.indexOf(r.id) }} aria-label={`查询 ${r.index} 结果`}>
         {paneHeading(r)}
@@ -127,11 +148,8 @@ export function ResultPanel({ tab, height, onLocate, onFillSql, fixes }: { tab: 
         {paneHeading(r)}
         <EntryView tab={tab} entry={r} tables={tables} onLocate={onLocate} fixes={fixes} />
       </section>)}
-      {view === "plan" && tab.plan ? (
-        <PlanView plan={tab.plan} connId={tab.connId} />
-      ) : view === "output" || !options.some(r => r.id === view) ? (
-        <OutputView tab={tab} />
-      ) : null}
+      {view === "plan" && tab.plan && <PlanView plan={tab.plan} connId={tab.connId} />}
+      {(showOutput || outputVisited) && <OutputView key={tab.id} tab={tab} active={showOutput} />}
       </div>
       </div>
     </section>
@@ -179,13 +197,35 @@ function StatsLine({ stats }: { stats: ResultEntry["stats"] }) {
   );
 }
 
-function OutputView({ tab }: { tab: SqlTab }) {
+function OutputView({ tab, active }: { tab: SqlTab; active: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    ref.current?.scrollTo({ top: ref.current.scrollHeight });
-  }, [tab.output.length]);
+  const following = useRef(true);
+  const seenOutput = useRef(tab.output);
+  const [unseen, setUnseen] = useState(0);
+  const bottom = () => {
+    const el = ref.current;
+    if (el) { el.scrollTop = el.scrollHeight; el.focus({ preventScroll: true }); }
+    following.current = true;
+    setUnseen(0);
+  };
+  useLayoutEffect(() => {
+    if (!active) return;
+    const previous = seenOutput.current;
+    seenOutput.current = tab.output;
+    if (following.current) { const el = ref.current; if (el) el.scrollTop = el.scrollHeight; }
+    else if (previous !== tab.output) {
+      const last = previous[previous.length - 1], index = last ? tab.output.lastIndexOf(last) : -1;
+      if (!tab.output.length) setUnseen(0);
+      else setUnseen(count => count + tab.output.length - index - 1);
+    }
+  }, [tab.output, active]);
   return (
-    <div ref={ref} className="dbx-output">
+    <div className="dbx-output-view" hidden={!active}>
+    <div ref={ref} className="dbx-output" tabIndex={0} aria-label="查询输出" onScroll={event => {
+      const el = event.currentTarget;
+      following.current = el.scrollHeight - el.clientHeight - el.scrollTop < 24;
+      if (following.current) setUnseen(0);
+    }}>
       {tab.output.length === 0 && <span className="info">{tab.results.length || tab.plan || tab.run
         ? "暂无执行输出。" : "执行 SQL 后，查询结果和执行信息会显示在这里。"}</span>}
       {tab.output.map((l, i) => (
@@ -193,6 +233,8 @@ function OutputView({ tab }: { tab: SqlTab }) {
           {l.text}
         </div>
       ))}
+    </div>
+    {unseen > 0 && <div className="dbx-rfoot"><span role="status">{unseen} 条新输出</span><button type="button" className="dbx-lk" onClick={bottom}>跳到底部</button></div>}
     </div>
   );
 }

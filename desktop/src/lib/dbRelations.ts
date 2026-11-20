@@ -1,7 +1,7 @@
 import type { BoundCell, Cell, ColumnMeta, ExecResult } from "./dbApi";
 import { bindRowValue } from "./dbOptimisticEdit";
 import { identifier } from "./dbConditions";
-import { activateTab, getDb, openTableTab, patchTab, type TableTab } from "./dbStore";
+import { activateTab, getDb, openTableFollowup, openTableTab, type TableTab } from "./dbStore";
 export interface Relation {id:string;source:string;target:string;from:string[];to:string[];kind:"外键"|"NC类引用"}
 export function relationRows(result:ExecResult,kind:Relation["kind"]):Relation[] {
   if(result.kind!=="rows") return [];
@@ -26,12 +26,11 @@ export function relationQuery(relation:Relation,table:string,columns:ColumnMeta[
   return {table:forward?relation.target:relation.source,where,order:"",params};
 }
 export function openRelated(tab:TableTab,query:ReturnType<typeof relationQuery>) {
-  const id=openTableTab(tab.connId,query.table);
-  patchTab<TableTab>(id,{query,trail:[...(tab.trail??[]),{tabId:tab.id,label:tab.table}]});
+  return openTableFollowup(tab, query.table, query);
 }
 
 export function returnRelated(tab:TableTab,step:{tabId:string;label:string}):boolean {
   if(getDb().tabs.some(t=>t.id===step.tabId)) { activateTab(step.tabId); return false; }
-  openTableTab(tab.connId,step.label);
+  openTableTab(tab.connId,step.label,"data",undefined,tab.schema);
   return true;
 }

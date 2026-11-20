@@ -5,10 +5,11 @@ import { friendlyDbError, thousands } from "../../lib/db";
 import { dbApi, type DbObject, type TableInfo } from "../../lib/dbApi";
 import { newConsole, openTable, refreshMeta } from "../../lib/dbActions";
 import { favoriteKey, toggleFavorite, useAllFavorites, type FavoriteKind } from "../../lib/dbFavorites";
-import { openTableTab, useConnRt } from "../../lib/dbStore";
+import { connOf, openTableTab, useConnRt } from "../../lib/dbStore";
 import { toast } from "../ui/toast";
 import { copyText } from "../../lib/utils";
 import { FavStar, TableRow } from "./ConnTableRow";
+import { rankDbObjects } from "../../lib/dbObjectRanking";
 
 /** 真实库里上万张表是常态，一次全铺会让侧栏卡死：每组只渲染前 N 条，靠筛选收敛。 */
 const LIMIT = 200;
@@ -77,8 +78,8 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
   const matched = useMemo(() => {
     const all = rt.tables ?? [];
     if (!filter) return all;
-    return all.filter((t) => t.name.toLowerCase().includes(filter) || (names[t.name.toLowerCase()] ?? "").includes(filter));
-  }, [rt.tables, filter, names]);
+    return rankDbObjects(all, filter, names, connOf(connId), schema || rt.info?.schema, all.length);
+  }, [rt.tables, filter, names, connId, schema, rt.info?.schema]);
 
   /** 对象按类型分组；`filter` 命中名字就留下。 */
   const objSections = useMemo(
@@ -106,7 +107,7 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
         { label: "查看 DDL", icon: "file", onSelect: () => void openTable(connId, t.name, "ddl") },
         { label: "新建查询", icon: "terminal", separator: true, onSelect: () => void newConsole(connId, `select * from ${lower} where rownum <= 100`) },
         { label: "复制表名", icon: "copy", onSelect: () => void copyText(lower, () => toast(`已复制 ${lower}`, "success"), (e) => toast(`复制失败：${e}`, "error")) },
-        { label: fav ? "取消收藏" : "收藏", icon: "star", onSelect: () => toggleFavorite(connId, "table", t.name) },
+        { label: fav ? "取消收藏" : "收藏", icon: "star", onSelect: () => toggleFavorite(connId, "table", t.name, undefined, schema) },
       ],
     });
   };
@@ -120,7 +121,7 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
       items: [
         { label: "打开源码", icon: "file", onSelect: () => openTableTab(connId, o.name, "source", o.type) },
         { label: "复制名称", icon: "copy", onSelect: () => void copyText(lower, () => toast(`已复制 ${lower}`, "success"), (e) => toast(`复制失败：${e}`, "error")) },
-        { label: fav ? "取消收藏" : "收藏", icon: "star", separator: true, onSelect: () => toggleFavorite(connId, "object", o.name, o.type) },
+        { label: fav ? "取消收藏" : "收藏", icon: "star", separator: true, onSelect: () => toggleFavorite(connId, "object", o.name, o.type, schema) },
       ],
     });
   };
@@ -160,7 +161,7 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
                 table={t}
                 zh={names[t.name.toLowerCase()]}
                 fav={isFav("table", t.name)}
-                onToggleFav={() => toggleFavorite(connId, "table", t.name)}
+                onToggleFav={() => toggleFavorite(connId, "table", t.name, undefined, schema)}
                 onMenu={tableMenu}
               />
             ))}
@@ -212,7 +213,7 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
                       <FavStar
                         fav={fav}
                         name={o.name.toLowerCase()}
-                        onToggle={() => toggleFavorite(connId, "object", o.name, o.type)}
+                        onToggle={() => toggleFavorite(connId, "object", o.name, o.type, schema)}
                       />
                     </button>
                   );

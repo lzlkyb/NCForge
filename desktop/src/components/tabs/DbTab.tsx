@@ -16,8 +16,19 @@ import { TablePage } from "../db/TablePage";
 import { ComparisonWorkspace } from "../db/ComparisonWorkspace";
 import { ViewActivityContext, useViewActive } from "../../lib/viewActivity";
 import { newConsole, openDict } from "../../lib/dbActions";
-import { showObjectFinder, defaultConnId, loadConns, openConnDialog, openSqlTab, restoreClosedTab, useActiveDbTab, useDbSelector } from "../../lib/dbStore";
+import { showObjectFinder, defaultConnId, loadConns, openConnDialog, openSqlTab, restoreClosedTab, useActiveDbTab, useDbSelector, type DbTabItem, type SqlTab } from "../../lib/dbStore";
 import { dbPanelId, dbTabId } from "../../lib/dbPendingSessions";
+
+function sameDocument(a: DbTabItem | null, b: DbTabItem | null): boolean {
+  if (a === b) return true;
+  if (a?.kind !== "sql" || b?.kind !== "sql" || a.id !== b.id) return false;
+  // The result panel subscribes to its own presentation. Its tabs shouldn't rerender the editor or document shell.
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)] as (keyof SqlTab)[]);
+  keys.delete("view");
+  keys.delete("resultLayout");
+  keys.delete("resultPair");
+  return [...keys].every(key => a[key] === b[key]);
+}
 
 /**
  * 数据库页（多连接 SQL 客户端 + 数据字典文档）。
@@ -31,13 +42,18 @@ import { dbPanelId, dbTabId } from "../../lib/dbPendingSessions";
  */
 export function DbTab() {
   // 整页只跟着「当前标签」和几个计数走：别的标签跑查询、连接状态变化不重画整页
-  const tab = useActiveDbTab();
+  const tab = useActiveDbTab(sameDocument);
   const active = useViewActive();
   const retainedId = useRef<string | null>(null);
   if (tab?.kind === "sql" || tab?.kind === "table") retainedId.current = tab.id;
   // Comparison is a temporary document beside the query. Keep its source mounted so returning
   // preserves the editor, local grid filter, selection and exact scroll position without a requery.
-  const retained = useDbSelector(s => s.tabs.find(t => t.id === retainedId.current) ?? null);
+  const retained = useDbSelector(s => s.tabs.find(t => t.id === retainedId.current) ?? null, sameDocument);
+  const trail = retained?.kind === "table" ? retained.trail : undefined;
+  const tableParents = useDbSelector(s => (trail ?? []).flatMap(step => {
+    const parent = s.tabs.find(t => t.id === step.tabId);
+    return parent?.kind === "table" ? [parent] : [];
+  }), (a, b) => a.length === b.length && a.every((parent, index) => parent === b[index]));
   const db = {
     loaded: useDbSelector((s) => s.loaded),
     tabs: { length: useDbSelector((s) => s.tabs.length) },
@@ -79,8 +95,12 @@ export function DbTab() {
               <div className="dbx-document-host" hidden={tab?.kind === "compare" || !tab}>
                 <ViewActivityContext.Provider value={active && tab?.kind !== "compare"}>
                   {retained?.kind === "sql" && <SqlConsole tab={retained} />}
-                  {retained?.kind === "table" && <TablePage key={retained.id} tab={retained} />}
                 </ViewActivityContext.Provider>
+                {retained?.kind === "table" && [...tableParents, retained].map(table => <div key={table.id} className="dbx-document-host" hidden={table.id !== retained.id}>
+                  <ViewActivityContext.Provider value={active && tab?.kind === "table" && table.id === tab.id}>
+                    <TablePage tab={table} />
+                  </ViewActivityContext.Provider>
+                </div>)}
               </div>
               {tab?.kind === "compare" && <ComparisonWorkspace tab={tab} />}
               {!tab && (

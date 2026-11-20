@@ -8,6 +8,8 @@ import { ensureConnected } from "./dbConfirm";
 import { connOf, execOne, isRunning, patchTab, rtOf, sqlTabOf, type RunToken, type SqlTab } from "./dbStore";
 import { orderBySql } from "./serverSort";
 import { resultTargetIssue, type ResultExecutionContext } from "./dbResultContext";
+import { readQueryBody, type ResultFollowup } from "./dbResultFollowup";
+import { closeResultCursor } from "./dbResultCursors";
 
 /**
  * 结果表上那两个「动数据」的动作：服务端重排（A3）与流式导出（A4）。
@@ -56,6 +58,49 @@ export async function reSortOnServer(
     // 只清自己这一趟：期间用户可能已切连接或发起新执行
     if (sqlTabOf(tabId)?.run?.id === token.id) patchTab<SqlTab>(tabId, { run: undefined });
   }
+}
+
+/** Keep the source result alive, and recheck the execution target after connecting. */
+export async function appendResultQuery(tabId: string, parentId: string, query: ResultFollowup): Promise<void> {
+  const tab = sqlTabOf(tabId), parent = tab?.results.find(result => result.id === parentId);
+  if (!tab?.connId || !parent?.context || !query.executable || isRunning(tab)) return;
+  const connId = tab.connId, context = parent.context;
+  const current = () => {
+    const rt = rtOf(connId), live = sqlTabOf(tabId);
+    return live?.connId === connId && live.results.some(result => result.id === parentId)
+      && !resultTargetIssue(context, connOf(connId), rt.currentSchema ?? rt.info?.schema);
+  };
+  if (!(await ensureConnected(connId)) || !current() || isRunning(sqlTabOf(tabId))) {
+    toast("来源结果或连接已变化，请核对后重新发起。", "warning");
+    return;
+  }
+  const task = beginOperation({ ...dbTaskSpec(`followup:${tabId}`, query.title, connId, "查询结果", undefined, tabId),
+    phase: "等待数据库返回", cancel: () => dbApi.cancel(connId, sqlTabOf(tabId)?.slot) });
+  if (!task) return;
+  const token: RunToken = { id: task.id, connId, at: Date.now(), slot: sqlTabOf(tabId)?.slot ?? null, kind: "execute" };
+  patchTab<SqlTab>(tabId, { run: token });
+  try {
+    const bound = query.params.length ? { sql: query.sql, params: query.params } : undefined;
+    const index = Math.max(0, ...sqlTabOf(tabId)!.results.map(result => result.index)) + 1;
+    const entry = await execOne(tabId, query.sql, index, undefined, false, bound, current);
+    task.finish(entry.cancelled ? "cancelled" : entry.kind === "error" ? "failed" : "success",
+      entry.kind === "error" ? "查询未完成，详情见结果区" : `已读取 ${entry.rows.length} 行`);
+    const live = sqlTabOf(tabId);
+    if (live?.run?.id !== token.id || !current()) { await closeResultCursor(entry.id); return; }
+    patchTab<SqlTab>(tabId, { results: [...live.results, { ...entry, parentResultId: parentId, replayBindings: bound }],
+      ...(live.view === parentId || !live.view ? { view: entry.id } : {}) });
+  } catch (error) {
+    task.finish("failed", friendlyDbError(error));
+    toast(friendlyDbError(error), "error");
+  } finally {
+    if (sqlTabOf(tabId)?.run?.id === token.id) patchTab<SqlTab>(tabId, { run: undefined });
+  }
+}
+
+export function snapshotReplayQuery(entry: import("./dbStore").ResultEntry): ResultFollowup | null {
+  if (entry.replayBindings) return { ...entry.replayBindings, title: "重新执行查询", executable: true };
+  const sql = readQueryBody(entry.sql);
+  return sql && !entry.boundQuery ? { sql, params: [], title: "重新执行查询", executable: true } : null;
 }
 
 /** 文件名里的时间戳：本机时区（后端没有 chrono，算 UTC 会让文件名差 8 小时）。 */
