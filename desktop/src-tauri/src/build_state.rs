@@ -11,7 +11,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -293,17 +293,20 @@ pub fn list_manifests(dir: &Path) -> Vec<Manifest> {
 struct JarStampCache {
     home: PathBuf,
     at: Instant,
-    stamps: Vec<(String, u64, u64)>,
+    /// 格式化好的 jar 指纹字节（`path|len|ms`），跨模块共享：config_fingerprints 每模块
+    /// 都拼这 12738 条，重复 format+clone 是纯浪费。Arc 共享、借用拼 refs，指纹值不变。
+    blob: Arc<Vec<Vec<u8>>>,
 }
 
-static JAR_STAMPS: Mutex<Option<JarStampCache>> = Mutex::new(None);
+static JAR_STAMPS: Mutex<Option<Arc<JarStampCache>>> = Mutex::new(None);
 
-fn jar_stamps(nc_home: &Path) -> Vec<(String, u64, u64)> {
+/// 确保 jar _stamp 缓存新鲜（TTL 内复用），返回 Arc 供 stamps/blob 共享借用。
+fn jar_cache(nc_home: &Path) -> Arc<JarStampCache> {
     let now = Instant::now();
     if let Ok(g) = JAR_STAMPS.lock() {
         if let Some(c) = g.as_ref() {
             if c.home == nc_home && now.duration_since(c.at) < JAR_STAMP_TTL {
-                return c.stamps.clone();
+                return c.clone();
             }
         }
     }
@@ -314,14 +317,24 @@ fn jar_stamps(nc_home: &Path) -> Vec<(String, u64, u64)> {
             (build_layout::slash(&p).to_ascii_lowercase(), len, ms)
         })
         .collect();
+    let blob: Vec<Vec<u8>> = stamps
+        .iter()
+        .map(|(p, len, ms)| format!("{p}|{len}|{ms}").into_bytes())
+        .collect();
+    let cache = Arc::new(JarStampCache {
+        home: nc_home.to_path_buf(),
+        at: now,
+        blob: Arc::new(blob),
+    });
     if let Ok(mut g) = JAR_STAMPS.lock() {
-        *g = Some(JarStampCache {
-            home: nc_home.to_path_buf(),
-            at: now,
-            stamps: stamps.clone(),
-        });
+        *g = Some(cache.clone());
     }
-    stamps
+    cache
+}
+
+/// 共享 jar 指纹字节（Arc）：config_fingerprints 借用拼 refs，免每模块重 format+clone。
+fn jar_blob(nc_home: &Path) -> Arc<Vec<Vec<u8>>> {
+    jar_cache(nc_home).blob.clone()
 }
 
 /// 换 NC home / 点「重建类索引」时让 jar 指纹缓存立刻失效。
@@ -341,7 +354,7 @@ pub fn config_fingerprints(
     ecj: &Path,
     java: &Path,
 ) -> (String, String) {
-    let mut cp: Vec<Vec<u8>> = vec![
+    let cp: Vec<Vec<u8>> = vec![
         build_layout::slash(nc_home)
             .to_ascii_lowercase()
             .into_bytes(),
@@ -352,9 +365,8 @@ pub fn config_fingerprints(
         dependencies_blob(root, overrides),
         overrides_blob(overrides).into_bytes(),
     ];
-    for (p, len, ms) in jar_stamps(nc_home) {
-        cp.push(format!("{p}|{len}|{ms}").into_bytes());
-    }
+    // jar 侧 12738 条跨模块相同：借用共享 blob，免每模块重 format+clone（指纹字节序不变）。
+    let blob = jar_blob(nc_home);
 
     let (ecj_len, ecj_ms) = stat_of(ecj);
     let (java_len, java_ms) = stat_of(java);
@@ -368,7 +380,8 @@ pub fn config_fingerprints(
         java_ms,
         "-1.8 -g -nowarn -proc:none -preserveAllLocals -Dfile.encoding=UTF-8"
     );
-    let cp_refs: Vec<&[u8]> = cp.iter().map(|v| v.as_slice()).collect();
+    let mut cp_refs: Vec<&[u8]> = cp.iter().map(|v| v.as_slice()).collect();
+    cp_refs.extend(blob.iter().map(|v| v.as_slice()));
     (sha(&cp_refs), sha(&[compiler.as_bytes()]))
 }
 

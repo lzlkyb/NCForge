@@ -12,7 +12,8 @@
 //! 前两层在 OS 回调里就做掉，再入有界队列（EVENT_QUEUE）：编译 / SVN 更新 / 解压
 //! 这类事件风暴不会无限排队吃内存；队列满了就丢事件、记一笔，下一批改成全量重读。
 //!
-//! 纯逻辑（过滤 / 归类 / 合并）都在本文件；[`WorkspaceWatcher`] 是唯一摸 OS 的地方，
+//! 过滤 / 归类的纯规则在 [`watcher_rules`](crate::watcher_rules)，合并在本文件；
+//! [`WorkspaceWatcher`] 是唯一摸 OS 的地方，
 //! 命令层只负责在切工作区时换一份监听（见 `workspace_cmds::restart_watcher`）。
 //!
 //! 同一批事件还顺手喂给 `svn_status_cache`：版本控制页的增量刷新靠「哪个模块脏了」
@@ -24,7 +25,7 @@
 //! （平台报了「事件可能丢失」）。
 
 use std::collections::BTreeSet;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::Arc;
@@ -33,10 +34,10 @@ use std::time::{Duration, Instant};
 use notify::{RecursiveMode, Watcher};
 
 use crate::security::path::display_path;
-
-/// 不参与刷新的目录名（任意一级命中即跳过）。比较忽略大小写：
-/// Windows 上 `NC\.SVN\` 与 `.svn` 是同一个目录。
-const IGNORED_DIRS: [&str; 3] = [".svn", ".git", ".idea"];
+use crate::watcher_rules::{
+    is_ignored, is_java_change, is_java_path, is_library_path, is_review_change, is_review_path,
+    is_svn_watchable, needs_tree_refresh, svn_relevant, worth_queueing,
+};
 
 /// 合并窗口：盖得住一次 SVN 更新 / 一次批量生成，又不至于让用户觉得「改完半天没反应」。
 const DEBOUNCE: Duration = Duration::from_millis(350);
@@ -68,115 +69,6 @@ const MAX_WAIT: Duration = Duration::from_millis(1000);
 /// OS 回调 → 合并线程之间的有界队列长度（已过滤后的事件）。
 const EVENT_QUEUE: usize = 4096;
 
-/// 这个事件值不值得送进队列：内容 / 属性变更、全在元数据目录里的，回调里就丢掉。
-/// 平台的「可能丢事件」信号无论如何都要送。
-///
-/// **`.java` 内容变更是例外**：树不用刷新，但构建引擎要知道「外部改了源码」。
-/// 只放行 `.java`，编译写出的 `.class` 仍然在回调里丢掉。
-///
-/// **可审查文本文件的内容变更是另一个例外**：AI 工具 / 别的编辑器改 `.xml`、
-/// `.sql`、`.properties`、`.js` 时，审查时间线、改动色条、已审角标都要跟着更新，
-/// 不送的话这些改动对工作台完全不可见（只有 `.java` 能进自动编译那条线）。
-pub fn worth_queueing(ev: &notify::Event, root: &Path) -> bool {
-    ev.need_rescan()
-        || (needs_tree_refresh(&ev.kind) && ev.paths.iter().any(|p| !is_ignored(p)))
-        || (is_java_change(&ev.kind) && ev.paths.iter().any(|p| is_java_path(p)))
-        || (is_review_change(&ev.kind) && ev.paths.iter().any(|p| is_review_path(p)))
-        // 版本控制页的增量刷新要知道「哪个模块脏了」。这条比前三条宽：SVN 的
-        // modified 只认 mtime/size，`touch` 一下、改个 .txt 都算——它们进不了
-        // 文件树与审查时间线，但不送进来增量就会漏掉这次改动。
-        || (is_svn_watchable(&ev.kind) && ev.paths.iter().any(|p| svn_relevant(p, root)))
-}
-
-/// SVN 脏集关心的事件：除了「读」都算。
-///
-/// `Access` 是读文件 / 读属性（应用自己打开标签就一堆），送进来纯属噪音。
-fn is_svn_watchable(kind: &notify::EventKind) -> bool {
-    use notify::EventKind;
-    !matches!(kind, EventKind::Access(_) | EventKind::Other)
-}
-
-/// 这个路径变了，有没有可能让 `svn status` 的结论变。
-///
-/// **元数据目录认 `entries` 与 `wc.db` 两种**：
-/// - format 10（1.6 及更早）每个目录一份 `.svn/entries`；
-/// - format 12+（1.7 起）整份副本只有一个 `.svn/wc.db`，`entries` 退化成占位内容
-///   （只写着 `12`），**add / delete 根本不会改它**。
-///
-/// SVNKit 升到 1.10.11 后两种副本都能操作，只认 `entries` 会让 1.7+ 副本里
-/// 「`svn add` 一个已存在的文件」完全不可见：文件本身没被写过、脏集又是空的，
-/// 增量刷新把这次新增当成不存在。
-///
-/// 🔴 **`root` 必须传**：`svn_view::is_ignored` 的契约是「只看相对路径」，
-/// 它按整段匹配 `classes`/`out`/`target`/`bin` 等目录名。把绝对路径直接喂进去，
-/// 工作区本身住在 `D:\out\newar`、`C:\dev\target\ws` 下时**每个文件都会被判忽略**，
-/// 脏集永远为空 ⇒ 首次全量之后所有增量都走缓存，改动再也不出现。
-pub fn svn_relevant(path: &Path, root: &Path) -> bool {
-    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        // 构建产物 / 归档：`svn_view::is_ignored` 本来就不把它们当改动。
-        // 先按扩展名挡掉是性能考虑——编译一次几千个 .class 事件全走下面的
-        // 字符串切分，会把 OS 回调拖慢。
-        const NOISE: [&str; 6] = ["class", "jar", "zip", "log", "tmp", "bak"];
-        if NOISE.iter().any(|e| ext.eq_ignore_ascii_case(e)) {
-            return false;
-        }
-    }
-    if is_ignored(path) {
-        let name_is = |p: Option<&Path>, want: &str| {
-            p.and_then(|x| x.file_name())
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.eq_ignore_ascii_case(want))
-        };
-        if !name_is(path.parent(), ".svn") {
-            return false;
-        }
-        // wc.db-wal / wc.db-journal 是 SQLite 的临时文件，一次事务写好几遍，
-        // 认它们等于把噪音全收进来；真正的提交落在 wc.db 本身。
-        return name_is(Some(path), "entries") || name_is(Some(path), "wc.db");
-    }
-    // 构建产物目录（classes / out / target …）里的东西，改了 SVN 也不报。
-    // 先剥掉工作区根：规则只该作用于工程内部的相对路径。
-    let rel = path.strip_prefix(root).unwrap_or(path);
-    !crate::svn_view::is_ignored(&rel.to_string_lossy(), false)
-}
-
-/// 可审查文件的**内容**变更。不含增 / 删 / 改名：那类改动由文件树与「转到文件」
-/// 清单负责（见 `needs_tree_refresh` / `files_changed`），新建的文件本来就没有
-/// 旧内容可供比对，删掉的文件在编辑器里也不再存在。
-fn is_review_change(kind: &notify::EventKind) -> bool {
-    use notify::{event::ModifyKind, EventKind};
-    matches!(
-        kind,
-        EventKind::Modify(ModifyKind::Data(_)) | EventKind::Modify(ModifyKind::Any)
-    )
-}
-
-/// 可审查 = 工作区内的文本文件（与「转到文件」清单同一套判定：二进制扩展名 /
-/// 构建产物目录都不算）。`.java` 也在其中——它同样要进审查时间线。
-fn is_review_path(path: &Path) -> bool {
-    !is_ignored(path) && crate::search::is_listed_path(path)
-}
-
-/// 外部源码改动：内容变更 + 增删改名（新增/删除会让模块走全量）。
-pub fn is_java_change(kind: &notify::EventKind) -> bool {
-    use notify::{event::ModifyKind, EventKind};
-    matches!(
-        kind,
-        EventKind::Create(_)
-            | EventKind::Remove(_)
-            | EventKind::Modify(ModifyKind::Data(_))
-            | EventKind::Modify(ModifyKind::Any)
-            | EventKind::Modify(ModifyKind::Name(_))
-    )
-}
-
-pub fn is_java_path(path: &Path) -> bool {
-    !is_ignored(path)
-        && path
-            .extension()
-            .is_some_and(|x| x.eq_ignore_ascii_case("java"))
-}
-
 /// 合并状态机（纯逻辑，时间由调用方传入，便于单测）。
 struct Batcher {
     /// 监听的工作区根。SVN 脏标记要靠它把路径归到模块上。
@@ -197,6 +89,8 @@ struct Batcher {
     svn_overflow: bool,
     /// 这一批里有「会出现在文件清单里」的文件被增 / 删 / 改名（编译写 `.class` 不算）
     files_changed: bool,
+    /// 这一批里有库来源（jar / class / 文本条目 / `.classpath`）变化：库文件目录要失效。
+    library: bool,
     /// 这一批第一个事件到达的时间；空批为 None。
     since: Option<Instant>,
 }
@@ -214,6 +108,7 @@ impl Batcher {
             svn: BTreeSet::new(),
             svn_overflow: false,
             files_changed: false,
+            library: false,
             since: None,
         }
     }
@@ -246,6 +141,14 @@ impl Batcher {
                 }
             }
         }
+        if is_java_change(&ev.kind)
+            && ev
+                .paths
+                .iter()
+                .any(|p| p.starts_with(root) && is_library_path(p))
+        {
+            self.library = true;
+        }
         if is_review_change(&ev.kind) {
             for p in &ev.paths {
                 if p.starts_with(root) && is_review_path(p) && !self.review.contains(p) {
@@ -273,7 +176,8 @@ impl Batcher {
                 || !self.pending.is_empty()
                 || !self.java.is_empty()
                 || !self.review.is_empty()
-                || !self.svn.is_empty())
+                || !self.svn.is_empty()
+                || self.library)
         {
             self.since = Some(now);
         }
@@ -316,10 +220,13 @@ impl Batcher {
             self.svn.clear();
             self.svn_overflow = false;
         }
-        // 源码变了：让工作区索引在下一次查询时后台校准。索引构建要遍历整棵树
-        // （慢盘上十几秒），绝不能跟着查询同步做，也不能靠定时校准空转。
-        if !self.java.is_empty() || self.java_overflow {
-            crate::workspace_types::mark_dirty();
+        // 源码变了：小脏集喂精确路径走增量 patch（只 stat/parse 改动文件）；溢出/rescan
+        // 才置全量标记。索引全量构建要遍历整棵树（慢盘十几秒），不能跟着查询同步做。
+        if !self.java.is_empty() || self.java_overflow || self.rescan {
+            let java: Vec<PathBuf> = self.java.iter().cloned().collect();
+            crate::workspace_types::mark_dirty_paths(&java, self.java_overflow || self.rescan);
+            // 装配诊断的「类是否存在」按源码类名集判：java 变了集合作废。
+            crate::commands::invalidate_upm_classes();
         }
         // 编译脏集：decide 据此只 stat 脏文件而非全模块扫描。溢出 / rescan 抬高 epoch
         // 作废所有模块基线（即便本批没有 java，rescan 也要作废——事件可能丢了）。
@@ -344,6 +251,13 @@ impl Batcher {
             crate::search::mark_list_dirty();
         }
         self.files_changed = false;
+        // 库文件目录改事件驱动：来源变了才失效，重建推迟到下次搜索（旧目录先返回）。
+        // rescan 说明事件可能丢了，同样失效；NC home 侧变化由兜底 TTL 负责。
+        if self.library || self.rescan {
+            crate::commands::invalidate_library();
+            crate::commands::invalidate_bmf_index();
+        }
+        self.library = false;
         self.since = None;
         flush(
             &mut self.pending,
@@ -355,27 +269,6 @@ impl Batcher {
             files_changed,
             emit,
         );
-    }
-}
-
-/// 这条路径是不是落在不看的目录里。
-pub fn is_ignored(path: &Path) -> bool {
-    path.components().any(|c| match c {
-        Component::Normal(name) => name
-            .to_str()
-            .is_some_and(|s| IGNORED_DIRS.iter().any(|d| s.eq_ignore_ascii_case(d))),
-        _ => false,
-    })
-}
-
-/// 这类事件有没有可能改变「目录里有哪些项」。
-pub fn needs_tree_refresh(kind: &notify::EventKind) -> bool {
-    use notify::{event::ModifyKind, EventKind};
-    match kind {
-        EventKind::Create(_) | EventKind::Remove(_) | EventKind::Any => true,
-        // 改名会同时给新旧两个路径；`ModifyKind::Any` 是平台没细分的兜底
-        EventKind::Modify(ModifyKind::Name(_) | ModifyKind::Any) => true,
-        EventKind::Modify(_) | EventKind::Access(_) | EventKind::Other => false,
     }
 }
 
@@ -701,6 +594,33 @@ mod tests {
 
     fn ev(kind: K, path: PathBuf) -> notify::Event {
         notify::Event::new(kind).add_path(path)
+    }
+
+    #[test]
+    fn 库来源判定只认目录收录的扩展名() {
+        let r = root();
+        assert!(is_library_path(&r.join("lib/a.jar")));
+        assert!(is_library_path(&r.join("out/p/B.class")));
+        assert!(is_library_path(&r.join(".classpath")));
+        assert!(is_library_path(&r.join("src/p/A.java")));
+        // 反例：二进制与元数据目录里的同名文件不该触发库目录重扫
+        assert!(!is_library_path(&r.join("img/logo.png")));
+        assert!(!is_library_path(&r.join(".git/x.jar")));
+    }
+
+    #[test]
+    fn jar_改动置库脏标志_flush_后复位() {
+        let r = root();
+        let mut b = Batcher::new(r.clone());
+        let content = K::Modify(ModifyKind::Data(DataChange::Content));
+        b.add(&r, &ev(content, r.join("lib/a.jar")), Instant::now());
+        assert!(b.library);
+        let emit: Arc<dyn Fn(WatchBatch) + Send + Sync> = Arc::new(|_| {});
+        b.flush(&emit);
+        assert!(!b.library);
+        // 反例：纯图片内容改动不失效库目录
+        b.add(&r, &ev(content, r.join("img/logo.png")), Instant::now());
+        assert!(!b.library);
     }
 
     #[test]

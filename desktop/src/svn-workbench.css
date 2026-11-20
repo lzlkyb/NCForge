@@ -30,7 +30,7 @@
 .vc-checkbox { flex-shrink:0;width:16px;height:16px;accent-color:hsl(var(--primary));cursor:pointer; }
 .vc-checkbox:disabled { cursor:not-allowed;opacity:.5; }
 .vc-checkbox:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:2px; }
-.vc-file-row { display:flex;align-items:center;gap:4px;padding-left:10px; }
+.vc-file-row { display:flex;align-items:center;gap:4px;padding-left:10px;content-visibility:auto;contain-intrinsic-size:auto 40px; }
 .vc-file-row .vc-row { min-width:0;flex:1;height:auto;min-height:40px;padding:5px 8px 5px 3px;gap:6px; }
 .vc-file-row[data-selected] { background:hsl(var(--accent)); }
 .vc-file-row[data-selected] .vc-row { background:transparent;color:hsl(var(--accent-foreground)); }

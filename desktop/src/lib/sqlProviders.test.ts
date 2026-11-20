@@ -20,7 +20,7 @@ beforeEach(() => { h.runtime.tablesAt++; h.business.mockReset().mockResolvedValu
 async function complete(text: string, cursor: number = text.length, cancelled = false) {
   const position = { lineNumber: 1, column: cursor + 1 };
   const prefix = /[\p{L}\p{N}_$#]*$/u.exec(text.slice(0, cursor))![0];
-  const model = { getValue: () => text, getValueLength: () => text.length, getVersionId: () => 1, isDisposed: () => false, getLanguageId: () => "ncforge-sql-plsql", getOffsetAt: () => cursor, getPositionAt: (offset: number) => ({ lineNumber: 1, column: offset + 1 }), getWordUntilPosition: () => ({ startColumn: cursor - prefix.length + 1, endColumn: cursor + 1 }) } as unknown as Monaco.editor.ITextModel;
+  const model = { getValue: () => text, getValueInRange: (r: { startColumn: number; endColumn: number }) => text.slice(r.startColumn - 1, r.endColumn - 1), getValueLength: () => text.length, getVersionId: () => 1, isDisposed: () => false, getLanguageId: () => "ncforge-sql-plsql", getOffsetAt: () => cursor, getPositionAt: (offset: number) => ({ lineNumber: 1, column: offset + 1 }), getWordUntilPosition: () => ({ startColumn: cursor - prefix.length + 1, endColumn: cursor + 1 }) } as unknown as Monaco.editor.ITextModel;
   return await h.completions.get("ncforge-sql-plsql")!.provideCompletionItems(model, position as Monaco.Position, {} as Monaco.languages.CompletionContext, { isCancellationRequested: cancelled } as Monaco.CancellationToken) as Monaco.languages.CompletionList;
 }
 it("所有方言保留补全、签名和DDL链接", () => {

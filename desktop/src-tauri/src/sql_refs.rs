@@ -580,15 +580,25 @@ pub struct TableIssue {
 /// 有多个候选表）。宁可漏报也不误报——一次误报就会让人不再看这个功能。
 pub fn check_file(file: &str, refs: &FileRefs, schema: &SchemaIndex) -> Vec<TableIssue> {
     let mut out = Vec::new();
+    // 表名清单与相近建议懒算 + 按名缓存：同一个拼错的表名可能在文件里出现几十次，
+    // table_names() 每次全库克隆（数千条）、similar_tables 每次全库扫，不能逐条重算。
+    let mut names: Option<Vec<String>> = None;
+    let mut sugg: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
     for t in &refs.tables {
-        if !schema.tables.contains_key(&t.name.to_lowercase()) {
+        let lower = t.name.to_lowercase();
+        if !schema.tables.contains_key(&lower) {
+            let list = names.get_or_insert_with(|| schema.table_names());
+            let suggestions = sugg
+                .entry(lower)
+                .or_insert_with(|| similar_tables(&t.name, list, 3))
+                .clone();
             out.push(TableIssue {
                 kind: IssueKind::MissingTable,
                 table: t.name.clone(),
                 column: None,
                 file: file.to_string(),
                 line: t.line,
-                suggestions: similar_tables(&t.name, &schema.table_names(), 3),
+                suggestions,
             });
         }
     }
@@ -859,6 +869,43 @@ mod tests {
         let src = "class A {\n  void f() {\n    String s = \"select * from gone_table\";\n  }\n}\n";
         let r = parse(src);
         assert_eq!(r.tables[0].line, 3);
+    }
+
+    #[test]
+    fn 相近建议按名缓存不串名() {
+        let s = idx(&[
+            ("fa_card", &[("pk", "CHAR(20)")]),
+            ("bd_material", &[("pk", "CHAR(20)")]),
+        ]);
+        // parse() 本身按名去重（seen_t），重复表名到不了 check_file；但 check_file
+        // 是公开入口，直接构造重复命中才能压到「按名缓存」这条路径：
+        // 同一拼错两次缓存命中要一致，不同拼错不能互相污染。
+        let refs = FileRefs {
+            tables: vec![
+                TableHit {
+                    name: "fa_car".into(),
+                    line: 2,
+                },
+                TableHit {
+                    name: "fa_car".into(),
+                    line: 3,
+                },
+                TableHit {
+                    name: "bd_materia".into(),
+                    line: 4,
+                },
+            ],
+            ..Default::default()
+        };
+        let issues = check_file("A.java", &refs, &s);
+        assert_eq!(issues.len(), 3);
+        assert!(issues[0].suggestions.contains(&"fa_card".to_string()));
+        assert_eq!(issues[0].suggestions, issues[1].suggestions);
+        assert!(issues[2].suggestions.contains(&"bd_material".to_string()));
+        assert!(!issues[2].suggestions.contains(&"fa_card".to_string()));
+        // 顺带钉住分层事实：parse 层同名只留第一次，避免误以为重复会报两条
+        let src = "String a = \"select * from fa_car\";\nString b = \"select * from fa_car\";";
+        assert_eq!(parse(src).tables.len(), 1);
     }
 
     #[test]

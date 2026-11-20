@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getModel } from "../lib/editorStore";
 import { currentDocumentOutline } from "../lib/documentOutlineModel";
+import { requestOutline } from "../lib/outlineWorkerHost";
 import { upmFile } from "../lib/upm";
 import { upmSymbols } from "../lib/upmOutline";
 import type { FlatSymbol } from "../lib/symbols";
@@ -11,11 +12,11 @@ export function useLocalOutline(path: string | null, mtimeMs?: number): FlatSymb
   const [data, setData] = useState<{ path: string; symbols: FlatSymbol[] }>();
   useEffect(() => {
     if (!path) return;
-    let worker: Worker | undefined;
+    let cancel: (() => void) | undefined;
     let disposed = false;
     const update = () => {
-      worker?.terminate();
-      worker = undefined;
+      cancel?.();
+      cancel = undefined;
       const model = getModel(path);
       if (/\.upm$/i.test(path)) {
         // upm 走后端结构化解析（真源 nc_upm::parse），传当前模型文本含未保存修改。
@@ -37,26 +38,21 @@ export function useLocalOutline(path: string | null, mtimeMs?: number): FlatSymb
       }
       if (model.getValueLength() > 512 * 1024) { setData({ path, symbols: [] }); return; }
       const version = model.getVersionId();
-      const task = new Worker(new URL("../lib/outlineWorker.ts", import.meta.url), { type: "module" });
-      worker = task;
-      task.onmessage = (event: MessageEvent<FlatSymbol[]>) => {
+      // 常驻共享 worker（outlineWorkerHost）：不再每次解析新建 / 销毁实例。
+      cancel = requestOutline(path, model.getValue(), symbols => {
         // A stale parse must never overwrite symbols for a newer edit or replacement model.
-        if (!disposed && getModel(path) === model && model.getVersionId() === version) setData({ path, symbols: event.data });
-        task.terminate();
-        if (worker === task) worker = undefined;
-      };
-      task.onerror = () => { task.terminate(); if (worker === task) worker = undefined; };
-      task.postMessage({ path, text: model.getValue() });
+        if (!disposed && getModel(path) === model && model.getVersionId() === version) setData({ path, symbols });
+      });
     };
     update();
     let timer = 0;
     const subscription = getModel(path)?.onDidChangeContent(() => {
-      worker?.terminate();
-      worker = undefined;
+      cancel?.();
+      cancel = undefined;
       window.clearTimeout(timer);
       timer = window.setTimeout(update, 180);
     });
-    return () => { disposed = true; worker?.terminate(); window.clearTimeout(timer); subscription?.dispose(); };
+    return () => { disposed = true; cancel?.(); window.clearTimeout(timer); subscription?.dispose(); };
   }, [path, mtimeMs]);
   return data?.path === path && path !== null ? data.symbols : empty;
 }

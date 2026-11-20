@@ -71,7 +71,8 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
   const word = model.getWordUntilPosition(position);
   const identifier = analysis.tokens.find(t => t.start < offset && t.end >= offset && ["identifier", "quoted"].includes(t.kind));
   const start = identifier?.start ?? offset - (position.column - word.startColumn);
-  const prefix = model.getValue().slice(ctx.valueStart ?? start, offset).replace(/^['"`[]/, "");
+  // 只取光标前那一小段：getValue() 会整文拷贝，大脚本下每次补全都白拷一份。
+  const prefix = model.getValueInRange(monaco.Range.fromPositions(model.getPositionAt(ctx.valueStart ?? start), position)).replace(/^['"`[]/, "");
   const range = monaco.Range.fromPositions(model.getPositionAt(start), model.getPositionAt(identifier?.end ?? offset));
   const waitBudget = context?.triggerKind === monaco.languages.CompletionTriggerKind.Invoke ? 500 : 120;
   const archiveDeadline = Date.now() + waitBudget;
@@ -304,9 +305,13 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
    * 同源。不同源的后果是：补全里给了这条动作，点下去只弹一句「请在普通 SQL 语句中
    * 生成 INSERT 模板」——比不给更糟。
    */
+  // 语句切分一次补全最多算一遍（且只在真要判 INSERT 模板时才算）：
+  // 以前每个候选动作都 getValue()+splitStatements 整文重切。
+  let statementsCache: ReturnType<typeof splitStatements> | null = null;
   const insertableAt = (name: string): boolean => {
     if (!name) return false;
-    const statement = splitStatements(model.getValue()).find(s => s.start <= offset && s.end >= offset);
+    statementsCache ??= splitStatements(model.getValue());
+    const statement = statementsCache.find(s => s.start <= offset && s.end >= offset);
     return !!statement && !isPlsql(statement.text);
   };
   const wildcard = sqlWildcardAt(analysis, offset);
@@ -452,7 +457,7 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
       if (!expansion) return;
       const key = sqlUsageKey(objectKey(source), normalized(field.name), "select");
       return mark("archive", { label: { label: `${qualifierText(source)}.${normalized(field.name)} · 展开档案编码和名称`, description: `${rt.ncNames?.[table] || table} · ${relation.kind}` },
-        kind: K.Snippet, insertText: expansion.insertText, filterText: model.getValue().slice(projection.start, offset),
+        kind: K.Snippet, insertText: expansion.insertText, filterText: model.getValueInRange(monaco.Range.fromPositions(model.getPositionAt(projection.start), model.getPositionAt(offset))),
         range: monaco.Range.fromPositions(model.getPositionAt(projection.start), model.getPositionAt(projection.end)),
         additionalTextEdits: expansion.join ? [{ range: monaco.Range.fromPositions(model.getPositionAt(expansion.join.offset), model.getPositionAt(expansion.join.offset)), text: expansion.join.text }] : undefined,
         ncforgeExplicit: true as const,

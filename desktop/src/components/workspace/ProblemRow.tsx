@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Icon } from "../ui/icon";
 import { baseName } from "../../lib/workspace";
 import { explainError } from "../../lib/rootCause";
@@ -21,11 +22,11 @@ export function ProblemRow({ problem: p, selected, onOpen, onPreview }: { proble
  * 单独一行而不是塞进 title：根因的价值在于**不用悬停就能看见**——扫一遍列表就知道
  * 这十几条是同一类问题。认不出的条目什么都不渲染，不留空行。
  */
-export function ProblemCause({ message }: { message: string }) {
+export const ProblemCause = memo(function ProblemCause({ message }: { message: string }) {
   const cause = explainError(message);
   if (!cause) return null;
   return <p className="dw-problem-cause">
     <Icon name="info" size={11} />
     <span><strong>{cause.cause}</strong>{cause.action ? ` ${cause.action}` : ""}</span>
   </p>;
-}
+});

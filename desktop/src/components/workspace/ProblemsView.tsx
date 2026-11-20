@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { baseName, dirName } from "../../lib/workspace";
@@ -31,7 +31,7 @@ interface Props {
 }
 const FILTERS: { key: ProblemFilter; label: string }[] = [{ key: "all", label: "全部" }, { key: "error", label: "错误" }, { key: "warning", label: "警告" }, { key: "info", label: "提示" }];
 
-export function ProblemsView({ problems, diags, running, compiled, pathFilter = null, pathFilterScope = "file", onClearPathFilter, root = null, activePath = null, result, onOpenProblem, onOpenAt }: Props) {
+export const ProblemsView = memo(function ProblemsView({ problems, diags, running, compiled, pathFilter = null, pathFilterScope = "file", onClearPathFilter, root = null, activePath = null, result, onOpenProblem, onOpenAt }: Props) {
   const [filter, setFilter] = useState<ProblemFilter>("all");
   const [grouped, setGrouped] = useState(false);
   const [scope, setScope] = useState<DiagnosticScope>("project");
@@ -40,8 +40,9 @@ export function ProblemsView({ problems, diags, running, compiled, pathFilter = 
   const setSelected = (problem: UnifiedProblem | null) => setSelection(problem ? { problem, root } : null);
   const tabs = useWorkspaceSelector(s => s.tabs);
   const currentModule = root && activePath ? moduleOf(root, dirName(activePath)) : null;
-  const scoped = pathFilter ? problemsAtPath(problems, pathFilter, pathFilterScope) : scopeProblems(problems, scope, root, activePath);
-  const shown = filterProblems(scoped, filter), groups = groupProblems(shown);
+  const scoped = useMemo(() => pathFilter ? problemsAtPath(problems, pathFilter, pathFilterScope) : scopeProblems(problems, scope, root, activePath), [problems, pathFilter, pathFilterScope, scope, root, activePath]);
+  const shown = useMemo(() => filterProblems(scoped, filter), [scoped, filter]);
+  const groups = useMemo(() => groupProblems(shown), [shown]);
   const preview = selected && shown.includes(selected) ? selected : null;
   const changed = tabs.filter(t => compileSourceChanged(t, result));
   const open = (p: UnifiedProblem) => {
@@ -79,4 +80,4 @@ export function ProblemsView({ problems, diags, running, compiled, pathFilter = 
     </div>
     {preview && <SourceContextPreview path={preview.path} line={preview.line} identity={root} onOpen={() => open(preview)} onClose={() => setSelected(null)} />}
   </div>;
-}
+});

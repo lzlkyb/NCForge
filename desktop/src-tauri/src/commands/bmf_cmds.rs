@@ -5,8 +5,8 @@
 //! 这里不做「打开文件就顺手格式化」之类的隐式写入：BMF 里未知节点的字节要原样活着。
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::State;
@@ -135,9 +135,52 @@ pub async fn bmf_index_scan(
     let overrides = eclipse_cp::active_overrides(&cfg.linked_overrides);
     let list = roots(&primary, &overrides);
     let force = force.unwrap_or(false);
-    tauri::async_runtime::spawn_blocking(move || bmf_index::scan(&list, Some(&cache_dir), force))
-        .await
-        .map_err(|e| format!("索引任务失败：{e}"))
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = memo_key(&list);
+        if !force {
+            if let Ok(g) = INDEX_MEMO.lock() {
+                if let Some((k, at, idx)) = g.as_ref() {
+                    if memo_fresh(k, &key, at.elapsed()) {
+                        return idx.as_ref().clone();
+                    }
+                }
+            }
+        }
+        let idx = bmf_index::scan(&list, Some(&cache_dir), force);
+        if let Ok(mut g) = INDEX_MEMO.lock() {
+            *g = Some((key, Instant::now(), Arc::new(idx.clone())));
+        }
+        idx
+    })
+    .await
+    .map_err(|e| format!("索引任务失败：{e}"))
+}
+
+// ───────────────────────── 索引进程缓存 ─────────────────────────
+//
+// 磁盘缓存已按 (size,mtime) 免重解析，但每次调用仍要走一遍目录树 + 逐文件 stat。
+// 进程内再 memo 一层：TTL 兜底 + watcher（.bmf 属于库来源通道）/ 本层写操作失效。
+
+const INDEX_TTL: Duration = Duration::from_secs(300);
+static INDEX_MEMO: Mutex<Option<(String, Instant, Arc<BmfIndex>)>> = Mutex::new(None);
+
+fn memo_key(list: &[RootSpec]) -> String {
+    list.iter()
+        .map(|r| r.path.display().to_string())
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+/// 缓存是否仍可用（纯判据，便于单测反例）。
+fn memo_fresh(cached_key: &str, want: &str, age: Duration) -> bool {
+    cached_key == want && age <= INDEX_TTL
+}
+
+/// watcher 看到 `.bmf` 变化、或本层保存 / 新建成功后调用。
+pub fn invalidate_bmf_index() {
+    if let Ok(mut g) = INDEX_MEMO.lock() {
+        *g = None;
+    }
 }
 
 fn build_detail(path: String, doc: BmfDoc, mtime_ms: u64) -> BmfDetail {
@@ -360,6 +403,7 @@ pub async fn bmf_scaffold_write(
     tauri::async_runtime::spawn_blocking(move || bmf_write::write_new(&target, &bytes))
         .await
         .map_err(|e| format!("写入任务失败：{e}"))??;
+    invalidate_bmf_index();
     Ok(written)
 }
 
@@ -498,7 +542,9 @@ pub async fn bmf_edit_save(
                 ));
             }
         }
-        bmf_write::save_applied(&doc, bytes, &backup_dir)
+        let res = bmf_write::save_applied(&doc, bytes, &backup_dir)?;
+        invalidate_bmf_index();
+        Ok(res)
     })
     .await
     .map_err(|e| format!("保存任务失败：{e}"))?
@@ -731,6 +777,39 @@ pub async fn bmf_nchome_compare(
 mod tests {
     use super::check_scaffold_target;
     use std::path::Path;
+
+    #[test]
+    fn 索引memo判据_根集不同或超龄都作废() {
+        use super::{memo_fresh, INDEX_TTL};
+        use std::time::Duration;
+        assert!(memo_fresh("D:/w", "D:/w", Duration::ZERO));
+        assert!(memo_fresh("D:/w", "D:/w", INDEX_TTL));
+        // 反例：链接工程集变了（键不同）
+        assert!(!memo_fresh("D:/w", "D:/w|D:/dep", Duration::ZERO));
+        // 反例：超兜底 TTL
+        assert!(!memo_fresh(
+            "D:/w",
+            "D:/w",
+            INDEX_TTL + Duration::from_secs(1)
+        ));
+    }
+
+    #[test]
+    fn 失效入口真的清掉memo() {
+        use super::{invalidate_bmf_index, BmfIndex, INDEX_MEMO};
+        use std::sync::Arc;
+        use std::time::Instant;
+        let dummy = BmfIndex {
+            entries: vec![],
+            roots: vec![],
+            warnings: vec![],
+            elapsed_ms: 0,
+            cached: 0,
+        };
+        *INDEX_MEMO.lock().unwrap() = Some(("D:/w".to_string(), Instant::now(), Arc::new(dummy)));
+        invalidate_bmf_index();
+        assert!(INDEX_MEMO.lock().unwrap().is_none());
+    }
 
     #[test]
     fn scaffold_target_must_be_metadata_dir_and_match_code() {

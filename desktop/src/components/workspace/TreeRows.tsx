@@ -26,6 +26,32 @@ import { pathKey } from "../../lib/treeSvn";
 import type { TreeDirState } from "../../lib/workspaceSession";
 import type { EditState } from "./useTreeEdit";
 
+// kids（packageChildren+filter）按「items/filter/dirs/roots/indexes 引用 + hoist」缓存：
+// 选中态/编辑态变化会重建 ctx 触发整树重渲，但这些依赖不变 → 命中缓存，免每键重算
+// O(展开目录×items) 的包展开+筛选。引用用 WeakMap 发 id，避免持住大数组。
+const kidCache = new Map<string, { deps: string; kids: ReturnType<typeof packageChildren> }>();
+const kidRefIds = new WeakMap<object, number>();
+let kidNextId = 1;
+function kidRefId(o: object | null | undefined): number {
+  if (!o) return 0;
+  let id = kidRefIds.get(o);
+  if (id === undefined) {
+    id = kidNextId++;
+    kidRefIds.set(o, id);
+  }
+  return id;
+}
+function cachedKids(dir: string, state: Extract<TreeDirState, { status: "ok" }>, ctx: TreeRowsCtx): ReturnType<typeof packageChildren> {
+  const hoist = ctx.hoist(dir);
+  const deps = `${kidRefId(state.items)}|${kidRefId(ctx.filter)}|${kidRefId(ctx.dirs)}|${kidRefId(ctx.packageRoots)}|${kidRefId(ctx.packageIndexes)}|${hoist ? 1 : 0}`;
+  const hit = kidCache.get(dir);
+  if (hit && hit.deps === deps) return hit.kids;
+  const kids = packageChildren(dir, state.items, { hoist, dirs: ctx.dirs }, ctx.packageRoots, ctx.packageIndexes)
+    .filter(({ dir: from, item, label, kind }) => ctx.filter(label ?? item.name, joinPath(from, item.name), item.isDir, kind));
+  kidCache.set(dir, { deps, kids });
+  return kids;
+}
+
 export interface TreeRowsCtx {
   dirs: Record<string, TreeDirState>;
   expanded: Set<string>;
@@ -121,8 +147,7 @@ export const TreeRows = memo(function TreeRows({ dir, depth, ctx }: { dir: strin
     return <>{rows}</>;
   }
 
-  const kids = packageChildren(dir, state.items, { hoist: ctx.hoist(dir), dirs: ctx.dirs }, ctx.packageRoots, ctx.packageIndexes)
-    .filter(({ dir: from, item, label, kind }) => ctx.filter(label ?? item.name, joinPath(from, item.name), item.isDir, kind));
+  const kids = cachedKids(dir, state, ctx);
   const source = sourceForPath(ctx.packageRoots, dir);
   if (source === dir && ctx.packageIndexes?.get(dir) === undefined) {
     rows.push(<TreeRowNote key={`${dir}#index`} padLeft={notePad}>正在整理包列表…</TreeRowNote>);

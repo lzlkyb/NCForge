@@ -17,14 +17,35 @@ struct Slot {
     generation: u64,
     /// 上一次建包失败的时刻。失败后 30s 内不再重试。
     failed_at: Option<Instant>,
+    /// watcher / 换 NC home 置脏：下次搜索立刻重建（旧目录仍先返回，SWR）。
+    dirty: bool,
 }
 
 /// 建包失败后的退避窗口。
 ///
 /// 🔴 为什么需要：`snapshot` 每次搜索都会调，`launch` 只看 `!building && catalog.is_none()`。
 /// NC home 不可读 / 磁盘满这类**稳定失败**下，每敲一个字就重新扫一遍盘 —— 单飞 + 全局锁
-/// 压住了并发，但 IO 是白烧的。退避 30s 与 `stale` 窗口同量级，用户改好环境后半分钟内自愈。
+/// 压住了并发，但 IO 是白烧的。退避 30s 内不重试，用户改好环境后半分钟内自愈。
 const RETRY_BACKOFF: Duration = Duration::from_secs(30);
+
+/// 兜底 TTL：watcher 只看工作区，NC home 侧的 jar 增删它看不见。
+/// 事件驱动（`invalidate_library`）负责工作区内的即时失效；这个长窗口兜住
+/// 工作区外的变化。以前是 30s 无条件重扫——空闲时搜索也在白烧 IO。
+const LIBRARY_TTL: Duration = Duration::from_secs(300);
+
+/// 目录是否过期。抽成纯函数便于单测判据（脏标记优先于 TTL）。
+fn catalog_stale(has_catalog: bool, dirty: bool, age: Duration) -> bool {
+    has_catalog && (dirty || age > LIBRARY_TTL)
+}
+
+/// watcher 发现库来源（jar/class/文本条目/.classpath）变化、或换 NC home /
+/// 重建类索引时调用：只置标志，真正的重建推迟到下一次搜索（单飞线程里做）。
+pub fn invalidate_library() {
+    let mut slot = SLOT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(s) = slot.as_mut() {
+        s.dirty = true;
+    }
+}
 
 /// 是否该发起建包。抽成纯函数是为了能脱库单测退避判据。
 fn should_launch(
@@ -77,10 +98,11 @@ fn snapshot(
                 error: None,
                 generation: 0,
                 failed_at: None,
+                dirty: false,
             });
         }
         let s = slot.as_mut().unwrap();
-        let stale = s.catalog.is_some() && s.checked.elapsed() > Duration::from_secs(30);
+        let stale = catalog_stale(s.catalog.is_some(), s.dirty, s.checked.elapsed());
         let launch = should_launch(s.building, s.catalog.is_some(), stale, s.failed_at);
         if launch {
             s.building = true;
@@ -124,6 +146,7 @@ fn snapshot(
                         s.catalog = Some(c);
                         s.error = None;
                         s.failed_at = None;
+                        s.dirty = false;
                     }
                     Err(e) => {
                         s.error = Some(e);
@@ -243,6 +266,49 @@ pub async fn read_library_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 事件驱动失效：脏标记立刻过期；无脏标记时 TTL 内不重扫（空闲搜索不再白烧 IO）。
+    #[test]
+    fn stale_follows_dirty_flag_then_fallback_ttl() {
+        // 反例守卫：没目录时谈不上过期
+        assert!(!catalog_stale(false, true, Duration::ZERO));
+        // 刚建好且无事件：TTL 内保持新鲜（旧 30s 无条件重扫已废除）
+        assert!(!catalog_stale(true, false, Duration::from_secs(31)));
+        assert!(!catalog_stale(true, false, LIBRARY_TTL));
+        // 兜底 TTL 超了：即便没有事件也过期（NC home 侧变化 watcher 看不见）
+        assert!(catalog_stale(
+            true,
+            false,
+            LIBRARY_TTL + Duration::from_secs(1)
+        ));
+        // watcher 置脏：0 秒也立刻过期
+        assert!(catalog_stale(true, true, Duration::ZERO));
+    }
+
+    /// invalidate_library 只置标志、不清目录（SWR：重建期间旧结果仍可用）。
+    #[test]
+    fn invalidate_marks_dirty_without_dropping_catalog() {
+        let key = "test-invalidate-slot".to_string();
+        {
+            let mut slot = SLOT.lock().unwrap_or_else(|e| e.into_inner());
+            *slot = Some(Slot {
+                key: key.clone(),
+                catalog: None,
+                building: false,
+                checked: Instant::now(),
+                error: None,
+                generation: 0,
+                failed_at: None,
+                dirty: false,
+            });
+        }
+        invalidate_library();
+        let mut slot = SLOT.lock().unwrap_or_else(|e| e.into_inner());
+        let s = slot.as_mut().unwrap();
+        assert!(s.dirty);
+        // 清场，避免影响别的测试用的全局槽
+        *slot = None;
+    }
 
     /// 🔴 稳定失败（NC home 不可读 / 磁盘满）下不能每敲一个字就重扫一遍盘。
     #[test]

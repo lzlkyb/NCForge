@@ -1933,6 +1933,47 @@ fn load_cache(dir: &Path, url: &str, user: &str) -> Option<db_schema::SchemaCach
         .or_else(|| db_schema::load(&db_schema::cache_path(dir, url, user), url, user))
 }
 
+/// 进程内表结构缓存副本：悬停/核对高频调用 load_cache 会每次全量读盘+解析数 MB JSON。
+/// 以「双候选路径 + 各自 mtime」为键复用 Arc；db_schema_sync 落盘改 mtime 自动失效。
+static SCHEMA_MEMO: std::sync::Mutex<Option<(String, std::sync::Arc<db_schema::SchemaCache>)>> =
+    std::sync::Mutex::new(None);
+
+fn load_cache_cached(
+    dir: &Path,
+    url: &str,
+    user: &str,
+) -> Option<std::sync::Arc<db_schema::SchemaCache>> {
+    let primary = cache_file(dir, url, user);
+    let secondary = db_schema::cache_path(dir, url, user);
+    let stamp = |p: &Path| {
+        std::fs::metadata(p)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0)
+    };
+    let key = format!(
+        "{}|{}|{}|{}",
+        primary.display(),
+        stamp(&primary),
+        secondary.display(),
+        stamp(&secondary)
+    );
+    if let Ok(g) = SCHEMA_MEMO.lock() {
+        if let Some((k, c)) = g.as_ref() {
+            if k == &key {
+                return Some(c.clone());
+            }
+        }
+    }
+    let arc = std::sync::Arc::new(load_cache(dir, url, user)?);
+    if let Ok(mut g) = SCHEMA_MEMO.lock() {
+        *g = Some((key, arc.clone()));
+    }
+    Some(arc)
+}
+
 /// 表结构缓存的状态（不连库，只读本地文件）。
 #[tauri::command]
 pub async fn db_schema_status(
@@ -2128,21 +2169,30 @@ pub async fn db_columns(
 ) -> Result<DbTableColumns, String> {
     let cfg = state.config.read().await.clone();
     let (id, url, user) = current_db(&cfg)?;
-    if let Some(c) = load_cache(&state.config_dir, &url, &user) {
-        if let Some(t) = c.tables.get(&table.to_lowercase()) {
-            return Ok(DbTableColumns {
-                table,
-                columns: t
-                    .columns
+    // 缓存读盘+解析数 MB JSON 放 blocking 线程，别卡 async worker；进程内 memo 免重复解析。
+    let config_dir = state.config_dir.clone();
+    let table_key = table.to_lowercase();
+    let cols = tauri::async_runtime::spawn_blocking(move || {
+        load_cache_cached(&config_dir, &url, &user).and_then(|c| {
+            c.tables.get(&table_key).map(|t| {
+                t.columns
                     .iter()
                     .map(|(n, ty)| DbColumn {
                         name: n.clone(),
                         type_name: ty.clone(),
                     })
-                    .collect(),
-                from_cache: true,
-            });
-        }
+                    .collect::<Vec<_>>()
+            })
+        })
+    })
+    .await
+    .map_err(|e| format!("读取表结构缓存失败：{e}"))?;
+    if let Some(columns) = cols {
+        return Ok(DbTableColumns {
+            table,
+            columns,
+            from_cache: true,
+        });
     }
     let key = id.ok_or_else(|| code_label("not-connected", "还没有数据库连接"))?;
     let b = existing_bridge(&state, &key)?;
@@ -2282,8 +2332,12 @@ pub async fn db_check_sources(
     let st = state.inner().clone();
     let cfg = st.config.read().await.clone();
     let (_, url, user) = current_db(&cfg)?;
-    let cache = load_cache(&st.config_dir, &url, &user)
-        .ok_or_else(|| code_label("need-schema", "还没有表结构缓存，先连库拉一次"))?;
+    let config_dir = st.config_dir.clone();
+    let cache =
+        tauri::async_runtime::spawn_blocking(move || load_cache_cached(&config_dir, &url, &user))
+            .await
+            .map_err(|e| format!("读取表结构缓存失败：{e}"))?
+            .ok_or_else(|| code_label("need-schema", "还没有表结构缓存，先连库拉一次"))?;
     let root = cfg
         .workspace_root
         .clone()

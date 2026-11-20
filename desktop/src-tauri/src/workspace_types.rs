@@ -247,6 +247,10 @@ static BUILD: Mutex<()> = Mutex::new(());
 static REBUILDING: AtomicBool = AtomicBool::new(false);
 /// 源码刚被改过的标记：下一次查询触发后台重建。
 static DIRTY: AtomicBool = AtomicBool::new(false);
+/// 小脏集待消费路径（watcher 精确事件）；查询路径增量 patch 消费，避免全量重建。
+static PENDING: Mutex<Option<std::collections::BTreeSet<PathBuf>>> = Mutex::new(None);
+/// 内存底：最近一次全量 build / 磁盘加载的 CachedFile 表，供增量 patch 复用（免全树重扫）。
+static RAW: Mutex<Option<(String, Vec<CachedFile>)>> = Mutex::new(None);
 
 /// 有人改了源码：让下一次查询触发后台重建。
 ///
@@ -254,6 +258,98 @@ static DIRTY: AtomicBool = AtomicBool::new(false);
 /// 定时校准太贵（一次全树 stat 十几秒），按事件标记才能既不漏改动又不空转。
 pub fn mark_dirty() {
     DIRTY.store(true, Ordering::SeqCst);
+}
+
+/// 带精确改动路径的脏标记（watcher _flush 喂）：小脏集走增量 patch，溢出/rescan 才全量。
+/// 无路径的旧调用方继续用 [`mark_dirty`]（=全量）。
+pub fn mark_dirty_paths(paths: &[PathBuf], overflow: bool) {
+    if overflow {
+        DIRTY.store(true, Ordering::SeqCst);
+        return;
+    }
+    if paths.is_empty() {
+        return;
+    }
+    let mut g = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    let set = g.get_or_insert_with(std::collections::BTreeSet::new);
+    for p in paths {
+        set.insert(p.clone());
+    }
+}
+
+/// 查询路径上消费小脏集：只 stat/parse 改动文件并修补内存索引，避免全树 walk+全量 stat+
+/// 整份 JSON 重写。patch 失败（无内存底/换工作区）置 DIRTY 回落全量重建。
+fn refresh_pending(root: &Path, cache_dir: &Path) {
+    if DIRTY.load(Ordering::SeqCst) {
+        return; // 全量重建路径处理
+    }
+    let paths = {
+        let mut g = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+        match g.take() {
+            Some(s) => s.into_iter().collect::<Vec<_>>(),
+            None => return,
+        }
+    };
+    if paths.is_empty() {
+        return;
+    }
+    if !patch_incremental(root, cache_dir, &paths) {
+        DIRTY.store(true, Ordering::SeqCst);
+    }
+}
+
+/// 增量修补：对脏路径逐个 stat——删除→移除条目；新增/改动→重 parse；其余条目原样保留。
+/// 只更新内存索引（SHARED+RAW），**不写磁盘缓存**（整份 JSON 重写太贵；磁盘留给下次全量
+/// build 刷新，重启时 load_cached_only+verified=false 会校准，不会拿旧数据当新）。
+/// 返回 false = 没有可修补的内存底（调用方回落全量）。
+fn patch_incremental(root: &Path, _cache_dir: &Path, paths: &[PathBuf]) -> bool {
+    let key = norm(root);
+    {
+        let g = SHARED.lock().unwrap_or_else(|e| e.into_inner());
+        match g.as_ref() {
+            Some(s) if s.key == key => {}
+            _ => return false,
+        }
+    }
+    let mut rawg = RAW.lock().unwrap_or_else(|e| e.into_inner());
+    let Some((rkey, files)) = rawg.as_mut() else {
+        return false;
+    };
+    if rkey != &key {
+        return false;
+    }
+    let roots = source_roots(root);
+    patch_files(files, &roots, paths);
+    files.sort_by_key(|f| f.path.clone());
+    let index = Arc::new(assemble(files.clone()));
+    store(&key, index, true);
+    true
+}
+
+/// 逐路径修补 CachedFile 表（纯函数，便于反例单测）：删除→移除；新增/改动→重 parse；
+/// 其余原样保留。module 按源码根前缀归属。
+fn patch_files(files: &mut Vec<CachedFile>, roots: &[(PathBuf, String)], paths: &[PathBuf]) {
+    for p in paths {
+        let k = norm(p);
+        files.retain(|f| f.path != k);
+        let Ok(md) = std::fs::metadata(p) else {
+            continue; // 已删除：移除即可
+        };
+        if !md.is_file() || md.len() > MAX_SOURCE {
+            continue;
+        }
+        let modified = md
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_nanos());
+        let module = roots
+            .iter()
+            .find(|(d, _)| p.starts_with(d))
+            .map(|(_, m)| m.clone())
+            .unwrap_or_default();
+        files.push(parse_file(p, &k, md.len(), modified, &module));
+    }
 }
 
 /// 取（必要时重建）工作区索引。
@@ -264,6 +360,7 @@ pub fn mark_dirty() {
 ///
 /// 只有在**一份都没有**（首次查询、刚换工作区）时才同步建。
 pub fn shared(root: &Path, cache_dir: &Path) -> Arc<WorkspaceTypes> {
+    refresh_pending(root, cache_dir);
     let key = norm(root);
     if let Some((index, fresh)) = peek(&key) {
         if !fresh {
@@ -287,6 +384,7 @@ pub fn shared(root: &Path, cache_dir: &Path) -> Arc<WorkspaceTypes> {
 /// 第一次搜类就卡在那里；返回「正在建索引」、界面退回文件名匹配反而即时。
 /// 已经有一份（哪怕过期）就照 [`shared`] 的 SWR 逻辑给旧索引。
 pub fn shared_opt(root: &Path, cache_dir: &Path) -> Option<Arc<WorkspaceTypes>> {
+    refresh_pending(root, cache_dir);
     let key = norm(root);
     if let Some((index, fresh)) = peek(&key) {
         if !fresh {
@@ -325,6 +423,7 @@ fn rebuild_now(key: &str, root: &Path, cache_dir: &Path) -> Arc<WorkspaceTypes> 
     }
     // 建之前清标记：构建期间再有改动，watcher 会重新置位，下一轮再校准
     DIRTY.store(false, Ordering::SeqCst);
+    *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = None;
     let index = Arc::new(build(root, cache_dir));
     store(key, index.clone(), true);
     index
@@ -477,6 +576,9 @@ fn assemble(files: Vec<CachedFile>) -> WorkspaceTypes {
 /// 查询触发重建，所以旧数据最多用一次。
 fn load_cached_only(root: &Path, cache_dir: &Path) -> Option<WorkspaceTypes> {
     let cache = load_cache(&cache_path(cache_dir, root), root)?;
+    if let Ok(mut g) = RAW.lock() {
+        *g = Some((norm(root), cache.files.clone()));
+    }
     Some(assemble(cache.files))
 }
 
@@ -525,6 +627,9 @@ fn build(root: &Path, cache_dir: &Path) -> WorkspaceTypes {
     }
     if changed || !cached.is_empty() {
         write_cache(&cache_path, root, &saved);
+    }
+    if let Ok(mut g) = RAW.lock() {
+        *g = Some((norm(root), saved.clone()));
     }
     assemble(saved)
 }
@@ -1088,6 +1193,41 @@ mod tests {
         assert_eq!(hits[0].name, "p.Inner", "不能跨包命中 q.Inner");
         // 别的包里的同名嵌套类不会被 p 的查询带出来
         assert!(idx.exact("z.Z$Inner").is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn patch_files_add_update_delete_without_full_rescan() {
+        let root = crate::test_support::tmp("wt-patch");
+        let m = root.join("gl");
+        let a = m.join("src/public/p/A.java");
+        let b = m.join("src/public/p/B.java");
+        std::fs::create_dir_all(a.parent().unwrap()).unwrap();
+        std::fs::write(&a, "package p; public class A {}").unwrap();
+        let roots = vec![(m.join("src/public"), "gl".to_string())];
+        let md = std::fs::metadata(&a).unwrap();
+        let modified = md
+            .modified()
+            .unwrap()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let mut files = vec![parse_file(&a, &norm(&a), md.len(), modified, "gl")];
+        assert_eq!(files.len(), 1);
+        // 新增 B：只 patch b，a 条目原样保留（不重扫）
+        std::fs::write(&b, "package p; public class B {}").unwrap();
+        patch_files(&mut files, &roots, std::slice::from_ref(&b));
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().any(|f| f.types.iter().any(|t| t.name == "B")));
+        // 删除 A：移除条目
+        std::fs::remove_file(&a).unwrap();
+        patch_files(&mut files, &roots, std::slice::from_ref(&a));
+        assert_eq!(files.len(), 1);
+        assert!(files.iter().all(|f| f.types.iter().all(|t| t.name != "A")));
+        // 改动 B：重 parse 反映新类型名
+        std::fs::write(&b, "package p; public class B2 {}").unwrap();
+        patch_files(&mut files, &roots, std::slice::from_ref(&b));
+        assert!(files.iter().any(|f| f.types.iter().any(|t| t.name == "B2")));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

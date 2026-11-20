@@ -159,6 +159,9 @@ pub(crate) fn invalidate_index() {
         *guard = None;
     }
     crate::build_state::invalidate_config_cache();
+    // 库文件目录也按 jar 集建：换 home / 重建索引后同样要失效。
+    super::invalidate_library();
+    super::invalidate_upm_classes();
 }
 
 /// 打开工作区后预热类索引（P2：消掉「第一次保存遇到 index-cold」的空窗）。

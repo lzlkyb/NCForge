@@ -358,6 +358,10 @@ pub struct JarSymbolIndex {
     /// 数量级——`a` 在 20MB 英文词表里有上百万个候选，`V` 只有一万个。所以每次搜索
     /// 先挑 needle 里频率最低的那个字节（连它的大小写形态一起算）。
     byte_freq: [u32; 256],
+    /// jar 路径表每条记录的字节偏移（`load` 时走一遍现算，不进文件）。
+    /// 以前 `jar_path(id)` 从头线性走到 id：每个命中处都 O(id)，数千 jar ×
+    /// 每词几十处是纯浪费。建表后 O(1) 取。
+    jar_path_off: Vec<u32>,
 }
 
 impl JarSymbolIndex {
@@ -384,6 +388,7 @@ impl JarSymbolIndex {
             classes: rd_u32(&data, 12)? as usize,
             jars: rd_u32(&data, 16)? as usize,
             byte_freq: [0; 256],
+            jar_path_off: Vec::new(),
             data,
         };
         // 段与段必须首尾相接且不越界；terms_off[terms] 同时是词表与 post_blob 的长度
@@ -422,6 +427,19 @@ impl JarSymbolIndex {
             byte_freq[b as usize] = byte_freq[b as usize].saturating_add(1);
         }
         me.byte_freq = byte_freq;
+        // jar 路径偏移表：顺带把整张表走完，坏表（长度越界）在载入时就拒掉，
+        // 而不是查询走到一半才拿 None。
+        let mut offs = Vec::with_capacity(me.jars);
+        let mut at = me.jar_paths_at;
+        for _ in 0..me.jars {
+            let len = rd_u16(&me.data, at)? as usize;
+            offs.push(at as u32);
+            at += 2 + len;
+            if at > me.data.len() {
+                return None;
+            }
+        }
+        me.jar_path_off = offs;
         Some(me)
     }
 
@@ -475,17 +493,10 @@ impl JarSymbolIndex {
             .get(self.class_blob_at + a..self.class_blob_at + b)
     }
     fn jar_path(&self, id: u16) -> Option<&str> {
-        let mut at = self.jar_paths_at;
-        for i in 0..=id {
-            let len = rd_u16(&self.data, at)? as usize;
-            at += 2;
-            let raw = self.data.get(at..at + len)?;
-            at += len;
-            if i == id {
-                return std::str::from_utf8(raw).ok();
-            }
-        }
-        None
+        let at = *self.jar_path_off.get(id as usize)? as usize;
+        let len = rd_u16(&self.data, at)? as usize;
+        let raw = self.data.get(at + 2..at + 2 + len)?;
+        std::str::from_utf8(raw).ok()
     }
     /// 一个词的出现处：最多 `MAX_PLACES` 个 (jar, class)，外加真实命中处数。
     fn places(&self, id: usize) -> (Vec<JarSymbolPlace>, usize) {
@@ -713,6 +724,27 @@ mod tests {
         out.extend_from_slice(&((utf8s.len() + 3) as u16).to_be_bytes());
         out.extend_from_slice(&items);
         out
+    }
+
+    #[test]
+    fn jar_路径偏移表首中尾都取对_越界回空() {
+        let root = crate::test_support::tmp("jar-sym-pathoff");
+        let jars: Vec<PathBuf> = ["a.jar", "b.jar", "c.jar"]
+            .iter()
+            .map(|n| jar_with(&root, n, &[("p/T.class", &class_with("p/T", &["m"]))]))
+            .collect();
+        let out = root.join("symbols.bin");
+        let index = ClassIndex::build(jars);
+        assert!(build(&index, &out, &|_, _| {}, &|| false).is_ok());
+        let loaded = JarSymbolIndex::load(&out).expect("索引应可载入");
+        assert_eq!(loaded.jars, 3);
+        // 反例守卫：偏移表不是只对了第 0 条——首 / 中 / 尾逐条核对
+        assert!(loaded.jar_path(0).unwrap().ends_with("a.jar"));
+        assert!(loaded.jar_path(1).unwrap().ends_with("b.jar"));
+        assert!(loaded.jar_path(2).unwrap().ends_with("c.jar"));
+        assert!(loaded.jar_path(3).is_none());
+        assert!(loaded.jar_path(u16::MAX).is_none());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -21,6 +21,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -77,6 +78,21 @@ static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
 
 /// 取（或重建）索引。`refresh` 由前端在保存 upm 后传，工作区/NCHOME 变了自动失效。
 fn load_index(root: &Path, home: &Path, refresh: bool) -> Result<Arc<UpmIndex>, String> {
+    // 快路径：命中缓存直接返回（持锁极短）。
+    if !refresh {
+        if let Ok(g) = CACHE.lock() {
+            if let Some(c) = g.as_ref() {
+                if c.root == root && c.home == home {
+                    return Ok(c.index.clone());
+                }
+            }
+        }
+    }
+    // 慢 IO（scan_project/scan_home 全量读解析）放锁外，别堵并发 lookup；
+    // 扫完再拿锁双检：等待期间别人可能已建好同 root/home 的索引，直接复用。
+    let project = nc_upm::scan_project(root);
+    let product = nc_upm::scan_home(home);
+    let index = Arc::new(nc_upm::build(project, product));
     let mut guard = CACHE.lock().map_err(|_| "内部状态异常".to_string())?;
     if !refresh {
         if let Some(c) = guard.as_ref() {
@@ -85,15 +101,57 @@ fn load_index(root: &Path, home: &Path, refresh: bool) -> Result<Arc<UpmIndex>, 
             }
         }
     }
-    let project = nc_upm::scan_project(root);
-    let product = nc_upm::scan_home(home);
-    let index = Arc::new(nc_upm::build(project, product));
     *guard = Some(Cached {
         root: root.to_path_buf(),
         home: home.to_path_buf(),
         index: index.clone(),
     });
     Ok(index)
+}
+
+// ───────────────────────── 类名集缓存 ─────────────────────────
+//
+// collect_project_classes 要走一遍全部模块的 src 树；装配页每次打开 / 刷新都重扫
+// 是纯浪费。TTL 兜底 + watcher 事件失效（.java 变了立刻作废），与库目录同一套路。
+
+const CLASS_SET_TTL: Duration = Duration::from_secs(300);
+
+type SetCache = Mutex<Option<(PathBuf, Instant, Arc<HashSet<String>>)>>;
+static PROJECT_CLASSES: SetCache = Mutex::new(None);
+static HOME_CLASSES: SetCache = Mutex::new(None);
+
+/// 缓存是否仍可用（纯判据，便于单测反例）。
+fn set_fresh(cached_key: &Path, want: &Path, age: Duration) -> bool {
+    cached_key == want && age <= CLASS_SET_TTL
+}
+
+fn cached_class_set(
+    cache: &SetCache,
+    key: &Path,
+    build: impl FnOnce() -> HashSet<String>,
+) -> Arc<HashSet<String>> {
+    if let Ok(g) = cache.lock() {
+        if let Some((k, at, set)) = g.as_ref() {
+            if set_fresh(k, key, at.elapsed()) {
+                return set.clone();
+            }
+        }
+    }
+    let set = Arc::new(build());
+    if let Ok(mut g) = cache.lock() {
+        *g = Some((key.to_path_buf(), Instant::now(), set.clone()));
+    }
+    set
+}
+
+/// watcher 看到 `.java` 变化、换 NC home / 重建类索引时调用：类名集立刻作废。
+pub fn invalidate_upm_classes() {
+    if let Ok(mut g) = PROJECT_CLASSES.lock() {
+        *g = None;
+    }
+    if let Ok(mut g) = HOME_CLASSES.lock() {
+        *g = None;
+    }
 }
 
 /// 构造「类是否存在」的判定函数，返回 (函数, 是否完整)。
@@ -103,11 +161,13 @@ fn class_presence(
     deep: bool,
     index: Option<Arc<crate::nc_index::ClassIndex>>,
 ) -> (impl Fn(&str) -> Presence, bool) {
-    let sources = nc_upm::collect_project_classes(root);
+    let sources = cached_class_set(&PROJECT_CLASSES, root, || {
+        nc_upm::collect_project_classes(root)
+    });
     let home_classes = if deep {
-        nc_upm::collect_home_classes(home)
+        cached_class_set(&HOME_CLASSES, home, || nc_upm::collect_home_classes(home))
     } else {
-        HashSet::new()
+        Arc::new(HashSet::new())
     };
     let jars = index;
     let complete = jars.is_some();
@@ -147,18 +207,12 @@ fn class_presence(
 }
 
 fn stats_of(index: &UpmIndex) -> UpmStats {
-    let mut interfaces: Vec<&str> = Vec::new();
-    let mut modules: Vec<&str> = Vec::new();
+    // 去重计数用 HashSet（小写归一）：旧版 Vec+线性 any 是 O(entries×unique)，数千×数千≈千万次比较。
+    let mut interfaces: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut modules: std::collections::HashSet<String> = std::collections::HashSet::new();
     for e in &index.entries {
-        if !interfaces
-            .iter()
-            .any(|i| i.eq_ignore_ascii_case(&e.interface))
-        {
-            interfaces.push(&e.interface);
-        }
-        if !modules.iter().any(|m| m.eq_ignore_ascii_case(&e.module)) {
-            modules.push(&e.module);
-        }
+        interfaces.insert(e.interface.to_ascii_lowercase());
+        modules.insert(e.module.to_ascii_lowercase());
     }
     UpmStats {
         files: index.files.len(),
@@ -279,4 +333,46 @@ pub async fn nc_upm_file(path: String, text: Option<String>) -> Result<UpmFile, 
     })
     .await
     .map_err(|e| AppError::internal("upm.taskFailed", format!("后台任务失败: {e}")))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 类名集缓存判据_键不同或超龄都作废() {
+        let a = PathBuf::from("C:/work/a");
+        let b = PathBuf::from("C:/work/b");
+        assert!(set_fresh(&a, &a, Duration::ZERO));
+        assert!(set_fresh(&a, &a, CLASS_SET_TTL));
+        // 反例：换了工程根
+        assert!(!set_fresh(&a, &b, Duration::ZERO));
+        // 反例：超过兜底 TTL（watcher 看不见的外部变化靠它）
+        assert!(!set_fresh(&a, &a, CLASS_SET_TTL + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn 命中缓存不再调构建_失效后重建() {
+        let cache: SetCache = Mutex::new(None);
+        let key = PathBuf::from("C:/work/cached-set-test");
+        let mut calls = 0;
+        let first = cached_class_set(&cache, &key, || {
+            calls += 1;
+            HashSet::from(["p.A".to_string()])
+        });
+        let second = cached_class_set(&cache, &key, || {
+            calls += 1;
+            HashSet::new()
+        });
+        assert_eq!(calls, 1);
+        assert!(Arc::ptr_eq(&first, &second));
+        // 失效后必须重建（反例守卫：失效不是空操作）
+        *cache.lock().unwrap() = None;
+        let third = cached_class_set(&cache, &key, || {
+            calls += 1;
+            HashSet::from(["p.B".to_string()])
+        });
+        assert_eq!(calls, 2);
+        assert!(third.contains("p.B"));
+    }
 }

@@ -137,6 +137,7 @@ pub mod svn_review;
 pub mod svn_status_cache;
 pub mod svn_view;
 pub mod watcher;
+mod watcher_rules;
 pub mod workspace;
 pub mod workspace_types;
 pub mod xlsx_date;

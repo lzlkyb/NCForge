@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo } from "react";
+import { lazy, Suspense, useCallback, useMemo } from "react";
 import { Icon } from "../ui/icon";
 import { missingResourceId } from "../../lib/resourceMissing";
 import { ResourceDownloadButton } from "../resource/ResourceDownloadButton";
@@ -87,7 +87,7 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
 
   // D4 诊断：ecj 原文之外的推断（有源码没产物 / 工程被停用 / 产物比源码旧）。
   // 单独一段显示，不算进错误数——它是「为什么编不过」的解释，不是又一条报错。
-  const diags = result?.diagnostics ?? [];
+  const diags = useMemo(() => result?.diagnostics ?? [], [result?.diagnostics]);
   // 徽章与「上/下一处」用合并后的口径：编译问题与代码检查经常指的是同一处，
   // 分开数会让数字和列表长度对不上
   const diagnostics = inspect ?? codeDiags;
@@ -97,6 +97,9 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
   const expanded = layout.expanded === tab || tab === "svc" && serviceExpanded;
   const compact = layout.compact && layout.mode === "code" && tab === "problems" && !running && !result && !merged.length && !diags.length && !compileResourceMissing && !log.length;
   const toggleExpanded = () => { revealWorkbenchPanel(tab); updateWorkbenchLayout({ expanded: expanded ? null : tab }); setSession({ serviceExpanded: tab === "svc" && !expanded }); };
+  // 稳定引用：编译日志每 80ms  tick 时 BottomPanel 会重渲，若回调每次新建会让
+  // memo(ProblemsView) 失效、问题列表跟着 12.5Hz 重算重渲。
+  const clearPathFilter = useCallback(() => setSession({ problemsPath: null, problemsPathScope: undefined }), []);
 
   return (
     <section className="wb-panel" data-compact={compact || undefined}>
@@ -145,7 +148,7 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
           compiled={result !== null}
           pathFilter={problemsPath}
           pathFilterScope={problemsPathScope}
-          onClearPathFilter={() => setSession({ problemsPath: null, problemsPathScope: undefined })}
+          onClearPathFilter={clearPathFilter}
           onOpenProblem={onOpenProblem}
           onOpenAt={onOpenAt}
         />
