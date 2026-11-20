@@ -36,8 +36,14 @@
 /* 数据库标签条独占文档面第一行：文件标签在代码面，两个面互斥，不会并列。
    底边线/高度沿用 `.wb-tabs`，这里不再重复声明。 */
 .dbx-doctab { position: relative; }
-/* 文档选中统一深青；环境在连接上下文中用文字说明。 */
+/* 文档选中统一深青；环境点是页签上的真实元素（.dbx-tab-env），连接上下文另有文字档。 */
 .dbx-doctab[data-active][class*="e-"]::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: hsl(var(--primary)); }
+/* 环境点是真实元素：选中页签的 ::before 已被上面那条选中标线占用，伪元素放点会被吞。 */
+.dbx-tab-env { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.dbx-tab-env.e-test { background: hsl(var(--warning)); }
+.dbx-tab-env.e-prod { background: hsl(var(--destructive)); }
+.dbx-tab-env.e-other { background: hsl(var(--muted-foreground)); }
+@media (forced-colors:active) { .dbx-tab-env { background:CanvasText; } }
 .dbx-doctab .dbx-edot { width: 7px; height: 7px; }
 .dbx-tabadd { width: 30px; height: var(--dbx-h-tab); display: grid; place-items: center; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
 .dbx-tabadd:hover { color: hsl(var(--foreground)); background: hsl(var(--secondary) / .6); }
@@ -144,6 +150,8 @@
 }
 .dbx-stmt-hl { background: hsl(var(--primary) / .07); }
 .dbx-stmt-gl { border-left: 2px solid hsl(var(--primary)); margin-left: 3px; }
+/* 最近一次执行的语句行痕：与光标跟随的 stmt-hl 不同，它执行后常驻、下次执行整块替换。 */
+.dbx-runline { background: hsl(var(--primary) / .07); }
 .dbx-region-label { flex:none; color:var(--color-muted-foreground); font-size:var(--dbx-fs-meta); font-weight:600; white-space:nowrap; }
 .dbx-splitbar {
   position:relative; height:5px; flex:none; cursor:row-resize; touch-action:none;
@@ -177,7 +185,7 @@
 /* 表页恢复了上次条件时的提示：必须显眼，否则用户会把「筛过的几十行」当成整张表。 */
 .dbx-restored { display: flex; align-items: center; gap: 8px; padding: 2px 8px; flex: none; color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); }
 .dbx-connpick { white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; height: var(--dbx-h-control); min-width: 0; padding: 0 8px; border-radius: var(--r-control); border: 1px solid hsl(var(--border)); background: hsl(var(--card)); font-size: var(--dbx-fs-body); max-width: min(240px, 100%); }
-.dbx-connpick b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.dbx-connpick b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
 .dbx-connpick .u { color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); overflow: hidden; text-overflow: ellipsis; }
 /* 执行 + 执行脚本合成一组：主按钮执行光标语句，小三角里放脚本 / 计划 / 回放 */
 .dbx-runsplit { display: inline-flex; flex-shrink: 0; }
@@ -398,9 +406,14 @@
   .dbx-grid:focus-within .dbx-gc[data-active-cell]::after { border-color:HighlightText; }
   .dbx-grid .dbx-gc.chg::before { background:CanvasText;outline:1px solid Canvas; }
 }
-.dbx-gh { flex-shrink: 0; position: relative; height: var(--dbx-head-h); padding: 4px 10px 0; border-bottom: 1px solid hsl(var(--border)); font: 600 var(--dbx-fs-body) var(--font-sans); white-space: nowrap; overflow: hidden; text-align: left; background: hsl(var(--chrome)); }
-.dbx-gh .t { display: block; font-size: var(--dbx-fs-meta); line-height: 17px; color: hsl(var(--muted-foreground)); font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
-.dbx-gh .nm { overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: calc(100% - 14px); line-height: 17px; vertical-align: top; }
+.dbx-gh { flex-shrink: 0; position: relative; height: var(--dbx-head-h); padding: 0 10px; border-bottom: 1px solid hsl(var(--border)); font: 600 var(--dbx-fs-body) var(--font-sans); white-space: nowrap; overflow: hidden; text-align: left; background: hsl(var(--chrome)); line-height: var(--dbx-head-h); container-type: inline-size; }
+/* 单行表头：名+排序caret 一行；类型窄列收进 title tooltip（ResultGridHeader 已带），
+   列宽 ≥150px 才 inline 补显，避免「VARC/NUM」截断噪音。外框高度仍由 --dbx-head-h 定，JS 几何契约不变。 */
+.dbx-gh .t { display: none; margin-left: 6px; font-size: var(--dbx-fs-meta); line-height: inherit; color: hsl(var(--muted-foreground)); font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
+@container (min-width: 150px) { .dbx-gh .t { display: inline; } }
+.dbx-gh .nm { overflow: hidden; text-overflow: ellipsis; display: inline; max-width: none; line-height: inherit; vertical-align: baseline; }
+.dbx-gh .nm::after { content: "↕"; margin-left: 4px; font-size: var(--dbx-fs-meta); opacity: .5; }
+.dbx-gh[aria-sort] .nm::after { content: none; }
 /* 列名后面那个点：空心 = 抽样判定为编码列，实心 = 正在显示解码后的值。
    开关在列头右键菜单，这里只做标识——点它仍然是排序，别抢列名的动作。 */
 .dbx-gh .dbx-codec { display: inline-block; width: 4px; height: 4px; margin-left: 4px; border: 1px solid hsl(var(--primary) / .7); border-radius: 50%; vertical-align: middle; }

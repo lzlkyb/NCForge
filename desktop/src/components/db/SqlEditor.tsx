@@ -21,6 +21,8 @@ export interface SqlEditorApi {
   /** auto：选中内容或全部；current：仅光标语句；script：全部。 */
   insert:(text:string)=>void;
   target: (mode: SqlRunMode) => RunStmt[];
+  /** 执行发起时记下本次语句范围：整行行痕 + overview ruler 标记，按标签保留。 */
+  markRun?: (stmts: RunStmt[]) => void;
   format: (scope?: SqlFormatScope) => void;
   reveal: (line: number) => void;
   focus: () => void;
@@ -57,6 +59,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
   const overflowRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Editor | null>(null);
   const views = useRef(new Map<string, monaco.editor.ICodeEditorViewState>());
+  const runTraces = useRef(new Map<string, RunStmt[]>());
   const refreshScope = useRef<(() => void) | null>(null);
   const visibleRef = useRef(visible); visibleRef.current = visible;
   const previousVisible = useRef(visible);
@@ -128,6 +131,16 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
       if (id && view) views.current.set(id, view);
     };
     const deco = editor.createDecorationsCollection();
+    const runDeco = editor.createDecorationsCollection();
+    // ruler 是 canvas：颜色只认主题色键（monacoSetup 注册 ncforge.runTrace），CSS var 串会被丢弃。
+    const applyRunTrace = () => {
+      const model = editor.getModel(), id = model && tabIdOfModel(model);
+      const stmts = (id && runTraces.current.get(id)) || [];
+      runDeco.set(stmts.map(s => ({
+        range: new monaco.Range(s.startLine, 1, s.endLine ?? s.startLine, 1),
+        options: { isWholeLine: true, className: "dbx-runline", overviewRuler: { color: { id: "ncforge.runTrace" }, position: monaco.editor.OverviewRulerLane.Full } },
+      })));
+    };
     let raf = 0;
     let previousScope: SqlExecutionScope | null = null;
     const highlight = () => {
@@ -160,6 +173,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
     };
     refreshScope.current = highlight;
     const subs = [wireSqlEditorAssist(editor), wireSqlSuggestLayout(editor), wireSqlActionMenu(editor, overflow),
+      editor.onDidChangeModel(applyRunTrace),
       editor.onDidChangeCursorPosition(highlight),
       editor.onDidChangeCursorSelection(highlight),
       editor.onDidChangeModelContent(() => {
@@ -173,6 +187,12 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
     apiRef.current = {
       insert:(text)=>{const range=editor.getSelection();if(range) editor.executeEdits("ncforge-object-name",[{range,text,forceMoveMarkers:true}]);if (visibleRef.current) editor.focus();},
       target,
+      markRun: (stmts) => {
+        const model = editor.getModel(), id = model && tabIdOfModel(model);
+        if (!id) return;
+        runTraces.current.set(id, stmts);
+        applyRunTrace();
+      },
       format: (scope) => formatAt(editor, scope),
       reveal: (line) => {
         editor.revealLineInCenter(line);

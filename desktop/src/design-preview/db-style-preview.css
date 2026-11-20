@@ -1,0 +1,15 @@
+/* SQL 编辑页 P0–P3 视觉基线走查页专用样式：只放说明面板。
+   提案样式已落进应用真源（sql-highlight.css / db-console.css / db-execution.css / db-grid-inspector.css），
+   本文件不再持有任何 override——自检量的就是应用实现。 */
+.db-style-legend {
+  position: fixed; right: 12px; bottom: 12px; z-index: 60; width: 302px; max-height: 62vh; overflow: auto;
+  padding: 12px; border: 1px solid hsl(var(--border)); border-radius: var(--r-card);
+  background: hsl(var(--card)); box-shadow: 0 8px 24px rgb(0 0 0 / .14); font-size: 12px;
+}
+.db-style-legend h2 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+.db-style-legend ul { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; }
+.db-style-legend li[data-ok="true"] { color: hsl(var(--success-ink)); }
+.db-style-legend li[data-ok="false"] { color: hsl(var(--destructive-ink)); }
+.db-style-geo { margin: 4px 0; color: hsl(var(--muted-foreground)); }
+.db-style-legend-bar { display: flex; gap: 6px; margin-top: 8px; }
+.db-style-legend-bar .dbx-btn { height: 26px; padding: 0 8px; font-size: 12px; }

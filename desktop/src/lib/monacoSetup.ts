@@ -75,6 +75,8 @@ export function applyMonacoTheme(theme: Theme): void {
       "editorLineNumber.activeForeground": fg,
       "editor.lineHighlightBackground": accent + "99",
       "editorCursor.foreground": primary,
+      // 执行行痕的 overview ruler 标记色：canvas 不解析 CSS var，必须走主题色键（随浅/深重建）。
+      "ncforge.runTrace": primary,
       "editorIndentGuide.background1": border,
       "editorIndentGuide.activeBackground1": primary + "80",
       "editorBracketMatch.background": accent,

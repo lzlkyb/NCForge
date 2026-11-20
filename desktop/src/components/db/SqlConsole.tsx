@@ -57,6 +57,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
   const execute = useCallback(
     async (mode: SqlRunMode, stmts: RunStmt[], collectStats: boolean, bound?: { bindings?: ReturnType<typeof bindQuery>[]; targetCurrent?: () => boolean; dangerConfirmed?: boolean }) => {
       const executionScope = { tabId, selected: mode === "auto" && scopeRef.current?.tabId === tabId && scopeRef.current.selected, statements: stmts };
+      api.current?.markRun?.(stmts);
       executingScopes.current.set(tabId, executionScope);
       try {
         const outcome = await runStatements(tabId, stmts, { collectStats, ...bound });

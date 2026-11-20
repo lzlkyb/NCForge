@@ -151,14 +151,9 @@ export function RowsEntryView({ tab, entry, isLast, onLocate, onFillSql }: { tab
           </>
         ) : (
           <>
-            <button type="button" className="dbx-lk dbx-edit-status-action" title="查看判定依据与下一步" onClick={() => setDiagOpen(true)}>
-              只读 · {editData.blocked}
+            <button type="button" className="dbx-lk dbx-edit-status-action" title={`只读 · ${editData.blocked} · 查看判定依据与下一步`} onClick={() => setDiagOpen(true)}>
+              {editData.blocked.startsWith("正在") ? "确认中" : "只读"}
             </button>
-            {tab.connId && !sets.length && !editData.blocked.startsWith("正在") && (
-              <button type="button" className="dbx-lk dbx-edit-target-action" onClick={() => setPickTarget(true)}>
-                指定基表/定位列…
-              </button>
-            )}
             {diveButton}
           </>
         )}
@@ -195,7 +190,7 @@ export function RowsEntryView({ tab, entry, isLast, onLocate, onFillSql }: { tab
         open={diagOpen}
         diag={editData.diagnostics}
         onClose={() => setDiagOpen(false)}
-        onPick={tab.connId && !sets.length ? () => { setDiagOpen(false); setPickTarget(true); } : undefined}
+        onPick={tab.connId && !sets.length && !editData.blocked.startsWith("正在") ? () => { setDiagOpen(false); setPickTarget(true); } : undefined}
       />
       <EditTargetDialog
         open={pickTarget}

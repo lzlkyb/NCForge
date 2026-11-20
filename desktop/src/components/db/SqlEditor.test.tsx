@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   selection: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
   scrollTop: 0,
   listeners: {} as Record<string, () => void>,
+  decoSets: [] as unknown[][][],
   create: vi.fn(), dispose: vi.fn(), focus: vi.fn(), layout: vi.fn(), draft: vi.fn(),
   undoStop: vi.fn(), format: vi.fn(), language: vi.fn((_url: string) => "plsql"), toast: vi.fn(),
 }));
@@ -31,7 +32,12 @@ vi.mock("../../lib/monacoSetup", () => {
     getContribution: () => null,
     addAction: (action: ActionDesc) => { mocks.actions.push(action); return { dispose: () => {} }; },
     addCommand: () => { throw new Error("SQL 动作必须保留编辑器右键菜单"); },
-    createDecorationsCollection: () => ({ set: () => {}, clear: () => {} }),
+    createDecorationsCollection: () => {
+      const sets: unknown[][] = [];
+      mocks.decoSets.push(sets);
+      return { set: (d: unknown[]) => { sets.push(d); }, clear: () => { sets.push([]); } };
+    },
+    onDidChangeModel: (callback: () => void) => { mocks.listeners.model = callback; return { dispose: () => {} }; },
     onDidChangeCursorPosition: (callback: () => void) => { mocks.listeners.position = callback; return { dispose: () => {} }; },
     onDidChangeCursorSelection: (callback: () => void) => { mocks.listeners.selection = callback; return { dispose: () => {} }; },
     onDidChangeModelContent: (callback: () => void) => { mocks.listeners.content = callback; return { dispose: () => {} }; },
@@ -41,6 +47,7 @@ vi.mock("../../lib/monacoSetup", () => {
     setModel: (model: TestModel) => {
       mocks.model = model; mocks.position = { lineNumber: 1, column: 1 };
       mocks.selection = { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 }; mocks.scrollTop = 0;
+      mocks.listeners.model?.();
     },
     saveViewState: () => mocks.model ? { position: { ...mocks.position }, selection: { ...mocks.selection }, scrollTop: mocks.scrollTop } : null,
     restoreViewState: (view: { position: Position; selection: Selection; scrollTop: number }) => {
@@ -79,7 +86,7 @@ vi.mock("../../lib/monacoSetup", () => {
       Range: class {
         constructor(readonly startLineNumber: number, readonly startColumn: number, readonly endLineNumber: number, readonly endColumn: number) {}
       },
-      editor: { create: mocks.create },
+      editor: { create: mocks.create, OverviewRulerLane: { Left: 1, Center: 2, Right: 4, Full: 7 } },
     },
   };
 });
@@ -130,6 +137,30 @@ function select(range: Selection) {
   mocks.selection = range; mocks.position = { lineNumber: range.endLineNumber, column: range.endColumn };
   act(() => mocks.listeners.selection());
 }
+
+describe("执行行痕", () => {
+  it("markRun 整块替换行痕与 ruler，切标签清空、切回恢复", () => {
+    const { apiRef, render } = mount("select 1;\nselect 2;\nselect 3;");
+    const runIdx = mocks.decoSets.length - 1; // mount 建了两个 collection：光标高亮 + 行痕
+    const runSets = mocks.decoSets[runIdx];
+    act(() => apiRef.current!.markRun!([{ text: "select 2;", startLine: 2, endLine: 2 }]));
+    type Deco = { range: Selection; options: { className?: string; isWholeLine?: boolean; overviewRuler?: { color?: { id?: string }; position?: number } } };
+    const marked = runSets[runSets.length - 1] as Deco[];
+    expect(marked).toHaveLength(1);
+    expect(marked[0].range.startLineNumber).toBe(2);
+    expect(marked[0].range.endLineNumber).toBe(2);
+    expect(marked[0].options.className).toBe("dbx-runline");
+    expect(marked[0].options.isWholeLine).toBe(true);
+    expect(marked[0].options.overviewRuler?.color?.id).toBe("ncforge.runTrace");
+    expect(marked[0].options.overviewRuler?.position).toBe(7);
+    render("t2", true, "select 9;");
+    expect(runSets[runSets.length - 1]).toHaveLength(0);
+    render("t1");
+    const restored = runSets[runSets.length - 1] as Deco[];
+    expect(restored).toHaveLength(1);
+    expect(restored[0].range.startLineNumber).toBe(2);
+  });
+});
 
 describe("SQL 编辑器动作与真实执行目标", () => {
   it("补全浮层挂在窗口层，随编辑器隐藏和移除", () => {

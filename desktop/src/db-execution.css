@@ -9,7 +9,6 @@
   display:flex; flex:none; flex-wrap:nowrap; gap:0; min-width:0;
   min-height:0; padding:0 8px 0 0; border:0; border-right:1px solid hsl(var(--border)); background:none;
 }
-.dbx-execution-primary .dbx-editor-label { margin-inline-end:var(--gap-control); }
 .dbx-execution-bar .dbx-btn { height:28px; min-height:28px; padding:0 5px; flex:none; }
 .dbx-execution-bar .dbx-btn.ghost { border-color:transparent; background:transparent; }
 .dbx-execution-bar .dbx-btn.ghost:hover:not(:disabled) { background:hsl(var(--secondary)); }
@@ -47,6 +46,8 @@
 .dbx-execution-bar .dbx-tx-actions[data-compact] { gap:0; padding:0; border:0; }
 .dbx-execution-bar .dbx-tx-actions[data-compact] .dbx-btn { width:28px; padding:0; }
 .dbx-execution-bar .dbx-context-connection { min-width:48px; flex:0 1 auto; }
+/* 连接名是上下文不是标题：去 bold，把视觉重量让给执行按钮与结果。 */
+.dbx-execution-bar .dbx-context-connection strong { font-weight:500; }
 .dbx-execution-bar .dbx-context-connection .dbx-connpick { max-width:min(154px, 100%); font-size:var(--dbx-fs-body); }
 .dbx-execution-bar .dbx-context-env { flex:none; color:hsl(var(--foreground)); }
 .dbx-execution-bar .dbx-context[data-prod] .dbx-context-env { color:hsl(var(--destructive-ink)); }

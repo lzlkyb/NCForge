@@ -114,7 +114,6 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
   return <>
     <div className="dbx-command-header dbx-execution-bar" role="toolbar" aria-label="SQL 工具栏">
       <div className="dbx-sqlbar dbx-execution-primary">
-        {focusMode !== "results" && <span className="dbx-region-label dbx-editor-label">SQL 编辑器</span>}
         <div className="dbx-run-controls">
           <div className="dbx-runsplit">
             <button type="button" className="dbx-btn pri dbx-run-action" disabled={executionBlocked || !statements.length}

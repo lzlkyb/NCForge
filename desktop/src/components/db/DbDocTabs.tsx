@@ -169,14 +169,15 @@ export function DbDocTabs() {
                 onDrop={(e) => dropOnTab(e, t.id)}
                 onDragEnd={endDrag}
               >
+                {c && <span className={`dbx-tab-env e-${c.env}`} aria-hidden="true" />}
                 <Icon name={icon} size={13} />
                 {dirty > 0 && <span className="dbx-dirty-dot" role="img" aria-label={`有 ${dirty} 处未写回的改动`} title={`有 ${dirty} 处未写回的改动`} />}
                 <span className="wb-tab-name">
                   {label}
-                  <span className="dbx-muted">
-                    {t.kind !== "compare" && (t.kind !== "table" || sameName) && ` · ${shortConn ?? "未选连接"}`}
-                    {c && ` · ${ENV_LABEL[c.env]}`}
-                  </span>
+                  {/* 身份段收进 title tooltip；只有同名表跨连接/未选连接时才保留可见连接名消歧。 */}
+                  {t.kind === "table" && (sameName || !c) && (
+                    <span className="dbx-muted"> · {shortConn ?? "未选连接"}</span>
+                  )}
                 </span>
                 <button
                   type="button"
