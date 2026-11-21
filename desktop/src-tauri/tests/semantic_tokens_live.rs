@@ -181,6 +181,7 @@ fn 语义高亮命令返回标准五元组并且认影子路径() {
         data_dir: &base.join("data"),
         config_dir: &base.join("cfg"),
         xmx_mb: 1024,
+        syntax_server: false,
     };
     let lsp = LspClient::spawn(launch.command().unwrap(), Arc::new(Quiet)).expect("jdt.ls 起不来");
     lsp.request(

@@ -31,10 +31,16 @@ use crate::workspace::{detect_encoding, TextEncoding};
 pub const PROJECT_NAME: &str = "nc-forge-shadow";
 /// jdt.ls 的编译产物目录（相对影子根）。显式指定在影子目录内，否则会默认落到别处；
 /// 再配合 `java.autobuild.enabled=false`，双保险不把 class 写进用户的工作副本。
-const OUTPUT_DIR: &str = "shadow-bin";
+///
+/// `pub` 是为了让集成测试（`tests/` 是外部 crate）能断言「每条源根的 output 都以它开头」
+/// —— 那条断言护的是「不写用户工作区」这条红线，不该在测试里重抄一遍字面量。
+pub const OUTPUT_DIR: &str = "shadow-bin";
 const JRE_CONTAINER: &str =
     "org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-1.8";
 const SRC_DIRS: [&str; 3] = ["src/public", "src/client", "src/private"];
+/// 不算模块的一级目录：`out` 是 Eclipse 的默认输出（含外部源码产物），
+/// `META-INF` 是注册文件目录，`nclogs` 是日志，`bin` 是外部工具的输出。
+const NOT_MODULE: [&str; 4] = ["out", "META-INF", "nclogs", "bin"];
 
 // ───────────────────────── 文件内容渲染（纯函数） ─────────────────────────
 
@@ -42,6 +48,13 @@ const SRC_DIRS: [&str; 3] = ["src/public", "src/client", "src/private"];
 pub struct ClasspathInputs<'a> {
     /// 源码目录，相对影子根（如 `gl/src/private`）。
     pub src_dirs: &'a [String],
+    /// 需要显式声明 output 的源根：`(src 相对路径, output 相对路径)`。
+    ///
+    /// 🔴 **output 必须落在影子目录内**（如 `shadow-bin/gl`）。源根是 junction，
+    /// 若照抄 Eclipse 官方的 `output="gl/classes"`，产物会经链接写进**用户工作区** ——
+    /// 违反「jdt.ls 不写用户文件」红线（`OUTPUT_DIR` 就是为此设的）。
+    /// 不在此表里的源根沿用全局 `OUTPUT_DIR`。
+    pub src_outputs: &'a [(String, String)],
     /// 已编译的类目录（其他模块的二开类只在这里）。
     pub class_dirs: &'a [PathBuf],
     /// jar 与它的源码 jar（`xxx_src.jar`，没有就是 None），顺序即 classpath 顺序。
@@ -63,10 +76,18 @@ fn xml_attr(s: &str) -> String {
 pub fn render_classpath(inp: &ClasspathInputs) -> String {
     let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<classpath>\n");
     for d in inp.src_dirs {
-        out.push_str(&format!(
-            "\t<classpathentry kind=\"src\" path=\"{}\"/>\n",
-            xml_attr(d)
-        ));
+        // 显式 output 的源根：产物按模块隔离，且一定在影子内
+        match inp.src_outputs.iter().find(|(p, _)| p == d) {
+            Some((_, o)) => out.push_str(&format!(
+                "\t<classpathentry kind=\"src\" output=\"{}\" path=\"{}\"/>\n",
+                xml_attr(o),
+                xml_attr(d)
+            )),
+            None => out.push_str(&format!(
+                "\t<classpathentry kind=\"src\" path=\"{}\"/>\n",
+                xml_attr(d)
+            )),
+        }
     }
     out.push_str(&format!(
         "\t<classpathentry kind=\"con\" path=\"{JRE_CONTAINER}\"/>\n"
@@ -222,9 +243,14 @@ pub fn ensure_link(
 /// - 链接：直接摘（切模块时旧模块的链接，目标目录原样不动）
 /// - 非链接的普通目录（被外部工具展开的副本）：改名挪开，不删
 /// - 文件、点开头的目录（`.settings/`、`.classpath`、`.project`、`*.orphan-*`）：不碰
+///
+/// `keep` 是「本次要链的模块名清单」：single 模式传 `[module]`，flat 传全部模块。
+/// 🔴 `OUTPUT_DIR` 必须单独放过：它是影子工程自己的产物目录，既不是模块链接、
+/// 也不在模块清单里，按旧逻辑会被 `move_aside` 挪走 —— 而 flat 的每条 src 都声明了
+/// `output="shadow-bin/<模块>"`，目录被挪走后 jdt.ls 会报 classpath 无效。
 fn sweep_shadow(
     shadow: &Path,
-    keep: &str,
+    keep: &[String],
     displaced: &mut Vec<(PathBuf, PathBuf)>,
 ) -> Result<bool, String> {
     let mut changed = false;
@@ -236,7 +262,7 @@ fn sweep_shadow(
         let Some(name) = p.file_name().map(|n| n.to_string_lossy().into_owned()) else {
             continue;
         };
-        if name == keep {
+        if name == OUTPUT_DIR || keep.iter().any(|k| k == &name) {
             continue;
         }
         if is_link(&p) {
@@ -274,6 +300,46 @@ pub struct ShadowSpec<'a> {
     /// 工程关联覆盖表：影子工程的 `.classpath` 必须与编译/启动用同一份，否则
     /// 编辑器里能解析、真编译却找不到（或反过来）。
     pub overrides: &'a [crate::eclipse_cp::LinkedOverride],
+    /// `None` = 只链 `module`（现状，也是回滚路径）；`Some(清单)` = flat，
+    /// 把清单里全部模块的源根塞进同一个工程，`module` 自动补进清单。
+    ///
+    /// 清单由 [`workspace_modules`] 给出（全工作区、真有 `.java` 的模块）。
+    pub extra_modules: Option<&'a [String]>,
+}
+
+/// 工作区里「真有 `.java`」的模块名（按字典序，结果稳定）。
+///
+/// 🔴 判据是**有源文件**，不是「有 `src/public` 之类的目录」：S0 实测本机 59 个目录含
+/// `SRC_DIRS`，其中 6 个是空壳。按目录判会给 jdt.ls 塞 6 个空源根，它会报 classpath 警告，
+/// 也白白拉长 import。
+///
+/// 不取 `eclipse_cp::graph()`：那是**工程级依赖闭包**，本机 `newar` 的闭包只有它自己
+/// （模块不是独立 project），而用户要跳的恰恰是闭包外的模块。
+///
+/// 成本：一次全量 `collect_sources`（本机 7517 文件约 1~2s）。调用方应缓存，别在每帧调。
+pub fn workspace_modules(workspace_root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(workspace_root) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for e in entries.flatten() {
+        let p = e.path();
+        if !p.is_dir() {
+            continue;
+        }
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') || NOT_MODULE.contains(&name.as_str()) {
+            continue;
+        }
+        if !SRC_DIRS.iter().any(|d| p.join(d).is_dir()) {
+            continue;
+        }
+        if !compile::collect_sources(&p).is_empty() {
+            out.push(name);
+        }
+    }
+    out.sort();
+    out
 }
 
 #[derive(Debug)]
@@ -284,6 +350,9 @@ pub struct ShadowProject {
     /// 被改名挪开的非链接实体（原路径 → 新路径）。正常应为空，非空说明影子目录
     /// 被外部工具（备份/复制/还原）展开过，调用方该记一条日志。
     pub displaced: Vec<(PathBuf, PathBuf)>,
+    /// 本次链进影子的模块（single 只有一个；flat 是全工作区）。调用方用它判断
+    /// 「上次是 single、这次是 flat」这种形态切换，从而强制重新导入。
+    pub modules: Vec<String>,
     pub source_files: usize,
     pub jar_count: usize,
     pub utf8_files: usize,
@@ -319,10 +388,24 @@ pub(crate) fn src_jar_of(jar: &Path) -> Option<PathBuf> {
 /// 只排除该模块**明确声明**的 output，以及模块级 `.classpath` 的全部产物；工程根的
 /// 默认输出（`out/bin`）保留——别的源码根（如 `ia/src`）也往那里编译，剪掉就没有
 /// 它们的类了。重复条目交给上层按全限定名去重。
+#[cfg(test)]
 fn own_output_dirs(workspace_root: &Path, module: &str) -> Vec<PathBuf> {
+    own_output_dirs_with(
+        ProjectCp::load(workspace_root).as_ref(),
+        workspace_root,
+        module,
+    )
+}
+
+/// 同上，但工程根 `.classpath` 由调用方给（flat 要给 63 个模块算，只解析一次）。
+fn own_output_dirs_with(
+    root_cp: Option<&ProjectCp>,
+    workspace_root: &Path,
+    module: &str,
+) -> Vec<PathBuf> {
     let mut dirs = ModuleLayout::resolve(workspace_root, module).outputs;
     dirs.push(workspace_root.join(module).join("classes"));
-    if let Some(cp) = ProjectCp::load(workspace_root) {
+    if let Some(cp) = root_cp {
         for src in &cp.srcs {
             let rel = src.path.to_string_lossy().replace('\\', "/");
             let rel = rel.trim_matches('/');
@@ -341,44 +424,115 @@ fn own_output_dirs(workspace_root: &Path, module: &str) -> Vec<PathBuf> {
     dedupe_paths(dirs)
 }
 
+/// 本次要链进影子的模块清单（字典序去重，`spec.module` 一定在里面）。
+fn target_modules(spec: &ShadowSpec) -> Vec<String> {
+    match spec.extra_modules {
+        None => vec![spec.module.to_string()],
+        Some(extra) => {
+            let mut v: Vec<String> = extra.to_vec();
+            if !v.iter().any(|m| m == spec.module) {
+                v.push(spec.module.to_string());
+            }
+            v.sort();
+            v.dedup();
+            v
+        }
+    }
+}
+
 /// 为 `spec.module` 生成（或更新）影子工程。幂等：内容没变就什么都不写，`changed` 为 false。
+///
+/// `extra_modules` 为 `Some` 时是 **flat** 形态：一个工程里挂全工作区的源根。
+/// 这是 NC 官方 `newar` 的形态（1 project + 223 src 根 + 63 模块），也是「不按模块切工程」
+/// 的前提 —— 见 `docs/NCForge-智能代码-单索引常驻-规划-2026-11-21.md` §2.5。
 pub fn generate(spec: &ShadowSpec) -> Result<ShadowProject, String> {
     let module_dir = spec.workspace_root.join(spec.module);
     if !module_dir.is_dir() {
         return Err(format!("模块目录不存在: {}", module_dir.display()));
     }
-    let files = compile::collect_sources(&module_dir);
-    if files.is_empty() {
+    // 校验当前模块：文案与原行为一致（single 模式就是全部；flat 模式下它是「当前页」）。
+    let module_files = compile::collect_sources(&module_dir);
+    if module_files.is_empty() {
         return Err(format!("模块 {} 下没有 .java 源文件", spec.module));
     }
     std::fs::create_dir_all(spec.shadow_dir.join(".settings"))
         .map_err(|e| format!("无法创建影子目录: {e}"))?;
 
-    // 1. 源码链接：只链当前模块，切模块时摘掉旧的
+    // 1. 源码链接：flat 链全部模块，single 只链当前模块。切清单时由 sweep 摘掉多余的链接。
+    let mods = target_modules(spec);
     let mut displaced: Vec<(PathBuf, PathBuf)> = Vec::new();
-    let mut changed = ensure_link(
-        &spec.shadow_dir.join(spec.module),
-        &module_dir,
-        &mut displaced,
-    )?;
-    changed |= sweep_shadow(spec.shadow_dir, spec.module, &mut displaced)?;
+    let mut changed = false;
+    let mut linked: Vec<String> = Vec::new();
+    for m in &mods {
+        let dir = spec.workspace_root.join(m);
+        if !dir.is_dir() {
+            // 清单里混进了已删掉的模块（缓存/清单过期）：跳过，别让整个语言服务起不来
+            continue;
+        }
+        changed |= ensure_link(&spec.shadow_dir.join(m), &dir, &mut displaced)?;
+        linked.push(m.clone());
+    }
+    if linked.is_empty() {
+        return Err(format!(
+            "工作区里没有可用的模块: {}",
+            spec.workspace_root.display()
+        ));
+    }
+    changed |= sweep_shadow(spec.shadow_dir, &linked, &mut displaced)?;
 
-    let src_dirs: Vec<String> = SRC_DIRS
+    // 2. 源根与源文件：按「真有 src 目录」筛（`workspace_modules` 已保证有 .java）
+    let mut src_dirs: Vec<String> = Vec::new();
+    // (模块名, 模块真实目录, 源文件) —— 后面算 UTF-8 相对路径要按各自模块算
+    let mut mod_files: Vec<(String, PathBuf, Vec<PathBuf>)> = Vec::new();
+    for m in &linked {
+        let dir = spec.workspace_root.join(m);
+        for d in SRC_DIRS {
+            if dir.join(d).is_dir() {
+                src_dirs.push(format!("{m}/{d}"));
+            }
+        }
+        // 当前模块刚扫过，复用；其余模块现扫
+        let fs = if m == spec.module {
+            module_files.clone()
+        } else {
+            compile::collect_sources(&dir)
+        };
+        mod_files.push((m.clone(), dir, fs));
+    }
+    let files: Vec<PathBuf> = mod_files
         .iter()
-        .filter(|d| module_dir.join(d).is_dir())
-        .map(|d| format!("{}/{d}", spec.module))
+        .flat_map(|(_, _, fs)| fs.iter().cloned())
         .collect();
 
-    // 2. 类目录：规则与编译/启动服务共用。当前模块自己的产物要排除——那是它自己源码的
-    //    旧产物，与源码重复，留着只会让跳转偏到旧 class。产物目录可能不止 `<模块>/classes`。
-    let own = own_output_dirs(spec.workspace_root, spec.module);
+    // 3. 🔴 每条源根显式声明 output，且一定落在影子目录内（`shadow-bin/<模块>`）。
+    //    源根是 junction：照抄 NC 官方的 `output="gl/classes"` 会经链接把 class 写进
+    //    **用户工作区**，违反「jdt.ls 只读工作副本」红线。按模块分目录则避免同名类互相覆盖。
+    let src_outputs: Vec<(String, String)> = src_dirs
+        .iter()
+        .map(|d| {
+            let m = d.split('/').next().unwrap_or_default();
+            (d.clone(), format!("{OUTPUT_DIR}/{m}"))
+        })
+        .collect();
+
+    // 4. 类目录：规则与编译/启动服务共用。本次所有「有源码」模块自己的产物都要排除——
+    //    那是它们自己源码的旧产物，与源码重复，留着只会让跳转偏到旧 class。
+    let root_cp = ProjectCp::load(spec.workspace_root);
+    let own = dedupe_paths(
+        linked
+            .iter()
+            .flat_map(|m| own_output_dirs_with(root_cp.as_ref(), spec.workspace_root, m))
+            .collect(),
+    );
     let class_dirs: Vec<PathBuf> =
         project_class_dirs(spec.workspace_root, spec.nc_home, spec.overrides)
             .into_iter()
             .filter(|d| !own.iter().any(|o| eq_path(d, o)))
             .collect();
 
-    // 3. jar：按当前模块全部源文件的 import / 同包 / 父类型链精选 + 公共库 + 上次编译的 jar 集
+    // 5. jar：按源码全集的 import / 同包 / 父类型链精选 + 公共库 + 上次编译的 jar 集。
+    //    🔴 flat 必须**一次**调用（并集 = 全部 import 的全集）。S0 实测：7517 文件一次 94.9s，
+    //    逐模块循环 258s —— `select_jars` 的共同祖先遍历每模块重付一遍，再取并集只多不少。
     let mut jar_ids: BTreeSet<u32> = compile::select_jars(spec.index, &files);
     jar_ids.extend(common_jars(spec.index, spec.nc_home));
     jar_ids.extend(spec.extra_jars.iter().copied());
@@ -394,15 +548,17 @@ pub fn generate(spec: &ShadowSpec) -> Result<ShadowProject, String> {
         })
         .collect();
 
-    // 4. 编码：按内容探测 UTF-8 的文件逐个登记
+    // 6. 编码：按内容探测 UTF-8 的文件逐个登记（相对路径要按各自模块算）
     let mut utf8_files = Vec::new();
-    for f in &files {
-        let Ok(bytes) = std::fs::read(f) else {
-            continue;
-        };
-        if detect_encoding(&bytes) == TextEncoding::Utf8 && !bytes.is_ascii() {
-            if let Ok(rel) = f.strip_prefix(&module_dir) {
-                utf8_files.push(format!("{}/{}", spec.module, forward(rel)));
+    for (m, dir, fs) in &mod_files {
+        for f in fs {
+            let Ok(bytes) = std::fs::read(f) else {
+                continue;
+            };
+            if detect_encoding(&bytes) == TextEncoding::Utf8 && !bytes.is_ascii() {
+                if let Ok(rel) = f.strip_prefix(dir) {
+                    utf8_files.push(format!("{m}/{}", forward(rel)));
+                }
             }
         }
     }
@@ -410,6 +566,7 @@ pub fn generate(spec: &ShadowSpec) -> Result<ShadowProject, String> {
     let root = spec.shadow_dir;
     let classpath = render_classpath(&ClasspathInputs {
         src_dirs: &src_dirs,
+        src_outputs: &src_outputs,
         class_dirs: &class_dirs,
         jars: &jars,
     });
@@ -427,6 +584,7 @@ pub fn generate(spec: &ShadowSpec) -> Result<ShadowProject, String> {
         root: root.to_path_buf(),
         changed,
         displaced,
+        modules: linked,
         source_files: files.len(),
         jar_count: jars.len(),
         utf8_files: utf8_files.len(),
@@ -436,6 +594,11 @@ pub fn generate(spec: &ShadowSpec) -> Result<ShadowProject, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `sweep_shadow` 的 keep 清单：`keep(&["gl", "ic"])` 比一串 `to_string()` 好读。
+    fn keep(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| (*s).to_string()).collect()
+    }
 
     fn temp(tag: &str) -> PathBuf {
         // 🔴 根必须落在工程内 target/test-tmp，不能用系统 %TEMP%：
@@ -467,6 +630,7 @@ mod tests {
         ];
         let xml = render_classpath(&ClasspathInputs {
             src_dirs: &src_dirs,
+            src_outputs: &[],
             class_dirs: &class_dirs,
             jars: &jars,
         });
@@ -595,7 +759,7 @@ mod tests {
         std::fs::create_dir_all(shadow.join(".settings")).unwrap();
         std::fs::write(shadow.join("real-file.txt"), "x").unwrap();
         let mut displaced = Vec::new();
-        assert!(sweep_shadow(&shadow, "other", &mut displaced).unwrap());
+        assert!(sweep_shadow(&shadow, &keep(&["other"]), &mut displaced).unwrap());
         assert!(std::fs::symlink_metadata(&link).is_err(), "旧链接应被摘掉");
         assert!(shadow.join("real-file.txt").is_file());
         assert!(shadow.join(".settings").is_dir());
@@ -642,9 +806,149 @@ mod tests {
         // 再跑一次：链接已在，什么都不该动；已挪开的副本也不能被反复改名
         let mut again = Vec::new();
         assert!(!ensure_link(&link, &target, &mut again).unwrap());
-        assert!(!sweep_shadow(&shadow, "m", &mut again).unwrap());
+        assert!(!sweep_shadow(&shadow, &keep(&["m"]), &mut again).unwrap());
         assert!(again.is_empty(), "orphan 目录不该每轮都被再挪一次");
         let _ = remove_link(&link);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 用户工作区的完整快照：`(相对路径, 字节数, mtime 纳秒)`。
+    fn snapshot(root: &Path) -> Vec<(String, u64, u128)> {
+        fn go(dir: &Path, root: &Path, out: &mut Vec<(String, u64, u128)>) {
+            for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                let p = e.path();
+                let md = std::fs::symlink_metadata(&p).unwrap();
+                let mtime = md
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0);
+                out.push((
+                    p.strip_prefix(root).unwrap().to_string_lossy().into_owned(),
+                    md.len(),
+                    mtime,
+                ));
+                if md.is_dir() {
+                    go(&p, root, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        go(root, root, &mut out);
+        out.sort();
+        out
+    }
+
+    /// flat：一个工程里挂多个模块的源根，且**每条源根都声明落在影子内的 output**。
+    ///
+    /// 🔴 这条钉的是「jdt.ls 不写用户工作副本」红线：源根是 junction，一旦照抄 NC 官方的
+    /// `output="gl/classes"`，class 就会**经链接落进用户的工作区**（`OUTPUT_DIR` 正是为此设的）。
+    /// 所以除了断言 `.classpath` 的内容，还必须断言 generate 前后工作区的
+    /// **文件数、字节数、mtime 全等**。
+    #[test]
+    fn flat_shadow_多模块源根与影子内产物目录() {
+        let base = temp("flat");
+        let ws = base.join("ws");
+        for (m, cls) in [("m1", "A"), ("m2", "B")] {
+            let d = ws.join(m).join("src/private/p");
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(
+                d.join(format!("{cls}.java")),
+                format!("package p;\npublic class {cls} {{}}\n"),
+            )
+            .unwrap();
+        }
+        // 空壳模块（有 src 目录但没有 .java）与「不算模块」的一级目录，都不许进清单
+        std::fs::create_dir_all(ws.join("m3/src/public/p")).unwrap();
+        std::fs::create_dir_all(ws.join("out/p")).unwrap();
+        std::fs::create_dir_all(ws.join("nclogs")).unwrap();
+
+        let mods = workspace_modules(&ws);
+        assert_eq!(
+            mods,
+            vec!["m1".to_string(), "m2".to_string()],
+            "只认真有 .java 的模块"
+        );
+
+        let nc_home = base.join("nc");
+        std::fs::create_dir_all(&nc_home).unwrap();
+        let before = snapshot(&ws);
+        let index = ClassIndex::build(vec![]);
+        let shadow = base.join("shadow");
+        let mut extra = mods.clone();
+        let p = generate(&ShadowSpec {
+            workspace_root: &ws,
+            module: "m1",
+            nc_home: &nc_home,
+            shadow_dir: &shadow,
+            index: &index,
+            extra_jars: &[],
+            overrides: &[],
+            extra_modules: Some(&extra),
+        })
+        .unwrap();
+        assert_eq!(p.modules, mods);
+        assert_eq!(p.source_files, 2, "flat 的 source_files 是全部模块之和");
+
+        let cp = std::fs::read_to_string(shadow.join(".classpath")).unwrap();
+        for m in &mods {
+            assert!(
+                cp.contains(&format!("path=\"{m}/src/private\"")),
+                "{m} 的源根应在 classpath 里：\n{cp}"
+            );
+            assert!(
+                cp.contains(&format!("output=\"{OUTPUT_DIR}/{m}\"")),
+                "{m} 的产物必须在影子内：\n{cp}"
+            );
+        }
+        // 🔴 红线：不许经 junction 写用户工作区
+        assert_eq!(snapshot(&ws), before, "generate 改动了用户工作区");
+        assert!(
+            !ws.join("shadow-bin").exists(),
+            "产物目录落进用户工作区了：{}",
+            ws.join("shadow-bin").display()
+        );
+
+        // 回切 single：m2 的链接要摘掉，但目标目录原样
+        let single = generate(&ShadowSpec {
+            workspace_root: &ws,
+            module: "m1",
+            nc_home: &nc_home,
+            shadow_dir: &shadow,
+            index: &index,
+            extra_jars: &[],
+            overrides: &[],
+            extra_modules: None,
+        })
+        .unwrap();
+        assert_eq!(single.modules, vec!["m1".to_string()]);
+        assert!(
+            std::fs::symlink_metadata(shadow.join("m2")).is_err(),
+            "旧链接应摘掉"
+        );
+        assert!(
+            ws.join("m2/src/private/p/B.java").is_file(),
+            "目标文件绝不能删"
+        );
+        let cp = std::fs::read_to_string(shadow.join(".classpath")).unwrap();
+        assert!(!cp.contains("m2/src/private"), "回切后不该再留着 m2 源根");
+
+        // 空清单也要保住当前模块（否则 flat 开关传空数组会生成一个没有源根的工程）
+        extra.clear();
+        let fallback = generate(&ShadowSpec {
+            workspace_root: &ws,
+            module: "m2",
+            nc_home: &nc_home,
+            shadow_dir: &shadow,
+            index: &index,
+            extra_jars: &[],
+            overrides: &[],
+            extra_modules: Some(&[]),
+        })
+        .unwrap();
+        assert_eq!(fallback.modules, vec!["m2".to_string()]);
+
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -689,6 +993,7 @@ mod tests {
             index: &index,
             extra_jars: &[],
             overrides: &[],
+            extra_modules: None,
         };
         let first = generate(&spec).unwrap();
         assert!(first.changed);
@@ -720,6 +1025,7 @@ mod tests {
             data_dir: &data,
             config_dir: &base.join("jdtls-config"),
             xmx_mb: 512,
+            syntax_server: false,
         }
         .command()
         .unwrap();
@@ -812,7 +1118,7 @@ mod tests {
         assert_eq!(walk_names(&ws), ws_before, "工作副本里出现了多余文件");
         let _ = std::fs::remove_dir_all(base.join("jdtls-data"));
         // 不对 base 做 remove_dir_all：shadow 里有指向 ws 的 junction，先摘链接再清理
-        sweep_shadow(&shadow, "", &mut Vec::new()).unwrap();
+        sweep_shadow(&shadow, &[], &mut Vec::new()).unwrap();
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -856,7 +1162,7 @@ mod tests {
             return;
         }
         let base = PathBuf::from(r"D:\AItool\aiwork\nc-workbench-m0\m4v\real-gl");
-        let _ = sweep_shadow(&base.join("shadow"), "", &mut Vec::new());
+        let _ = sweep_shadow(&base.join("shadow"), &[], &mut Vec::new());
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
 
@@ -880,6 +1186,7 @@ mod tests {
             index: &index,
             extra_jars: &[],
             overrides: &[],
+            extra_modules: None,
         };
         let p = generate(&spec).unwrap();
         println!(
@@ -923,6 +1230,7 @@ mod tests {
             data_dir: &data,
             config_dir: &base.join("jdtls-config"),
             xmx_mb: 1024,
+            syntax_server: false,
         }
         .command()
         .unwrap();
@@ -1061,7 +1369,7 @@ mod tests {
         std::thread::sleep(Duration::from_secs(8));
 
         client.shutdown();
-        let _ = sweep_shadow(&shadow, "", &mut Vec::new());
+        let _ = sweep_shadow(&shadow, &[], &mut Vec::new());
         let _ = std::fs::remove_dir_all(&base);
     }
 

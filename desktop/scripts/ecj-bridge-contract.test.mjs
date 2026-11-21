@@ -18,10 +18,10 @@
 import assert from 'node:assert/strict';
 import { clearTimeout } from 'node:timers';
 import { performance } from 'node:perf_hooks';
-import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
@@ -327,3 +327,113 @@ test('struct 指纹与 Eclipse hasStructuralChanges 对齐；单文件失败不�
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/**
+ * ⑦ Phase 1 索引器与桥**同一个 jar**，但它是独立 main（`java -cp ncecj.jar NcIndexer …`）。
+ *
+ * 这条防两件事：Java 改了忘记 `build-bridge-jar.mjs ecj`（jar 里没有新类）；
+ * 以及写出的 `types.idx` 头部与 `src/decl_index.rs` 的读取器漂移 —— 后者用单测钉格式，
+ * 这里钉的是「真的能从一个最小工作区产出来、且整份记录区都解得通」。
+ */
+test('索引器 NcIndexer：独立入口能建出格式正确的 types.idx', () => {
+  assert.ok(existsSync(BRIDGE), `缺 ${BRIDGE}，先跑 node scripts/build-bridge-jar.mjs ecj`);
+
+  const dir = mkdtempSync(join(tmpdir(), 'ncforge-decl-idx-'));
+  try {
+    // 一个模块 / 一个源根 / 两个类：够验「能发现模块、能 parse、头部计数正确」
+    const pkg = join(dir, 'mod', 'src', 'private', 'demo');
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, 'A.java'), 'package demo;\npublic class A {\n  int f;\n  void m(int x) {}\n}\n');
+    writeFileSync(join(pkg, 'B.java'), 'package demo;\npublic class B extends A {\n}\n');
+
+    const out = join(dir, 't.idx');
+    // Java 的 -cp 用 ';' 分隔，路径统一成正斜杠（避免 Windows 反斜杠与通配符混用）
+    const norm = (p) => p.split(sep).join('/');
+    const cp = `${norm(BRIDGE)};${norm(join(ta, 'resources', 'jdtls', 'plugins'))}/*`;
+    const r = spawnSync(
+      findJava(),
+      ['-Dfile.encoding=UTF-8', '-cp', cp, '-Xmx512m', 'NcIndexer', '--ws', dir, '--out', out, '--threads', '1'],
+      { encoding: 'utf8' },
+    );
+    const log = `${r.stdout || ''}${r.stderr || ''}`;
+    // 类不在 jar 里时，JVM 报的是 ClassNotFoundException —— 这条断言就是「忘了重新打包」的探针
+    assert.ok(!/ClassNotFound/.test(log), `jar 里没有 NcIndexer，先跑 build-bridge-jar.mjs ecj\n${log}`);
+    assert.equal(r.status, 0, `NcIndexer 退出码 ${r.status}\n${log}`);
+    assert.ok(/源文件 2 个/.test(log), `应发现 2 个源文件\n${log}`);
+
+    const buf = readFileSync(out);
+    assert.equal(buf.subarray(0, 8).toString('latin1'), 'NCFIDX01', '魔数必须与 decl_index.rs 一致');
+    assert.equal(buf.readInt32BE(8), 3, '格式版本（v3 = 成员带声明行）');
+    assert.equal(buf.readInt32BE(12), 2, '类型数（A + B）');
+    assert.equal(buf.readInt32BE(16), 2, '路径数（A.java + B.java 各一条）');
+    // 头部末尾是落盘时刻：判「索引过期」全靠它，所以必须在、且是个像样的毫秒时间戳。
+    // 少了它 Rust 侧 `read_stats` 会读到记录区前 8 字节，判据就变成随机数。
+    const builtAt = Number(buf.readBigInt64BE(40));
+    assert.ok(
+      builtAt > 1_600_000_000_000 && builtAt < Date.now() + 60_000,
+      `builtAtMs 不像当前时间戳：${builtAt}`,
+    );
+
+    // 记录区整体解一遍：只钉头部挡不住「字段写了一半」这类错位，
+    // 而 Rust 侧读到成员行号错位的索引不会报错，只会**跳到错的行**。
+    const types = parseIdx(buf);
+    assert.equal(types.length, 2, '记录数应与头部一致');
+    const a = types.find((t) => t.name === 'demo.A');
+    assert.ok(a, `应能按全限定名找到 demo.A：${types.map((t) => t.name)}`);
+    assert.equal(a.line, 2, 'A 的 class 声明行');
+    assert.deepEqual(
+      a.methods.map((m) => [m.sig, m.line]),
+      [['m(int)', 4]],
+      '方法签名与声明行（`void m(int x) {}` 在第 4 行）',
+    );
+    assert.deepEqual(
+      a.fields.map((f) => [f.sig, f.line]),
+      [['f:int', 3]],
+      '字段名、类型与声明行',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * 把 `types.idx` 整体解成对象。**与 `src/decl_index.rs::parse_with` 逐字段对应**：
+ * 两边任何一侧改了写法，这条测试都会红（这是它存在的唯一理由）。
+ */
+function parseIdx(buf) {
+  const typeCount = buf.readInt32BE(12);
+  const pathCount = buf.readInt32BE(16);
+  let p = 48; // 头部定长，见 decl_index.rs::HEADER_LEN
+  const str = () => {
+    const n = buf.readUInt16BE(p);
+    p += 2;
+    const s = buf.toString('utf8', p, p + n);
+    p += n;
+    return s;
+  };
+  const i32 = () => {
+    const v = buf.readInt32BE(p);
+    p += 4;
+    return v;
+  };
+  const paths = [];
+  for (let i = 0; i < pathCount; i++) paths.push(str());
+  const out = [];
+  for (let i = 0; i < typeCount; i++) {
+    const kind = buf[p++];
+    const fromJar = buf[p++] !== 0;
+    const pathIdx = i32();
+    const line = i32();
+    const name = str();
+    const members = (n) =>
+      Array.from({ length: n }, () => {
+        const sig = str();
+        return { sig, line: i32() };
+      });
+    const methods = members(i32());
+    const fields = members(i32());
+    out.push({ kind, fromJar, path: paths[pathIdx], line, name, methods, fields });
+  }
+  assert.equal(p, buf.length, '解析长度与文件长度不符：记录区写法与读取端不一致');
+  return out;
+}

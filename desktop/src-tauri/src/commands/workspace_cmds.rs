@@ -21,6 +21,13 @@ use crate::workspace::{self, DirItem, Eol, FileContent, NewEntryKind, TextEncodi
 pub fn restart_watcher(app: &tauri::AppHandle, state: &AppState, root: &str) {
     let handle = app.clone();
     let emit: Arc<dyn Fn(crate::watcher::WatchBatch) + Send + Sync> = Arc::new(move |batch| {
+        // 顺带把外部改动的 `.java` 推给 jdt.ls：影子源根是 junction，它自己看不见
+        // 穿透后的改动（见 `lang_cmds::notify_external_changes` 的注释）。
+        // 放在 emit 之前：文件树刷新与「语言服务知道代码变了」是两条独立链路，
+        // 前者失败不该拖住后者。
+        if !batch.java.is_empty() {
+            super::lang_cmds::notify_external_changes(&handle, &batch.java);
+        }
         if let Err(e) = handle.emit(
             "fs-changed",
             serde_json::json!({

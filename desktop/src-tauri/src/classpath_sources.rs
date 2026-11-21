@@ -341,6 +341,7 @@ mod tests {
         let jars = vec![(jar, Some(attached))];
         let rendered = crate::shadow::render_classpath(&crate::shadow::ClasspathInputs {
             src_dirs: &[],
+            src_outputs: &[],
             class_dirs: &[],
             jars: &jars,
         });

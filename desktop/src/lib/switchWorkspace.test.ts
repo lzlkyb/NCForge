@@ -13,7 +13,9 @@ vi.mock("./editorStore", () => ({
   // workspaceSession 在模块加载时就会订阅 dirty 变化，缺了它整个模块起不来
   onDirtyChange: () => () => {},
 }));
-vi.mock("./lang", () => ({ stopLang: mocks.stopLang }));
+// `applyWorkspace` 切完工作区会预热代码智能（`prepareLang`，见阶段 2 的 lang_prepare）。
+// 打桩成 no-op：这条用例只关心会话/页签的清理顺序。
+vi.mock("./lang", () => ({ stopLang: mocks.stopLang, prepareLang: vi.fn(async () => {}) }));
 vi.mock("./javaRunLifecycle", () => ({ withJavaRunsStopped: async (work: () => Promise<string>) => { await mocks.cancelJava(); return work(); } }));
 
 import { applyWorkspace } from "./switchWorkspace";

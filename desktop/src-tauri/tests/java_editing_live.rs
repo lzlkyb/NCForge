@@ -207,6 +207,7 @@ fn formatting_and_real_parameter_names() {
                 data_dir: &temp.0.join("data"),
                 config_dir: &temp.0.join("cfg"),
                 xmx_mb: 600,
+                syntax_server: false,
             }
             .command()
             .unwrap(),

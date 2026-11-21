@@ -332,6 +332,7 @@ fn 跨模块断点_探针() {
         data_dir: &base.join("data"),
         config_dir: &base.join("cfg"),
         xmx_mb: 1024,
+        syntax_server: false,
     };
     let lsp = LspClient::spawn(launch.command().unwrap(), Arc::new(Quiet)).expect("jdt.ls 起不来");
     lsp.request(

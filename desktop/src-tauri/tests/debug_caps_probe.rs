@@ -336,6 +336,7 @@ fn java_debug_capabilities_探针() {
         data_dir: &base.join("data"),
         config_dir: &base.join("cfg"),
         xmx_mb: 1024,
+        syntax_server: false,
     };
     let lsp = LspClient::spawn_with_stderr(
         launch.command().unwrap(),

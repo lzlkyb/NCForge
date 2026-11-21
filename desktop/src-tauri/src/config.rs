@@ -13,6 +13,29 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// 影子工程的形态（见 `shadow::ShadowSpec::extra_modules`）。
+///
+/// - `Flat`：一个 jdt.ls 工程挂全工作区的源根 —— NC 官方 Eclipse 就是这种形态
+///   （1 project + 223 src 根 + 63 模块），也是「切模块不重启」的前提。
+/// - `Single`：只挂当前模块。2026-11-21 之前的行为，留作回滚。
+// @ts-mirror —— 生成成字面量联合 `"flat" | "single"`，前端设置页要拿它做开关
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ShadowMode {
+    #[default]
+    Flat,
+    Single,
+}
+
+impl ShadowMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShadowMode::Flat => "flat",
+            ShadowMode::Single => "single",
+        }
+    }
+}
+
 /// 应用配置。字段即「跨重启需要记住的设置」；一次性状态不要放这里。
 // @ts-mirror response —— 生成到 `src/lib/bindings.generated.ts`，前端 `appConfig.ts` 断言相等
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +119,12 @@ pub struct AppConfig {
     /// jdt.ls 堆上限（MB）。`None` = 默认 1024（见 `lang::DEFAULT_XMX_MB`）。
     #[serde(default)]
     pub lang_xmx_mb: Option<u32>,
+    /// 影子工程形态：`flat`（默认，一个实例覆盖全工作区）/ `single`（只挂当前模块）。
+    ///
+    /// 切 `single` 是唯一的回滚路径：行为与 2026-11-21 之前完全一致，不需要回滚代码。
+    /// 见 `docs/NCForge-智能代码-实施方案-2026-11-21.md` 阶段 2。
+    #[serde(default)]
+    pub lang_shadow_mode: ShadowMode,
     /// 启动服务/编译成功后，把工程模块的 `META-INF/*.upm` 等元数据投送到 NCHOME。
     ///
     /// 默认开：不投送时「改了 upm 不生效」没有任何提示，排查成本远高于多写几百 KB。
@@ -344,6 +373,7 @@ impl Default for AppConfig {
             db_conns_init: false,
             lang_enabled: true,
             lang_auto_start: true,
+            lang_shadow_mode: ShadowMode::Flat,
             lang_xmx_mb: None,
             deploy_on_start: true,
             hotswap_enabled: true,

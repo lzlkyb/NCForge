@@ -141,6 +141,7 @@ fn refactor(case: &str, range: Value) -> Value {
         data_dir: &data,
         config_dir: &cfg,
         xmx_mb: 1024,
+        syntax_server: false,
     };
     let lsp = LspClient::spawn(launch.command().unwrap(), Arc::new(Quiet)).expect("jdt.ls 起不来");
     lsp.request(
@@ -262,6 +263,7 @@ fn 影子工程映射下提取变量返回真实路径() {
         data_dir: &base.join("data"),
         config_dir: &base.join("cfg"),
         xmx_mb: 1024,
+        syntax_server: false,
     };
     let lsp = LspClient::spawn(launch.command().unwrap(), Arc::new(Quiet)).expect("jdt.ls 起不来");
     lsp.request(

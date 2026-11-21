@@ -1,13 +1,14 @@
 import { useEffect, useRef } from "react";
-import { ensureLang, initLang, setNavHandler } from "../lib/lang";
+import { ensureLang, initLang, prepareLang, setNavHandler } from "../lib/lang";
 import { initCompileMarkers } from "../lib/compileMarkers";
 import { initSemanticTokens } from "../lib/semanticTokens";
-import { getSession } from "../lib/workspaceSession";
+import { getSession, useWorkspaceRoot } from "../lib/workspaceSession";
 
 /**
  * 把代码智能接到文件页：
  * - 挂载时初始化一次（订阅后端事件，幂等）；
- * - 切到 .java 文件时确保其所在模块有语言服务；
+ * - 工作区就绪即**预热**（flat 冷导要几分钟，别等用户点第一个 .java 才开始）；
+ * - 切到 .java 文件时确保其所在模块有语言服务（后端幂等，同工作区不重启）；
  * - 登记「跳转目标怎么打开」：F12 / Ctrl+点击落在另一个文件或 jar 内的类时由文件页切标签。
  */
 export function useLangWiring({
@@ -25,6 +26,12 @@ export function useLangWiring({
     // ecj 标记不依赖 jdt.ls：服务关着时它是编辑器里唯一能看到编译错误的途径
     initCompileMarkers();
   }, []);
+
+  // 预热不看 activePath：用户先开的是 .md 或 .sql 时，代码智能同样该在后台准备好
+  const root = useWorkspaceRoot();
+  useEffect(() => {
+    if (root) prepareLang(root);
+  }, [root]);
 
   useEffect(() => {
     if (activePath) ensureLang(activePath);

@@ -1,5 +1,6 @@
 import { getModel, getText, markSaved } from "./editorStore";
 import { captureLocalHistory } from "./localHistory";
+import { notifyLangSaved } from "./lang";
 import { notifyLocalSave } from "./localSaves";
 import { baseName, writeFile, type Eol, type TextEncoding } from "./workspace";
 import { isHistoryRestoring } from "./historyRestoreGuard";
@@ -99,5 +100,8 @@ export async function saveOne(tab: SaveTarget, opts: SaveOptions = {}): Promise<
   // 事件只在真的落盘后发：写盘失败（冲突 / UNENCODABLE）时文件没变，
   // 发出去会多一条幻影轮，还会把已审角标连后端标记一起清掉。
   notifyLocalSave(tab.path, archivedId ?? undefined);
+  // 语言服务也想知道这一份变了（junction 源根它自己看不见，见 `notifyLangSaved`）。
+  // 不 await：保存已经成功，通知慢一拍不该拖住保存。
+  notifyLangSaved(tab.path);
   return { mtimeMs, encoding, hasBom, converted: !!opts.encodingOverride };
 }

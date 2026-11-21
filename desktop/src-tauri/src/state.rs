@@ -34,6 +34,7 @@ pub struct AppState {
     config_write: tokio::sync::Mutex<()>,
     /// 配置目录（`{config_dir}`，与 data_dir 相同）。
     pub config_dir: std::path::PathBuf,
+    pub(crate) language_cache: std::sync::RwLock<()>,
     /// NC 中间件的运行态（起/停/日志都以它为准）。
     ///
     /// 用 `std::sync::Mutex` 而不是 tokio 的：起停是阻塞操作（杀进程要等 200ms 级），
@@ -72,6 +73,11 @@ pub struct AppState {
     pub db_schemas: std::sync::Mutex<std::collections::HashMap<String, String>>,
     /// 代码智能（jdt.ls）会话与状态。同样在 `spawn_blocking` 里持锁，用 std Mutex。
     pub lang: std::sync::Mutex<crate::lang::LangRun>,
+    /// Phase 1 声明索引（`types.idx`）。
+    ///
+    /// 与 `lang` 分开：jdt.ls 没起来（甚至没装）它也能用，只有换工作区才整体替换。
+    /// 详见 `crate::fast_decl` 的头注释。
+    pub fast_decl: std::sync::Mutex<crate::fast_decl::Holder>,
     /// 调试会话（java-debug 的 DAP 连接）。与语言服务是两条独立连接。
     pub debug: std::sync::Mutex<crate::debug::DebugRun>,
     /// 编译的取消标志。
@@ -154,6 +160,7 @@ impl AppState {
             config: RwLock::new(config),
             config_write: tokio::sync::Mutex::new(()),
             config_dir,
+            language_cache: std::sync::RwLock::new(()),
             server: std::sync::Mutex::new(ServerRun::default()),
             client: std::sync::Mutex::new(ServerRun::default()),
             svn: std::sync::Mutex::new(None),
@@ -162,6 +169,7 @@ impl AppState {
             db_procs: std::sync::Mutex::new(Default::default()),
             db_schemas: std::sync::Mutex::new(Default::default()),
             lang: std::sync::Mutex::new(Default::default()),
+            fast_decl: std::sync::Mutex::new(Default::default()),
             debug: std::sync::Mutex::new(Default::default()),
             compile_cancel: std::sync::atomic::AtomicBool::new(false),
             hotswap: std::sync::Mutex::new(Default::default()),

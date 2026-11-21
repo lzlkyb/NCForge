@@ -180,6 +180,7 @@ fn 类型层级在影子工程下返回父类子类与真实路径() {
         data_dir: &base.join("data"),
         config_dir: &base.join("cfg"),
         xmx_mb: 1024,
+        syntax_server: false,
     };
     let lsp = LspClient::spawn(launch.command().unwrap(), Arc::new(Quiet)).expect("jdt.ls 起不来");
     let init = lsp

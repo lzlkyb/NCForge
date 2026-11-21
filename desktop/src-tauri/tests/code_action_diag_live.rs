@@ -88,6 +88,7 @@ fn write_project(ws: &Path) -> PathBuf {
         ws.join(".classpath"),
         nc_forge::shadow::render_classpath(&nc_forge::shadow::ClasspathInputs {
             src_dirs: &["src".into()],
+            src_outputs: &[],
             class_dirs: &[],
             jars: &[],
         }),
@@ -168,6 +169,7 @@ fn 传真实诊断能拿到快速修复而传空数组拿不到() {
         data_dir: &data,
         config_dir: &cfg,
         xmx_mb: 1024,
+        syntax_server: false,
     };
     let handler = Arc::new(CollectDiags::default());
     // stderr 落盘：jdt.ls 起不来时唯一的线索在这里（默认 spawn 会丢进 NUL）。

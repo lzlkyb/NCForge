@@ -318,10 +318,13 @@ html[data-ui-style] .dbx-sql-overflow :is(.monaco-hover, .parameter-hints-widget
 /* 最近一次执行的语句行痕：与光标跟随的 stmt-hl 不同，它执行后常驻、下次执行整块替换。 */
 .dbx-runline { background: hsl(var(--primary) / .07); }
 .dbx-region-label { flex:none; color:var(--color-muted-foreground); font-size:var(--dbx-fs-meta); font-weight:600; white-space:nowrap; }
+/* 通栏线默认不画：编辑器白底 ↔ 结果头 muted 底本身就分层，分隔不靠描边（DESIGN.md R4
+   「能靠留白就不断线」）。悬停 / 拖动 / 聚焦时下面的规则把线切回主色，作为「抓住了」的
+   反馈；居中小手柄留作拖拽入口，命中区与键盘行为不变。 */
 .dbx-splitbar {
   position:relative; height:5px; flex:none; cursor:row-resize; touch-action:none;
-  --dbx-split-line:color-mix(in srgb, var(--color-foreground) 24%, var(--color-border));
-  --dbx-split-grip:color-mix(in srgb, var(--color-foreground) 60%, var(--color-border));
+  --dbx-split-line:transparent;
+  --dbx-split-grip:color-mix(in srgb, var(--color-foreground) 45%, var(--color-border));
 }
 .dbx-splitbar::before, .dbx-splitbar::after { content:""; position:absolute; top:50%; pointer-events:none; }
 .dbx-splitbar::before { inset-inline:0; height:1px; transform:translateY(-50%); background:var(--dbx-split-line); }

@@ -99,6 +99,7 @@ fn java_completion_acceptance() {
         root.join(".classpath"),
         render_classpath(&ClasspathInputs {
             src_dirs: &["src".into()],
+            src_outputs: &[],
             class_dirs: &[],
             jars: &jars,
         }),
@@ -121,6 +122,7 @@ fn java_completion_acceptance() {
             data_dir: &temp.0.join("data"),
             config_dir: &temp.0.join("cfg"),
             xmx_mb: 768,
+            syntax_server: false,
         }
         .command()
         .unwrap(),

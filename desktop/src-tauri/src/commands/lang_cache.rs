@@ -20,7 +20,7 @@ const CACHE_SUBDIR: &str = "jdtls-ws";
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LangCacheStats {
-    /// 有几份缓存（一个「工程 + 模块」一份）。
+    /// 有几份缓存（一个「工程 + 形态」一份：flat 下全工作区只占一份，single 回滚路径才按模块）。
     pub count: usize,
     /// 合计占用字节数。目录很大时遍历要一点时间，所以这个命令是 async 的。
     pub bytes: u64,
@@ -58,7 +58,11 @@ fn dir_size(dir: &Path) -> u64 {
 
 fn busy(state: &AppState) -> bool {
     let run = state.lang.lock().unwrap_or_else(|e| e.into_inner());
-    run.session.is_some()
+    in_use(&run)
+}
+
+pub(crate) fn in_use(run: &crate::lang::LangRun) -> bool {
+    run.session.is_some() || matches!(run.status.state.as_str(), "starting" | "indexing" | "ready")
 }
 
 /// 缓存现状。语言服务在跑时仍然可以统计（读的是磁盘，不碰进程）。
@@ -96,13 +100,19 @@ pub async fn lang_cache_stats(state: State<'_, Arc<AppState>>) -> Result<LangCac
 /// 删掉的表现是「代码智能突然报错」，而用户只是想腾点空间。
 #[tauri::command]
 pub async fn lang_cache_clear(state: State<'_, Arc<AppState>>) -> Result<usize, String> {
-    if busy(&state) {
-        return Err("代码智能正在运行，先停止再清理索引缓存".into());
-    }
+    let state = state.inner().clone();
     let root = cache_root(&state);
     tauri::async_runtime::spawn_blocking(move || {
+        let _cache = state
+            .language_cache
+            .try_write()
+            .map_err(|_| "代码智能正在准备索引，稍后再清理".to_string())?;
+        let run = state.lang.lock().unwrap_or_else(|error| error.into_inner());
+        if in_use(&run) {
+            return Err("代码智能正在运行，先停止再清理索引缓存".into());
+        }
         let Ok(rd) = std::fs::read_dir(&root) else {
-            return 0usize;
+            return Ok(0usize);
         };
         let dirs: Vec<PathBuf> = rd
             .flatten()
@@ -115,10 +125,10 @@ pub async fn lang_cache_clear(state: State<'_, Arc<AppState>>) -> Result<usize, 
                 removed += 1;
             }
         }
-        removed
+        Ok(removed)
     })
     .await
-    .map_err(|e| format!("清理索引缓存失败: {e}"))
+    .map_err(|e| format!("清理索引缓存失败: {e}"))?
 }
 
 #[cfg(test)]

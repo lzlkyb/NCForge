@@ -193,6 +193,14 @@ pub struct JdtlsLaunch<'a> {
     /// jdt.ls 运行时会往配置目录写缓存，装在 Program Files 之类的位置时没有写权限。
     pub config_dir: &'a Path,
     pub xmx_mb: u32,
+    /// `true` = 以**语法服务器**身份启动（`-Dsyntaxserver=true`）。
+    ///
+    /// 🔴 **生产恒为 `false`**，只给 `tests/syntax_probe.rs` 复现实测用：语法服务器的
+    /// `SyntaxProjectsManager.importProjects()` 是空实现（不导入工程），0.57 里实测
+    /// `documentSymbol`/`definition` 全空 —— 拿不到任何跨文件跳转。
+    /// 详见 `docs/NCForge-GitHub调研-加速方案-2026-11-21.md` §2。
+    /// 留着开关是因为它是唯一能解释「为什么不该用它」的可执行证据。
+    pub syntax_server: bool,
 }
 
 impl JdtlsLaunch<'_> {
@@ -257,14 +265,18 @@ impl JdtlsLaunch<'_> {
             "-Dosgi.bundles.defaultStartLevel=4",
             "-Declipse.product=org.eclipse.jdt.ls.core.product",
             "-noverify",
-        ])
-        .arg(format!("-Xmx{}m", self.xmx_mb))
-        .arg("-jar")
-        .arg(launcher)
-        .arg("-configuration")
-        .arg(config)
-        .arg("-data")
-        .arg(self.data_dir);
+        ]);
+        // 🔴 必须在 `-jar` 之前：放到 launcher 后面就成了 Equinox 的程序参数，JVM 不认。
+        if self.syntax_server {
+            cmd.arg("-Dsyntaxserver=true");
+        }
+        cmd.arg(format!("-Xmx{}m", self.xmx_mb))
+            .arg("-jar")
+            .arg(launcher)
+            .arg("-configuration")
+            .arg(config)
+            .arg("-data")
+            .arg(self.data_dir);
         Ok(cmd)
     }
 }
@@ -854,6 +866,7 @@ pub(crate) mod tests {
             data_dir: Path::new("data"),
             config_dir: &cfg,
             xmx_mb: 1024,
+            syntax_server: false,
         };
         assert!(
             spec.command().is_err(),
@@ -929,6 +942,7 @@ pub(crate) mod tests {
             data_dir: data,
             config_dir: &data.with_extension("cfg"),
             xmx_mb: 512,
+            syntax_server: false,
         }
         .command()
         .unwrap();

@@ -71,3 +71,6 @@ desktop/.gitee-token
 # 启动耗时基线：**机器相关**，入库没意义（换台机器就是另一套数字）。
 # 由 `npm run boot:update` 在需要校验的机器上生成；缺失时校验脚本自动跳过。
 desktop/scripts/boot-budget.json
+
+# 索引器探针的编译产物（源码留在 tools/index-probe）
+tools/index-probe/out/

@@ -18,11 +18,20 @@ import {
 import { monaco } from "./monacoSetup";
 import { registerJavaCompletion } from "./javaCompletion";
 import { navigationHover, registerNavigationCommand } from "./navigationHover";
+import { invoke } from "./tauri";
 import { context, type Ctx } from "./langProviderContext";
 export { context, type Ctx } from "./langProviderContext";
 
 type Model = ReturnType<typeof monaco.editor.createModel>;
 type Pos = { lineNumber: number; column: number };
+
+/** 后端 `lang_fast_definition` 的返回项：LSP Location + 两个诊断字段。 */
+interface FastLoc {
+  uri: string;
+  range: LspRange;
+  name?: string;
+  fromJar?: boolean;
+}
 
 /** Monaco 的 uri 字符串 → jdt.ls 给出的原始地址。打开跳转目标时要用原始地址查。 */
 const originalUri = new Map<string, string>();
@@ -63,8 +72,10 @@ type Loc = { uri: ReturnType<typeof monaco.Uri.parse>; range: ReturnType<typeof 
 
 /**
  * 轻量模式的跳转：jdt.ls 不可用（关闭 / 还没就绪 / 文件不在当前模块）时，
- * 按光标下的类名在工作区里找 `类名.java` 的声明行。只找工作区里的源码（NC 标准类在 jar 里，跳不到），
- * 也不认方法和变量——这就是「有限跳转」的全部范围。
+ * 先问 Phase 1 声明索引（`lang_fast_definition`），索引没命中再退回「按类名搜工作区源码」。
+ *
+ * 索引覆盖**源码 + jar 两侧**：jar 里的类返回 `jdt://` 地址，点开走既有的反编译标签页
+ * （`registerEditorOpener` 拦截）。内容搜索只覆盖源码 —— 这也是加索引的主要动机。
  */
 /**
  * 按类名缓存搜索结果。Monaco 在按住 Ctrl 移动鼠标时会对经过的每个单词调 provideDefinition，
@@ -102,8 +113,33 @@ async function lightDefinition(model: Model, pos: Pos): Promise<Loc[] | null> {
   const path = pathOfModel(model);
   const root = getSession().root;
   if (!path || !root || !path.toLowerCase().endsWith(".java")) return null;
+
+  // 先问 Phase 1 声明索引：毫秒级、行号来自 AST（jdt.ls 没就绪时索引已经能答）。
+  // 没建好 / 没命中一律返回空数组 —— 后端刻意不报错，这里直接落到下面的内容搜索。
+  const fast = await invoke<FastLoc[]>("lang_fast_definition", {
+    path,
+    line: pos.lineNumber,
+    character: Math.max(0, pos.column - 1),
+  }).catch(() => null);
+  if (fast && fast.length) {
+    if (epoch !== workspaceEpoch() || model.isDisposed() || version !== model.getVersionId()) return null;
+    const out: Loc[] = [];
+    for (const t of fast) {
+      // jar 目标**不预建 model**（不像下面 ask 那条路会 `loadJdtSource(peek)`）：
+      // jdt.ls 没就绪时 peek 走不了 `java/classFileContents`，只剩 CFR 反编译一路，
+      // 而 Ctrl+悬停会对经过的每个类名调一次。代价换不来东西 —— 用户真要打开时
+      // `registerEditorOpener` 会拦下 `jdt://` 并走反编译标签页，那里有缓存。
+      const uri = monaco.Uri.parse(t.uri);
+      rememberUri(uri.toString(), t.uri);
+      out.push({ uri, range: toMonacoRange(t.range) });
+    }
+    return out;
+  }
+
   const word = model.getWordAtPosition(pos)?.word;
-  // 类名按 Java 习惯大写开头；小写开头的是变量 / 方法，这个模式本来就跳不到，别白扫一遍盘
+  // 走到这里说明索引没答上（没建好 / 没命中）。内容搜索只认**大写开头的类名**：
+  // 小写的方法名、变量名现在由后端的成员级跳转负责（`vo.getCode()` / 局部变量），
+  // 那层没答上时再扫一遍盘也只会捞到一堆调用点，不值得等那几秒。
   if (!word || !isIdentifier(word) || !/^[A-Z]/.test(word)) return null;
   const found = await searchDeclarations(word);
   if (!found || epoch !== workspaceEpoch() || model.isDisposed() || version !== model.getVersionId()) return null;
@@ -212,7 +248,12 @@ export function registerLangProviders(): void {
         rememberUri(uri.toString(), t.uri);
         out.push({ uri, range: toMonacoRange(t.range) });
       }
-      return current() ? out : null;
+      if (!current()) return null;
+      // jdt.ls 给了空结果（类不在 classpath / 该模块没链上 / 光标不在可解析符号上）时，
+      // 退回声明索引 + 内容搜索。索引查询是本地二分（微秒级），而「Ctrl+点击什么都不发生」
+      // 正是 NC 工程里最常见、也最让人怀疑工具坏了的失败态。
+      if (out.length === 0) return lightDefinition(model, position);
+      return out;
     },
   });
 

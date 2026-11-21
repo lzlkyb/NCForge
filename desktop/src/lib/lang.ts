@@ -529,7 +529,7 @@ export async function initLang(): Promise<void> {
  * 拿到确定结论后必须把标记清掉，否则那条「不确定」会一直挂在状态栏上。
  */
 /**
- * 索引缓存现状：一份 = 一个「工程 + 模块」。
+ * 索引缓存现状：一份 = 一个「工程 + 形态」（flat 下一个实例覆盖全工作区，不再按模块分）。
  *
  * 多项目切换时要看它：缓存命中就秒级就绪，被挤掉了就重头索引一遍。
  */
@@ -598,7 +598,10 @@ function freshIntent(): number {
 }
 
 /**
- * 打开 / 切到一个 .java 文件时调用：该文件所在模块还没有语言服务就拉起（切模块 = 重启）。
+ * 打开 / 切到一个 .java 文件时调用：该文件所在模块还没有语言服务就拉起。
+ *
+ * 后端自己判幂等（`flat` 形态下一份实例覆盖全工作区，同工作区不会重启，
+ * 只把「当前页模块」标签换成这里传的模块），所以这里不用再按模块名去猜。
  * 同一模块上次失败过不自动重试，避免循环弹错；用户可以手动重启。
  */
 export function ensureLang(path: string): void {
@@ -618,6 +621,51 @@ export function ensureLang(path: string): void {
       });
     });
   }, START_DEBOUNCE_MS);
+}
+
+/**
+ * 文件落盘后告诉语言服务（`textDocument/didSave`），让它重读这一份。
+ *
+ * 🔴 必须显式发：影子工程的源根是 junction，jdt.ls 自己监视不到（2026-11-21 实测）。
+ * 不发的话，刚改的方法名在另一个模块里跳过去还是旧位置。
+ *
+ * 不 `await`、不报错：保存已经成功了，通知失败最多是智能提示慢一拍，
+ * 绝不能因为语言服务没跑就让「保存文件」失败。
+ */
+export function notifyLangSaved(path: string): void {
+  if (!prefs.enabled) return;
+  if (!path.toLowerCase().endsWith(".java")) return;
+  void invoke("lang_notify", { method: "textDocument/didSave", path, params: {} }).catch(() => {});
+}
+
+/**
+ * 打开工作区后预热：不等用户点第一个 `.java`，先把 flat 影子工程与 jdt.ls 拉起来。
+ *
+ * 后端立即返回、冷导进度走 `lang-status`，所以这里 fire-and-forget 即可。
+ * 同一工作区只发一次（换工作区时 `root` 变化会重新发）；`single` 形态下后端直接返回，
+ * 不会白导一遍。
+ *
+ * 🔴 **必须走 `serialize` 队列**：切工作区时 `applyWorkspace` 先 `stopLang()`（进队列），
+ * 紧接着调这里。不排队的话两条 IPC 并发，stop 可能落在 launch 登记之后把它杀掉，
+ * 或者更糟——先 stop 后 launch，cancel_epoch 已经变过，launch 自己退场，预热静默失效。
+ *
+ * 代际用**调用时**的 `intentGen`（`stopLang` 已自增过）：排队到执行时若又停过一次，
+ * 说明目标已过期，直接放弃。
+ */
+let preparedRoot: string | null = null;
+
+export function prepareLang(root: string): void {
+  if (!prefs.enabled || !prefs.autoStart) return;
+  if (preparedRoot === root) return;
+  preparedRoot = root;
+  const gen = intentGen;
+  void serialize(async () => {
+    if (gen !== intentGen) return;
+    await invoke("lang_prepare").catch(() => {
+      // 预热失败不该弹任何东西：用户点第一个 .java 时会走 ensureLang 再试一次
+      if (preparedRoot === root) preparedRoot = null;
+    });
+  });
 }
 
 /** 「自动启动」关掉时，状态栏的「启动」按钮走这里：不防抖、不看自动开关。 */

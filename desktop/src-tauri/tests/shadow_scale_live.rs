@@ -395,6 +395,7 @@ fn build_multi_project(
             index,
             extra_jars: &[],
             overrides: &[],
+            extra_modules: None,
         };
         match shadow::generate(&spec) {
             Ok(p) => {
@@ -429,8 +430,9 @@ fn build_multi_project(
 
 /// 造一个「单 project 多源根」影子工作区（flat 形态）。
 ///
-/// 手工拼 `.classpath`：`shadow::generate` 只支持单模块，这里把每个模块的源根
-/// 都塞进同一个 project。jar 段沿用 ic 的（够解析用，实测关注的是源根数量的影响）。
+/// 走 `shadow::generate` 的 `extra_modules` 分支（= 生产路径），不再手工拼 `.classpath`：
+/// 旧版只拿 `ic` 的 jar 段拼，测出来的 classpath 比生产实际的小得多（生产是全体 import
+/// 的并集），boot 时间会被低估。
 fn build_flat(
     base: &Path,
     ws: &Path,
@@ -440,7 +442,6 @@ fn build_flat(
 ) -> (PathBuf, usize, usize, u64) {
     let root = base.join("flat-ws");
     let _ = std::fs::create_dir_all(root.join(".settings"));
-    // 先用生产逻辑生成 ic 那份，拿到 jar / class 目录段
     let spec = ShadowSpec {
         workspace_root: ws,
         module: "ic",
@@ -449,42 +450,14 @@ fn build_flat(
         index,
         extra_jars: &[],
         overrides: &[],
+        extra_modules: Some(mods),
     };
-    let mut files = 0;
-    if let Ok(p) = shadow::generate(&spec) {
-        files += p.source_files;
-    }
-    // 其余模块建 junction 并追加源根
-    let mut extra_src = String::new();
-    for m in mods.iter().filter(|m| m.as_str() != "ic") {
-        let link = root.join(m);
-        if !link.exists() {
-            let _ = shadow::ensure_link(&link, &ws.join(m), &mut Vec::new());
-        }
-        for s in ["src/public", "src/client", "src/private"] {
-            if ws.join(m).join(s).is_dir() {
-                extra_src.push_str(&format!(
-                    "\t<classpathentry kind=\"src\" path=\"{m}/{s}\"/>\n"
-                ));
-            }
-        }
-        files += count_java(&ws.join(m));
-    }
-    let cp_path = root.join(".classpath");
-    if let Ok(xml) = std::fs::read_to_string(&cp_path) {
-        // 插到 JRE_CONTAINER 之前，保持「源码在前」的既有顺序约定
-        let anchor = "<classpathentry kind=\"con\"";
-        let merged = match xml.find(anchor) {
-            Some(i) => {
-                let head = xml[..i].trim_end();
-                format!("{head}\n{extra_src}{}", &xml[i..])
-            }
-            None => xml.replace("</classpath>", &format!("{extra_src}</classpath>")),
-        };
-        let _ = std::fs::write(&cp_path, merged);
-    }
-    let kb = std::fs::metadata(&cp_path).map(|x| x.len()).unwrap_or(0) / 1024;
-    (root, 1, files, kb)
+    let p = shadow::generate(&spec).expect("flat 影子生成失败");
+    let kb = std::fs::metadata(root.join(".classpath"))
+        .map(|x| x.len())
+        .unwrap_or(0)
+        / 1024;
+    (root, p.modules.len(), p.source_files, kb)
 }
 
 // 三种模式的建场参数各不一样，硬拆成 struct 只是把噪音搬到另一个文件
@@ -517,6 +490,7 @@ fn run_one(
                 index,
                 extra_jars: &[],
                 overrides: &[],
+                extra_modules: None,
             };
             let p = shadow::generate(&spec).unwrap();
             let kb = std::fs::metadata(shadow.join(".classpath"))
@@ -549,6 +523,7 @@ fn run_one(
         data_dir: &data,
         config_dir: &case.join("jdtls-config"),
         xmx_mb: 2048,
+        syntax_server: false,
     }
     .command()
     .unwrap();
@@ -846,5 +821,964 @@ fn 影子工程规模对import耗时的影响_三组对照() {
     // 唯一硬断言：生产基线必须能就绪，否则整个实测无意义
     if let Some(s) = rows.iter().find(|r| r.mode == "single") {
         assert!(s.ready, "生产基线（single）都没就绪，实测环境有问题");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// S0：warm 复用 + 增量是否生效
+//
+// 规划 `docs/NCForge-智能代码-单索引常驻-规划-2026-11-21.md` S0 的两个阻塞项：
+// 1. **flat warm** —— 同一 data/config 目录第二次导入要多久，决定 S4 要不要做双进程
+// 2. **增量是否生效** —— 不重启引擎时，磁盘上的文件变化能不能进索引
+//
+// 为什么单独写而不复用 `run_one`：`run_one` 每次都 `remove_dir_all(case)` 且现造 data 目录，
+// 结构性排除了 warm；增量则要在同一个会话里做「改文件 → 再查询」，`run_one` 是启动即关。
+// ─────────────────────────────────────────────────────────────────────────
+
+/// 起一次 jdt.ls 并等到 ServiceReady，返回 (client, initialize 秒, ready 秒, 是否就绪)。
+///
+/// 🔴 `data` 与 `config` 由调用方给：**第二次必须传同一个**才算 warm
+/// （jdt.ls 的 workspace 索引在 `-data`，OSGi 缓存在 `-configuration`，少复用哪一半都不算）。
+///
+/// `#[allow(too_many_arguments)]`：8 个参数确实多，但与 `run_one` 同样理由 ——
+/// 硬拆成 struct 只是把「传什么」搬到另一个文件，参数校验反而更弱。
+/// （clippy 是 `-D warnings`，CI 上这个不能当警告放过。）
+#[allow(clippy::too_many_arguments)]
+fn boot_flat(
+    root: &Path,
+    data: &Path,
+    config: &Path,
+    log_dir: &Path,
+    home: &Path,
+    ls: &Path,
+    timeout: Duration,
+    syntax: bool,
+    tag: &str,
+) -> (LspClient, f32, f32, bool) {
+    let _ = std::fs::create_dir_all(log_dir);
+    let rec = Arc::new(Rec::default());
+    let t0 = Instant::now();
+    let cmd = JdtlsLaunch {
+        java_exe: &home.join("ufjdk/bin/java.exe"),
+        ls_dir: ls,
+        data_dir: data,
+        config_dir: config,
+        xmx_mb: 2048,
+        syntax_server: syntax,
+    }
+    .command()
+    .unwrap_or_else(|e| panic!("{tag}: 组装 jdt.ls 命令失败 {e}"));
+    let stderr_log = log_dir.join(format!("{tag}-stderr.log"));
+    let client = LspClient::spawn_with_stderr(cmd, Arc::new(H(rec.clone(), t0)), &stderr_log)
+        .unwrap_or_else(|e| panic!("{tag}: 拉起 jdt.ls 失败 {e}"));
+    let root_s = root.to_string_lossy().into_owned();
+    let runtime = home.join("ufjdk").to_string_lossy().into_owned();
+    let init = build_initialize_params(&root_s, &runtime, std::process::id(), &[]);
+    client
+        .request("initialize", init, Duration::from_secs(300))
+        .unwrap_or_else(|e| panic!("{tag}: initialize 失败 {e}"));
+    let init_secs = t0.elapsed().as_secs_f32();
+    client.notify("initialized", json!({})).unwrap();
+    client
+        .notify(
+            "workspace/didChangeConfiguration",
+            json!({ "settings": build_settings(&runtime) }),
+        )
+        .unwrap();
+    while !rec.ready.load(Ordering::SeqCst) && t0.elapsed() < timeout {
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    let ready_secs = t0.elapsed().as_secs_f32();
+    let ready = rec.ready.load(Ordering::SeqCst);
+    println!(
+        "[量] {tag}: initialize {init_secs:.1}s → ready {ready_secs:.1}s（{}）",
+        if ready { "就绪" } else { "超时" }
+    );
+    (client, init_secs, ready_secs, ready)
+}
+
+#[test]
+#[ignore = "需要真实工作区 + jdt.ls + JDK8；两轮全量导入，最长 30 分钟"]
+fn s0_flat_warm_同一data目录导入两次() {
+    let ws = workspace();
+    let home = nc_home();
+    let ls = ls_dir();
+    assert!(ws.join("ic").is_dir(), "工作区不可用：{}", ws.display());
+    assert!(
+        ls.join("plugins").is_dir(),
+        "jdt.ls 不可用：{}",
+        ls.display()
+    );
+    assert!(
+        home.join("ufjdk/bin/java.exe").is_file(),
+        "JDK 不可用：{}",
+        home.display()
+    );
+
+    let timeout = Duration::from_secs(
+        std::env::var("NCFORGE_SCALE_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(900),
+    );
+    let cache = perf_dir().join("scale-class-index.bin");
+    let t = Instant::now();
+    let index = ClassIndex::load_or_build(classpath_jars(&home), Some(&cache), None);
+    println!(
+        "[量] 类索引 {} jar / {} 类，{:.1}s（有缓存时这段接近 0，不计入 flat 差异）",
+        index.jars.len(),
+        index.class_count(),
+        t.elapsed().as_secs_f32()
+    );
+
+    let case = perf_dir().join("s0-warm");
+    let _ = std::fs::remove_dir_all(&case);
+    std::fs::create_dir_all(&case).unwrap();
+
+    // 全量模块：warm 要测的是「全量索引能不能被复用」，模块少就失去意义
+    let mods = modules(&ws, usize::MAX);
+    let t_build = Instant::now();
+    let (root, _, files, kb) = build_flat(&case, &ws, &mods, &index, &home);
+    println!(
+        "[量] 建场 {:.1}s：{} 个模块 / {} 个源文件 / classpath {}KB",
+        t_build.elapsed().as_secs_f32(),
+        mods.len(),
+        files,
+        kb
+    );
+
+    let data = case.join("jdtls-data");
+    let config = case.join("jdtls-config");
+    let logs = case.join("logs");
+
+    let (c1, i1, r1, ok1) = boot_flat(
+        &root, &data, &config, &logs, &home, &ls, timeout, false, "cold",
+    );
+    let peak1 = peak_memory_mb(&data);
+    c1.shutdown();
+    // 等 JVM 真正退出：data 目录的索引要 flush 完，否则第二轮读的是半截
+    std::thread::sleep(Duration::from_secs(5));
+
+    let (c2, i2, r2, ok2) = boot_flat(
+        &root, &data, &config, &logs, &home, &ls, timeout, false, "warm",
+    );
+    let peak2 = peak_memory_mb(&data);
+    let cross = if ok2 {
+        // warm 场景也要验一次语义可用（不能只是「起得快」）
+        let probe = add_probe_source_root(&root);
+        probe_cross_module(&c2, &probe)
+    } else {
+        "未就绪".to_string()
+    };
+    c2.shutdown();
+
+    let mut md = String::from("# flat 的 cold vs warm（同一 data/config 目录）\n\n");
+    md.push_str(&format!(
+        "工作区 `{}`，{} 个模块 / {} 个源文件，classpath {}KB，Xmx 2048MB。\n\n",
+        ws.display(),
+        mods.len(),
+        files,
+        kb
+    ));
+    md.push_str(
+        "| 轮次 | initialize s | ServiceReady s | 就绪 | 峰值 MB |\n|---|---|---|---|---|\n",
+    );
+    for (tag, i, r, ok, peak) in [
+        ("cold（全新 data）", i1, r1, ok1, peak1),
+        ("**warm（同一 data）**", i2, r2, ok2, peak2),
+    ] {
+        md.push_str(&format!(
+            "| {tag} | {i:.1} | {r:.1} | {} | {} |\n",
+            if ok { "是" } else { "否" },
+            peak.map(|(_, mb, _)| format!("{mb:.0}"))
+                .unwrap_or_else(|| "n/a".into())
+        ));
+    }
+    md.push_str(&format!(
+        "\nwarm 跨模块 definition → {cross}\n\n\
+         > 判读：warm 若显著低于 cold，S4 可以直接等（不必做双进程）；\n\
+         > 若 warm ≈ cold，说明缓存没命中，要先查 `.classpath` 指纹是否每次都在变。\n"
+    ));
+    let out = perf_dir().join("shadow-s0-warm.md");
+    let _ = std::fs::write(&out, &md);
+    println!("\n{md}");
+    println!("[出] 结论：{}", out.display());
+
+    assert!(ok1 && ok2, "两轮都必须就绪，否则 warm 数据不可比");
+}
+
+/// 问一次 definition，取 (目标文件名, 起始行 0 基)。失败返回 Err。
+fn def_site(client: &LspClient, uri: &str, line: u32, ch: u32) -> Result<(String, u32), String> {
+    let v = client
+        .request(
+            "textDocument/definition",
+            json!({ "textDocument": { "uri": uri }, "position": { "line": line, "character": ch } }),
+            Duration::from_secs(60),
+        )
+        .map_err(|e| e.to_string())?;
+    let first = v
+        .as_array()
+        .and_then(|a| a.first())
+        .cloned()
+        .unwrap_or(Value::Null);
+    let target = first["targetUri"]
+        .as_str()
+        .or_else(|| first["uri"].as_str())
+        .ok_or_else(|| format!("definition 无目标：{}", truncate(&v.to_string(), 200)))?;
+    let range = if first["range"].is_object() {
+        &first["range"]
+    } else {
+        &first["targetRange"]
+    };
+    let ln = range["start"]["line"].as_u64().unwrap_or(u64::MAX) as u32;
+    let name = target.rsplit('/').next().unwrap_or(target).to_string();
+    Ok((name, ln))
+}
+
+#[test]
+#[ignore = "需要真实工作区 + jdt.ls + JDK8；含 3 次 10 秒等待"]
+fn s0_增量_外部改文件后跳转是否更新() {
+    let ws = workspace();
+    let home = nc_home();
+    let ls = ls_dir();
+    assert!(ws.join("ic").is_dir(), "工作区不可用：{}", ws.display());
+    assert!(
+        ls.join("plugins").is_dir(),
+        "jdt.ls 不可用：{}",
+        ls.display()
+    );
+
+    let timeout = Duration::from_secs(
+        std::env::var("NCFORGE_SCALE_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(600),
+    );
+    let cache = perf_dir().join("scale-class-index.bin");
+    let index = ClassIndex::load_or_build(classpath_jars(&home), Some(&cache), None);
+
+    // 增量与模块规模无关，3 个模块足够启动
+    let mods = modules(&ws, 3);
+    let case = perf_dir().join("s0-incremental");
+    let _ = std::fs::remove_dir_all(&case);
+    std::fs::create_dir_all(&case).unwrap();
+    let (root, _, _, _) = build_flat(&case, &ws, &mods, &index, &home);
+
+    // 🔴 只在影子工程自己的 probe-src 里造文件，**绝不改用户源码树**
+    // （2026-11-17 教训：第一版探针直接写到 junction 目标，在用户工作区留下垃圾）
+    let probe = add_probe_source_root(&root);
+    let pkg = probe.join("ncforge/probe");
+    std::fs::create_dir_all(&pkg).unwrap();
+    let a_path = pkg.join("IncA.java");
+    let b_path = pkg.join("IncB.java");
+    // IncA 里 `IncB.target` 的 target 从第 2 行第 17 列开始
+    let a_text = "package ncforge.probe;\npublic class IncA {\n    int v = IncB.target();\n}\n";
+    let b_v1 =
+        "package ncforge.probe;\npublic class IncB {\n    public static int target() { return 1; }\n}\n";
+    // 头部插两行注释：语义不变，只把 target 从第 2 行推到第 4 行
+    let b_v2 = "// moved 1\n// moved 2\npackage ncforge.probe;\npublic class IncB {\n    public static int target() { return 1; }\n}\n";
+    std::fs::write(&a_path, a_text).unwrap();
+    std::fs::write(&b_path, b_v1).unwrap();
+
+    let data = case.join("jdtls-data");
+    let config = case.join("jdtls-config");
+    let logs = case.join("logs");
+    let (client, _, _, ready) = boot_flat(
+        &root, &data, &config, &logs, &home, &ls, timeout, false, "inc",
+    );
+    assert!(ready, "服务未就绪");
+
+    let a_uri = path_to_uri(&a_path.to_string_lossy());
+    client
+        .notify(
+            "textDocument/didOpen",
+            json!({ "textDocument": { "uri": a_uri, "languageId": "java", "version": 1, "text": a_text } }),
+        )
+        .unwrap();
+    std::thread::sleep(Duration::from_secs(10));
+
+    let before = def_site(&client, &a_uri, 2, 18);
+    println!("[量] 改动前 definition → {before:?}（期望 IncB.java 第 2 行）");
+
+    // 只改磁盘，不发任何通知 —— 这模拟 SVN 更新 / 在 Eclipse 里改
+    std::fs::write(&b_path, b_v2).unwrap();
+    std::thread::sleep(Duration::from_secs(10));
+    let self_watch = def_site(&client, &a_uri, 2, 18);
+    println!("[量] 改后不发通知（等 10s）→ {self_watch:?}");
+
+    // 再显式推一次 didChangeWatchedFiles（S2.5 要实现的通道）
+    let b_uri = path_to_uri(&b_path.to_string_lossy());
+    client
+        .notify(
+            "workspace/didChangeWatchedFiles",
+            json!({ "changes": [ { "uri": b_uri, "type": 2 } ] }),
+        )
+        .unwrap();
+    std::thread::sleep(Duration::from_secs(8));
+    let after_notify = def_site(&client, &a_uri, 2, 18);
+    println!("[量] 推送 didChangeWatchedFiles 后 → {after_notify:?}");
+
+    client.shutdown();
+
+    let verdict = |r: &Result<(String, u32), String>| match r {
+        Ok((n, l)) => format!("{n}:{l}"),
+        Err(e) => format!("失败 {e}"),
+    };
+    let saw_self = matches!(&self_watch, Ok((n, l)) if n.contains("IncB") && *l == 4);
+    let saw_notify = matches!(&after_notify, Ok((n, l)) if n.contains("IncB") && *l == 4);
+
+    let mut md = String::from("# 增量：外部改文件后跳转会不会更新\n\n");
+    md.push_str(&format!(
+        "影子工程 `{}`，探针 `{}`。改的是 `IncB.java` 头部注释（target 从第 2 行推到第 4 行）。\n\n",
+        root.display(),
+        b_path.display()
+    ));
+    md.push_str("| 时刻 | definition 落点 |\n|---|---|\n");
+    md.push_str(&format!("| 改动前 | {} |\n", verdict(&before)));
+    md.push_str(&format!(
+        "| 改后不发通知（10s） | {} |\n",
+        verdict(&self_watch)
+    ));
+    md.push_str(&format!(
+        "| 推送 `didChangeWatchedFiles` 后 | {} |\n",
+        verdict(&after_notify)
+    ));
+    md.push_str(&format!(
+        "\n## 结论\n\n\
+         - jdt.ls 自己感知 junction 后的真实文件变化：**{}**\n\
+         - 显式推送 `workspace/didChangeWatchedFiles` 有效：**{}**\n\n\
+         > {}\n",
+        if saw_self { "是" } else { "**否**" },
+        if saw_notify { "是" } else { "**否**" },
+        if saw_notify {
+            "⇒ S2.5 按「自己推 didChangeWatchedFiles」实现即可，不依赖 jdt.ls 的文件监视。"
+        } else if saw_self {
+            "⇒ jdt.ls 自己能感知，S2.5 可以简化；但 junction 的监视语义仍建议显式推一次兜底。"
+        } else {
+            "⇒ **两条都不生效**：flat 之后索引会冻结在导入那一刻，S2.5 必须先解决这个再上 S1。"
+        }
+    ));
+    let out = perf_dir().join("shadow-s0-incremental.md");
+    let _ = std::fs::write(&out, &md);
+    println!("\n{md}");
+    println!("[出] 结论：{}", out.display());
+}
+
+/// 往工程的 `.classpath` 里追加一条源根（幂等）。`add_probe_source_root` 是它的特例。
+///
+/// 为什么需要通用版：junction 测试要加一个**不是** `probe-src` 的源根，而
+/// `add_probe_source_root` 把名字写死成 `probe-src` 且只用一次。
+fn add_src_root(project_dir: &Path, name: &str) -> PathBuf {
+    let dir = project_dir.join(name);
+    let _ = std::fs::create_dir_all(&dir);
+    let cp = project_dir.join(".classpath");
+    if let Ok(xml) = std::fs::read_to_string(&cp) {
+        let needle = format!("path=\"{name}\"");
+        if !xml.contains(&needle) {
+            let entry = format!("\t<classpathentry kind=\"src\" path=\"{name}\"/>\n");
+            let merged = match xml.find("</classpath>") {
+                Some(i) => format!("{}{}{}", &xml[..i], entry, &xml[i..]),
+                None => format!("{xml}{entry}"),
+            };
+            let _ = std::fs::write(&cp, merged);
+        }
+    }
+    dir
+}
+
+/// **junction 源根**能不能感知外部改动 —— 这才是生产形态。
+///
+/// 上一条 `s0_增量_外部改文件后跳转是否更新` 的 `probe-src` 是影子工程**自己的真实目录**，
+/// 只证明了「jdt.ls 能感知自己工程里的文件变化」。生产里每个模块根都是
+/// `mklink /J` 到真实工作区，jdt.ls 的 watcher 挂在 junction 路径上，
+/// 目标目录的 mtime 变化能不能穿透过来是**另一件事**（Windows 上 junction 的 FindFirstChangeNotification
+/// 行为与普通目录不同）。
+///
+/// 所以这里自建一条 junction 指向**工程外的临时目录**（不碰用户源码），改那个真实文件，
+/// 看 junction 路径上的源根是否跟着更新。
+#[test]
+#[ignore = "需要真实工作区 + jdt.ls + JDK8；含 3 次等待"]
+fn s0_增量_junction源根能否感知外部改动() {
+    let ws = workspace();
+    let home = nc_home();
+    let ls = ls_dir();
+    assert!(ws.join("ic").is_dir(), "工作区不可用：{}", ws.display());
+    assert!(
+        ls.join("plugins").is_dir(),
+        "jdt.ls 不可用：{}",
+        ls.display()
+    );
+
+    let timeout = Duration::from_secs(
+        std::env::var("NCFORGE_SCALE_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(600),
+    );
+    let cache = perf_dir().join("scale-class-index.bin");
+    let index = ClassIndex::load_or_build(classpath_jars(&home), Some(&cache), None);
+    let mods = modules(&ws, 3);
+    let case = perf_dir().join("s0-junction");
+    let _ = std::fs::remove_dir_all(&case);
+    std::fs::create_dir_all(&case).unwrap();
+    let (root, _, _, _) = build_flat(&case, &ws, &mods, &index, &home);
+
+    // 真实目录在工程外（模拟用户工作区里的模块源码），junction 在影子工程内
+    let real = case.join("jreal");
+    let real_pkg = real.join("ncforge/probe");
+    std::fs::create_dir_all(&real_pkg).unwrap();
+    let jreal_file = real_pkg.join("Junc.java");
+    let j_v1 =
+        "package ncforge.probe;\npublic class Junc {\n    public static int value() { return 7; }\n}\n";
+    // 头部插两行，把 value 从第 2 行推到第 4 行
+    let j_v2 = "// moved A\n// moved B\npackage ncforge.probe;\npublic class Junc {\n    public static int value() { return 7; }\n}\n";
+    std::fs::write(&jreal_file, j_v1).unwrap();
+
+    let link = root.join("probe-junc");
+    if !link.exists() {
+        shadow::ensure_link(&link, &real, &mut Vec::new()).unwrap_or_else(|e| {
+            panic!(
+                "建 junction 失败（{} → {}）：{e}",
+                link.display(),
+                real.display()
+            )
+        });
+    }
+    // 🔴 必须在 jdt.ls 启动前加源根：import 时读 .classpath，之后加不生效
+    add_src_root(&root, "probe-junc");
+
+    // 引用 Junc 的类放在另一个真实源根（probe-src），避免「同目录内改动」被当成普通 edit
+    let probe = add_probe_source_root(&root);
+    let pkg = probe.join("ncforge/probe");
+    std::fs::create_dir_all(&pkg).unwrap();
+    let d_path = pkg.join("IncD.java");
+    let d_text = "package ncforge.probe;\npublic class IncD {\n    int w = Junc.value();\n}\n";
+    std::fs::write(&d_path, d_text).unwrap();
+
+    let data = case.join("jdtls-data");
+    let config = case.join("jdtls-config");
+    let logs = case.join("logs");
+    let (client, _, _, ready) = boot_flat(
+        &root, &data, &config, &logs, &home, &ls, timeout, false, "junc",
+    );
+    assert!(ready, "服务未就绪");
+
+    let d_uri = path_to_uri(&d_path.to_string_lossy());
+    client
+        .notify(
+            "textDocument/didOpen",
+            json!({ "textDocument": { "uri": d_uri, "languageId": "java", "version": 1, "text": d_text } }),
+        )
+        .unwrap();
+    std::thread::sleep(Duration::from_secs(12));
+
+    // `    int w = Junc.value();` → Junc 起于 12，value 起于 17
+    let before = def_site(&client, &d_uri, 2, 19);
+    println!("[量] junction 改动前 → {before:?}（期望 Junc.java 第 2 行）");
+    if before.is_err() {
+        // 诊断：类名能解析说明源根在、只是方法没索引；类名也不行则是 probe-junc 没被当源根
+        println!(
+            "[诊] 同文件里 `Junc` 类名的 definition → {:?}",
+            def_site(&client, &d_uri, 2, 14)
+        );
+    }
+
+    // 通过**真实路径**改（等价于 SVN 更新 / Eclipse 里改），junction 侧只看得到结果
+    std::fs::write(&jreal_file, j_v2).unwrap();
+    std::thread::sleep(Duration::from_secs(12));
+    let self_watch = def_site(&client, &d_uri, 2, 19);
+    println!("[量] junction 改后不发通知（12s）→ {self_watch:?}");
+
+    // 兜底通道：显式推 junction 侧的 URI（生产里 S2.5 就这么做）
+    let link_file = link.join("ncforge/probe/Junc.java");
+    let link_uri = path_to_uri(&link_file.to_string_lossy());
+    client
+        .notify(
+            "workspace/didChangeWatchedFiles",
+            json!({ "changes": [ { "uri": link_uri, "type": 2 } ] }),
+        )
+        .unwrap();
+    std::thread::sleep(Duration::from_secs(10));
+    let after_notify = def_site(&client, &d_uri, 2, 19);
+    println!("[量] junction 推送通知后 → {after_notify:?}");
+
+    client.shutdown();
+
+    let verdict = |r: &Result<(String, u32), String>| match r {
+        Ok((n, l)) => format!("{n}:{l}"),
+        Err(e) => format!("失败 {e}"),
+    };
+    let saw_self = matches!(&self_watch, Ok((n, l)) if n.contains("Junc") && *l == 4);
+    let saw_notify = matches!(&after_notify, Ok((n, l)) if n.contains("Junc") && *l == 4);
+
+    let mut md = String::from("# 增量：junction 源根能否感知外部改动（生产形态）\n\n");
+    md.push_str(&format!(
+        "junction `{}` → 真实目录 `{}`。改真实文件，看 junction 侧源根是否更新。\n\n",
+        link.display(),
+        real.display()
+    ));
+    md.push_str("| 时刻 | definition 落点 |\n|---|---|\n");
+    md.push_str(&format!("| 改动前 | {} |\n", verdict(&before)));
+    md.push_str(&format!(
+        "| 改后不发通知（12s） | {} |\n",
+        verdict(&self_watch)
+    ));
+    md.push_str(&format!(
+        "| 推送 `didChangeWatchedFiles`（junction URI）后 | {} |\n",
+        verdict(&after_notify)
+    ));
+    md.push_str(&format!(
+        "\n## 结论\n\n\
+         - junction 源根自己感知真实文件变化：**{}**\n\
+         - 显式推 junction URI 有效：**{}**\n\n\
+         > {}\n",
+        if saw_self { "是" } else { "**否**" },
+        if saw_notify { "是" } else { "**否**" },
+        if saw_notify && !saw_self {
+            "⇒ junction 不穿透（或不可靠），**S2.5 必须显式推 didChangeWatchedFiles**，且 URI 用 junction 侧路径。"
+        } else if saw_notify && saw_self {
+            "⇒ 两条都有效：jdt.ls 能穿透 junction，S2.5 可只做保底（批量更新/超时后补推）。"
+        } else {
+            "⇒ **两条都不生效**：flat 之后索引会冻结在导入那一刻，S2.5 必须先解决这个再上 S1。"
+        }
+    ));
+    let out = perf_dir().join("shadow-s0-junction.md");
+    let _ = std::fs::write(&out, &md);
+    println!("\n{md}");
+    println!("[出] 结论：{}", out.display());
+}
+
+/// **import 期间能不能跳转** —— 决定 S4 是「双进程」还是「单实例渐进可用」。
+///
+/// 背景：S0 已测出 flat 的 import 要 3~6 分钟（warm 也不省），而 Eclipse/IDEA 同样体量的
+/// workspace 却不必干等 —— 它们的做法是「UI 先出、索引进后台」（IDEA 的 dumb mode、
+/// Eclipse 的 splash + background job）。jdt.ls 没有这个契约，客户端只能等 `ServiceReady`。
+///
+/// 但状态轨迹显示 jdt.ls 是**逐个 project 导入**的（`Starting` 事件密集出现）。如果
+/// 已导入的部分能响应 `definition`，那就不该等 ServiceReady —— 直接边导边用，
+/// 体感最接近 Eclipse，也不需要双进程（省 700MB 内存和一套切换逻辑）。
+///
+/// 做法：`initialize` 返回后立刻 `didOpen` 一个引用 **so 模块类型**的探针文件，
+/// 然后每 3 秒问一次 definition，记录「第几秒开始有结果」与 `ServiceReady` 的时刻。
+///
+/// 判读：
+/// - 结果早于 ServiceReady 很多 → **单实例渐进可用**，S4 改成「不阻塞 UI + 前缀进度」
+/// - 只在 ServiceReady 后才有   → 只能双进程（S4 原方案）
+#[test]
+#[ignore = "需要真实工作区 + jdt.ls + JDK8；最长 6 分钟"]
+fn s0_import期间能否响应跳转() {
+    let ws = workspace();
+    let home = nc_home();
+    let ls = ls_dir();
+    assert!(ws.join("ic").is_dir(), "工作区不可用：{}", ws.display());
+    assert!(
+        ls.join("plugins").is_dir(),
+        "jdt.ls 不可用：{}",
+        ls.display()
+    );
+
+    let cache = perf_dir().join("scale-class-index.bin");
+    let index = ClassIndex::load_or_build(classpath_jars(&home), Some(&cache), None);
+    // 3 个模块：够触发「多 project 逐个导入」，又不至于等太久
+    let mods = modules(&ws, 3);
+    let case = perf_dir().join("s0-early");
+    let _ = std::fs::remove_dir_all(&case);
+    std::fs::create_dir_all(&case).unwrap();
+    let (root, _, files, _) = build_flat(&case, &ws, &mods, &index, &home);
+    println!("[量] 建场完成：{} 个模块 / {} 个源文件", mods.len(), files);
+
+    // 探针：引用 so 模块的 DeliveryVO（跨模块，必须等 so 导入后才可能有结果）
+    let probe = add_probe_source_root(&root);
+    let pkg = probe.join("ncforge/probe");
+    std::fs::create_dir_all(&pkg).unwrap();
+    let probe_path = pkg.join("EarlyProbe.java");
+    let probe_text = "package ncforge.probe;\nimport nc.vo.so.m4331.entity.DeliveryVO;\npublic class EarlyProbe {\n    DeliveryVO vo;\n}\n";
+    std::fs::write(&probe_path, probe_text).unwrap();
+
+    let rec = Arc::new(Rec::default());
+    let t0 = Instant::now();
+    let data = case.join("jdtls-data");
+    let config = case.join("jdtls-config");
+    let cmd = JdtlsLaunch {
+        java_exe: &home.join("ufjdk/bin/java.exe"),
+        ls_dir: &ls,
+        data_dir: &data,
+        config_dir: &config,
+        xmx_mb: 2048,
+        syntax_server: false,
+    }
+    .command()
+    .unwrap();
+    let stderr_log = case.join("early-stderr.log");
+    let client = LspClient::spawn_with_stderr(cmd, Arc::new(H(rec.clone(), t0)), &stderr_log)
+        .expect("拉起 jdt.ls 失败");
+
+    let root_s = root.to_string_lossy().into_owned();
+    let runtime = home.join("ufjdk").to_string_lossy().into_owned();
+    let init = build_initialize_params(&root_s, &runtime, std::process::id(), &[]);
+    client
+        .request("initialize", init, Duration::from_secs(300))
+        .unwrap();
+    let init_at = t0.elapsed().as_secs_f32();
+    client.notify("initialized", json!({})).unwrap();
+    client
+        .notify(
+            "workspace/didChangeConfiguration",
+            json!({ "settings": build_settings(&runtime) }),
+        )
+        .unwrap();
+
+    let pem_uri = path_to_uri(&probe_path.to_string_lossy());
+    client
+        .notify(
+            "textDocument/didOpen",
+            json!({ "textDocument": { "uri": pem_uri, "languageId": "java", "version": 1, "text": probe_text } }),
+        )
+        .unwrap();
+    println!("[量] didOpen 于 {init_at:.1}s（initialize 刚返回）");
+
+    // 每 3 秒问一次，直到拿到结果 / 就绪 / 超时
+    let mut timeline: Vec<(f32, String)> = Vec::new();
+    let mut first_hit: Option<f32> = None;
+    let mut ready_at: Option<f32> = None;
+    let deadline = Duration::from_secs(420);
+    while t0.elapsed() < deadline {
+        let at = t0.elapsed().as_secs_f32();
+        let is_ready = rec.ready.load(Ordering::SeqCst);
+        if is_ready && ready_at.is_none() {
+            ready_at = Some(at);
+        }
+        // definition 用短超时：import 期间可能不响应，别让一次请求卡住整个循环
+        let r = client.request(
+            "textDocument/definition",
+            json!({ "textDocument": { "uri": pem_uri }, "position": { "line": 3, "character": 6 } }),
+            Duration::from_secs(8),
+        );
+        let desc = match &r {
+            Ok(v) => {
+                let n = v.as_array().map_or(0, Vec::len);
+                let has_src = v
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .and_then(|f| f["targetUri"].as_str().or_else(|| f["uri"].as_str()))
+                    .map(|u| !u.contains("jdt://"))
+                    .unwrap_or(false);
+                if n == 0 {
+                    "empty".to_string()
+                } else if has_src {
+                    "SRC".to_string()
+                } else {
+                    format!("{n} 项(非源码)")
+                }
+            }
+            Err(e) => format!(
+                "timeout/err:{}",
+                e.to_string().chars().take(30).collect::<String>()
+            ),
+        };
+        println!("[量] {at:>6.1}s  ready={is_ready}  definition={desc}");
+        timeline.push((at, desc.clone()));
+        if first_hit.is_none() && desc == "SRC" {
+            first_hit = Some(at);
+        }
+        // 拿到源码结果且已就绪就收工；没就绪但已能跳也够了（这本身就是结论）
+        if first_hit.is_some() && ready_at.is_some() {
+            break;
+        }
+        if first_hit.is_some() && at > first_hit.unwrap() + 12.0 {
+            break;
+        }
+        std::thread::sleep(Duration::from_secs(3));
+    }
+    client.shutdown();
+
+    let ready_at = ready_at.or(Some(t0.elapsed().as_secs_f32()));
+    let mut md = String::from("# import 期间能否跳转（能否不等 ServiceReady）\n\n");
+    md.push_str(&format!(
+        "{} 个模块 / {} 个源文件。`initialize` 返回于 {init_at:.1}s，随后立刻 didOpen 探针。\n\n",
+        mods.len(),
+        files
+    ));
+    md.push_str("| 时刻 | 就绪 | definition |\n|---|---|---|\n");
+    for (at, d) in &timeline {
+        md.push_str(&format!(
+            "| {at:.1}s | {} | {d} |\n",
+            if ready_at.map(|r| *at >= r).unwrap_or(false) {
+                "是"
+            } else {
+                "否"
+            }
+        ));
+    }
+    md.push_str(&format!(
+        "\n## 结论\n\n- 首次拿到**源码跳转**：{}\n- ServiceReady：{}\n- 提前量：{}\n\n",
+        first_hit
+            .map(|t| format!("{t:.1}s"))
+            .unwrap_or_else(|| "**始终没有**".into()),
+        ready_at
+            .map(|t| format!("{t:.1}s"))
+            .unwrap_or_else(|| "未就绪".into()),
+        match (first_hit, ready_at) {
+            (Some(f), Some(r)) if r > f => format!("**{:.1}s**（可边导边用）", r - f),
+            (Some(f), _) => format!("{f:.1}s（早于就绪）"),
+            _ => "无".into(),
+        }
+    ));
+    md.push_str(
+        "> 判读：提前量显著（> 30s）⇒ 单实例渐进可用，S4 不必双进程；\n\
+         > 只有就绪后才有结果 ⇒ 只能双进程。\n",
+    );
+    let out = perf_dir().join("shadow-s0-early.md");
+    let _ = std::fs::write(&out, &md);
+    println!("\n{md}");
+    println!("[出] 结论：{}", out.display());
+}
+
+/// 阶段 2 的核心验收：**生产 `shadow::generate` 的 flat 形态**能不能被 jdt.ls 正确导入，
+/// 且**一个实例**能跨模块跳转。
+///
+/// 与 `s0_flat_*` 的区别：那些是手工拼 `.classpath` 的一次性实验（`build_flat`）；这里
+/// 走的是产品代码 —— `extra_modules: Some(全模块)`、per-src `output="shadow-bin/<m>"`、
+/// 按「真有 .java」筛源根。跑通才算 flat 可用，也是「切模块不重启」的前提。
+///
+/// 耗时：`select_jars` 约 95s + 导入 130~360s，合计 4~8 分钟。
+#[test]
+#[ignore = "需要真实工作区 + jdt.ls + JDK8；一次全量导入 4~8 分钟"]
+fn s2_生产flat_单实例跨模块跳转() {
+    let ws = workspace();
+    let home = nc_home();
+    let ls = ls_dir();
+    assert!(ls.join("plugins").is_dir(), "jdt.ls 不可用");
+    assert!(home.join("ufjdk/bin/java.exe").is_file(), "JDK 不可用");
+
+    let timeout = Duration::from_secs(
+        std::env::var("NCFORGE_SCALE_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(900),
+    );
+    let want: usize = std::env::var("NCFORGE_SCALE_MODULES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(6);
+    let all = shadow::workspace_modules(&ws);
+    assert!(all.len() > 1, "工作区里模块不足：{}", all.len());
+
+    // 🔴 先找跨模块引用再定模块清单：反过来（先截断清单再找引用）会因截断后的模块之间
+    //    恰好没有调用而白跑一趟（2026-11-21 踩过）。
+    let Some((src_file, line, ch, other, target_cls)) = cross_module_ref(&ws, &all) else {
+        panic!("{} 个模块里没找到跨模块 import", all.len());
+    };
+    let src_mod = src_file
+        .strip_prefix(&ws)
+        .ok()
+        .and_then(|r| r.components().next())
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .expect("引用文件必须落在某个模块目录下");
+    let mut mods = vec![src_mod.clone(), other.clone()];
+    for m in &all {
+        if mods.len() >= want.max(2) {
+            break;
+        }
+        if !mods.contains(m) {
+            mods.push(m.clone());
+        }
+    }
+    println!(
+        "[场] 引用 {}/{} 行{} → {}（模块 {}）；本次链 {} 个模块",
+        src_mod,
+        src_file.file_name().unwrap_or_default().to_string_lossy(),
+        line + 1,
+        target_cls,
+        other,
+        mods.len()
+    );
+
+    let case = perf_dir().join("s2-flat-prod");
+    let _ = std::fs::remove_dir_all(&case);
+    std::fs::create_dir_all(&case).unwrap();
+    let shadow_dir = case.join("shadow");
+    let cache = perf_dir().join("scale-class-index.bin");
+    let index = ClassIndex::load_or_build(classpath_jars(&home), Some(&cache), None);
+
+    let t_build = Instant::now();
+    let project = shadow::generate(&ShadowSpec {
+        workspace_root: &ws,
+        module: &src_mod,
+        nc_home: &home,
+        shadow_dir: &shadow_dir,
+        index: &index,
+        extra_jars: &[],
+        overrides: &[],
+        extra_modules: Some(&mods),
+    })
+    .unwrap_or_else(|e| panic!("flat 影子生成失败：{e}"));
+    let build_secs = t_build.elapsed().as_secs_f32();
+    println!(
+        "[量] 生产 flat 建场 {build_secs:.1}s：{} 个模块 / {} 个源文件 / {} 个 jar",
+        project.modules.len(),
+        project.source_files,
+        project.jar_count
+    );
+    // 形态断言：清单里每个模块都真的链进来了（少一个就说明 sweep/筛选把它丢了）
+    for m in &mods {
+        assert!(
+            project.modules.iter().any(|x| x == m),
+            "模块 {m} 没有进影子工程：{:?}",
+            project.modules
+        );
+        assert!(shadow_dir.join(m).is_dir(), "模块 {m} 的 junction 不存在");
+    }
+    // 🔴 红线：flat 的每条源根都带 output，且 output 必须落在 `shadow-bin/` 内。
+    //    照抄 NC 官方的 `<模块>/classes` 会经 junction 把 class 写进用户工作区。
+    let cp = std::fs::read_to_string(shadow_dir.join(".classpath")).unwrap_or_default();
+    let src_entries: Vec<&str> = cp.lines().filter(|l| l.contains("kind=\"src\"")).collect();
+    assert!(!src_entries.is_empty(), ".classpath 里没有源根");
+    for l in &src_entries {
+        assert!(
+            l.contains(&format!("output=\"{}/", nc_forge::shadow::OUTPUT_DIR)),
+            "源根缺 shadow-bin output：{l}"
+        );
+    }
+
+    let data = case.join("jdtls-data");
+    let config = case.join("jdtls-config");
+    let logs = case.join("logs");
+    let (client, init_secs, ready_secs, ready) = boot_flat(
+        &shadow_dir,
+        &data,
+        &config,
+        &logs,
+        &home,
+        &ls,
+        timeout,
+        false,
+        "prod",
+    );
+    assert!(ready, "flat 实例没有就绪（{ready_secs:.1}s 超时）");
+
+    // 🔴 必须相对**模块真实目录**再拼影子根：`Path::join(绝对路径)` 会整个替换，
+    // 传绝对的 src_file 得到的是真实文件的 URI，jdt.ls 不认识 ⇒ definition 恒空。
+    let rel = src_file
+        .strip_prefix(ws.join(&src_mod))
+        .unwrap_or_else(|_| panic!("{} 不在模块 {} 下", src_file.display(), src_mod));
+    let shadow_file = shadow_dir.join(&src_mod).join(rel);
+    // 自检：影子侧这份必须真的存在（junction 建错了会在这里先炸，而不是等 definition 超时）
+    assert!(
+        shadow_file.is_file(),
+        "影子侧文件不存在：{}",
+        shadow_file.display()
+    );
+    let uri = path_to_uri(&shadow_file.to_string_lossy());
+    println!("[场] definition 起点：{}", shadow_file.display());
+    let t_def = Instant::now();
+    let (target_name, target_line) =
+        def_site(&client, &uri, line, ch).unwrap_or_else(|e| panic!("跨模块 definition 失败：{e}"));
+    let def_secs = t_def.elapsed().as_secs_f32();
+    let expect = format!("{target_cls}.java");
+    println!(
+        "[量] 跨模块 definition {def_secs:.2}s → {target_name}:{}",
+        target_line + 1
+    );
+    assert_eq!(
+        target_name, expect,
+        "跳转目标不是 {expect}（拿到 {target_name}）—— flat 导入没把两个模块连起来"
+    );
+    client.shutdown();
+
+    let md = format!(
+        "# 生产 flat 单实例跨模块跳转\n\n\
+         > 判读：本测试**通过**才是阶段 2 可用的证据；跳错或超时说明 flat 影子工程\n\
+         > 没被正确导入，别急着做阶段 3/4。\n\n\
+         | 项 | 值 |\n|---|---|\n\
+         | 链入模块 | {} |\n\
+         | 源文件 | {} |\n\
+         | jar | {} |\n\
+         | 建场（含 select_jars） | {build_secs:.1}s |\n\
+         | initialize 返回 | {init_secs:.1}s |\n\
+         | ServiceReady | {ready_secs:.1}s |\n\
+         | 跨模块 definition | {def_secs:.2}s → {target_name}:{} |\n\n\
+         > 实测说 `shadow-bin`：每条源根都显式声明输出，且输出落在影子目录内 ——\n\
+         > 源根是 junction，照抄官方的 `<模块>/classes` 会写进用户工作区。\n",
+        project.modules.len(),
+        project.source_files,
+        project.jar_count,
+        target_line + 1,
+    );
+    let out = perf_dir().join("shadow-s2-flat-prod.md");
+    let _ = std::fs::write(&out, &md);
+    println!("\n{md}");
+    println!("[出] 结论：{}", out.display());
+}
+
+/// 找一处真实的跨模块 import：返回（引用方源文件, 行, 类名的列, 被引用方模块）。
+fn cross_module_ref(ws: &Path, mods: &[String]) -> Option<(PathBuf, u32, u32, String, String)> {
+    const SRCS: [&str; 3] = ["src/private", "src/public", "src/client"];
+    for m in mods {
+        let mut files = Vec::new();
+        for d in SRCS {
+            java_files(&ws.join(m).join(d), &mut files, 400);
+        }
+        for f in files {
+            // 只看文件头：import 块一定在最前面，读全文在上万个文件上白费 I/O
+            let Ok(bytes) = std::fs::read(&f) else {
+                continue;
+            };
+            let head = &bytes[..bytes.len().min(8192)];
+            let txt = String::from_utf8_lossy(head);
+            for (i, line) in txt.lines().enumerate().take(80) {
+                let t = line.trim();
+                let Some(rest) = t.strip_prefix("import ") else {
+                    continue;
+                };
+                let Some(fqn) = rest.strip_suffix(';') else {
+                    continue;
+                };
+                let Some((pkg, cls)) = fqn.rsplit_once('.') else {
+                    continue;
+                };
+                if pkg.starts_with("java.") || pkg.starts_with("javax.") {
+                    continue;
+                }
+                let rel = format!("{}/{}.java", pkg.replace('.', "/"), cls);
+                for other in mods.iter().filter(|x| *x != m) {
+                    if !SRCS
+                        .iter()
+                        .any(|s| ws.join(other).join(s).join(&rel).is_file())
+                    {
+                        continue;
+                    }
+                    // 🔴 列号相对**原始行**算：`t` 是 trim 过的，行首有缩进时
+                    // rfind 的结果会偏小（2026-11-21 在 syntax_probe 里踩过）。
+                    // 类名在 import 行末尾，用 rfind 避免命中包名里的同名前缀。
+                    let ch = line.rfind(cls).unwrap_or(0) as u32;
+                    // 第 5 项是**被引用的类名**：跳转目标是它所在的文件，不是引用方自己
+                    // （2026-11-21 首轮把 `src_file.file_name()` 当期望值，断言必错）
+                    return Some((f.clone(), i as u32, ch, other.clone(), cls.to_string()));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 递归收集 `.java`，最多 `limit` 个（找一处引用就够，不必扫全）。
+fn java_files(dir: &Path, out: &mut Vec<PathBuf>, limit: usize) {
+    if out.len() >= limit {
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in rd.flatten() {
+        if out.len() >= limit {
+            return;
+        }
+        let p = e.path();
+        if p.is_dir() {
+            java_files(&p, out, limit);
+        } else if p.extension().and_then(|x| x.to_str()) == Some("java") {
+            out.push(p);
+        }
     }
 }

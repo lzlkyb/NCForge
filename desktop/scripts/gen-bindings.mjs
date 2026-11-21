@@ -34,7 +34,7 @@ const check = process.argv.includes("--check");
 const update = process.argv.includes("--update");
 
 const sources = walk(RUST_DIR).map((f) => ({ file: relative(ROOT, f).split("\\").join("/"), text: readFileSync(f, "utf8") }));
-const { structs, errors } = parseMirrors(sources);
+const { structs, enums, errors } = parseMirrors(sources);
 
 if (errors.length) {
   console.error("✗ ts-mirror 解析失败（宁可报错也不生成半对的类型）：");
@@ -46,9 +46,12 @@ if (structs.length === 0) {
   process.exit(1);
 }
 
-const generated = renderBindings(structs);
+const generated = renderBindings(structs, enums);
 const counts = Object.fromEntries(structs.map((s) => [s.name, s.fields.length]));
-const summary = structs.map((s) => `  ${s.name.padEnd(24)} ${s.fields.length} 字段 · ${s.direction}`).join("\n");
+const summary = structs
+  .map((s) => `  ${s.name.padEnd(24)} ${s.fields.length} 字段 · ${s.direction}`)
+  .concat(enums.map((e) => `  ${e.name.padEnd(24)} ${e.variants.length} 变体 · enum`))
+  .join("\n");
 
 let baseline = {};
 try {

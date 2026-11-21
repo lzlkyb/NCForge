@@ -69,12 +69,21 @@ pub mod db_transfer_xlsx;
 pub mod db_value_search;
 pub mod db_zh;
 pub mod debug;
+/// Phase 1 声明索引（`types.idx`）的读取器；写出端在 `ecj-bridge/NcIndexer.java`。
+pub mod decl_drift;
+pub mod decl_index;
 pub mod decompile;
 /// 一键诊断包：白名单收集 + 脱敏 + 打 zip（打包前必须由界面逐项确认）。
 pub mod diagnostics;
 pub mod ecj_worker;
 pub mod eclipse_cp;
 pub mod encoding_reg;
+/// Phase 1 声明索引的持有、懒构建与跳转查询（与 jdt.ls 无生命周期关系）。
+pub mod fast_decl;
+/// Phase 1 快速跳转：不启 jdt.ls，用声明索引回答「这个标识符定义在哪」。
+pub mod fast_definition;
+/// 成员级跳转：`vo.getCode()` / `this.x` / 局部变量 → 声明行（类型级之上的一层）。
+pub mod fast_member;
 pub mod file_template;
 /// 前端错误落盘（UTF-8，独立于 GBK 的 NC 日志通道）。
 pub mod frontend_log;

@@ -45,10 +45,22 @@ const BRIDGES = {
   },
   ecj: {
     src: join(ta, 'ecj-bridge', 'NcEcjBridge.java'),
+    // Phase 1 声明索引器：独立 main，同 jar 不同入口（`java -cp ncecj.jar NcIndexer …`）。
+    // 合进一个 jar 是为了复用这里的 Java 8 编译约束与 ecj-bridge-contract 的校验。
+    extraSrc: [join(ta, 'ecj-bridge', 'NcIndexer.java')],
     out: join(ta, 'resources', 'ecj-bridge', 'ncecj.jar'),
     // ecj 的批量编译入口（Main.compile）与 ClassFileReader（struct/diff 命令）编桥时要在
-    // classpath 上；运行时也用它
-    cp: [join(ta, 'resources', 'ecj', 'ecj-3.17.jar')],
+    // classpath 上；运行时也用它。
+    //
+    // 🔴 NcIndexer 额外要 jdt.ls 自己那套插件：standalone `ecj-3.17.jar` 没有
+    // `org.eclipse.core.runtime`，而 `ASTParser.createAST(IProgressMonitor)` 的签名依赖它，
+    // 光靠 ecj-3.17 编不过。索引器运行时的 classpath 也是这批（实测 7524 文件 9.06s）。
+    cp: [
+      join(ta, 'resources', 'ecj', 'ecj-3.17.jar'),
+      ...readdirSync(join(ta, 'resources', 'jdtls', 'plugins'))
+        .filter((f) => f.endsWith('.jar'))
+        .map((f) => join(ta, 'resources', 'jdtls', 'plugins', f)),
+    ],
     label: 'NcEcjBridge',
     // 运行时是 NC 的 ufjdk（7/8）：JAVA_HOME 指向 JDK 9+ 时必须 --release 8，
     // 否则编出 53+ 的字节码，常驻 worker 起不来
@@ -142,6 +154,10 @@ function buildOne(name, { dry }) {
   if (spec.java8) javacArgs.push(...java8Flags(javac));
   if (cp.length) javacArgs.push('-cp', cp.join(process.platform === 'win32' ? ';' : ':'));
   javacArgs.push(spec.src);
+  for (const extra of spec.extraSrc || []) {
+    if (!existsSync(extra)) throw new Error(`源码不存在：${extra}`);
+    javacArgs.push(extra);
+  }
 
   process.stdout.write(`编译 ${spec.label} … `);
   try {

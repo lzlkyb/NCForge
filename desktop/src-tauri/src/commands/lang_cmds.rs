@@ -12,12 +12,10 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
 
-use super::compile_cmds::{cached_index, resolve_module};
-use crate::config::AppConfig;
+use super::compile_cmds::{cached_index, resolve_module, workspace_roots};
+use crate::config::{AppConfig, ShadowMode};
 use crate::lang::{validate_xmx, LangSession, LangStatus, DEFAULT_XMX_MB};
-use crate::lsp::{
-    build_initialize_params, build_settings, path_to_uri, JdtlsLaunch, LspClient, LspHandler,
-};
+use crate::lsp::{build_initialize_params, build_settings, JdtlsLaunch, LspClient, LspHandler};
 use crate::nc_home::{self, NcHome};
 use crate::shadow::{self, ShadowSpec};
 use crate::state::AppState;
@@ -123,7 +121,7 @@ pub fn jdtls_ext_bundle(app: &tauri::AppHandle) -> Option<PathBuf> {
     cands.into_iter().find(|p| p.is_file())
 }
 
-fn find_jdtls(app: &tauri::AppHandle, config_dir: &Path) -> Result<PathBuf, String> {
+pub(crate) fn find_jdtls(app: &tauri::AppHandle, config_dir: &Path) -> Result<PathBuf, String> {
     let mut cands: Vec<PathBuf> = Vec::new();
     if let Ok(env_dir) = std::env::var("NCFORGE_JDTLS_DIR") {
         cands.push(PathBuf::from(env_dir));
@@ -216,8 +214,8 @@ struct Handler {
     app: tauri::AppHandle,
     state: Arc<AppState>,
     module: String,
-    real_prefix: String,
-    shadow_prefix: String,
+    /// 影子前缀 → 真实前缀。flat 下每个源码模块一条（single 时 1 条）。
+    pairs: Vec<crate::lang::PathPair>,
     /// 拉起时的代数（见 `LangRun::generation`）。
     generation: u64,
     /// NC 自带 JDK 的根目录：`workspace/configuration` 请求要按它回 runtimes。
@@ -282,11 +280,18 @@ impl LspHandler for Handler {
             "language/status" => {
                 let kind = params["type"].as_str().unwrap_or_default();
                 let message = params["message"].as_str().unwrap_or_default().to_string();
-                let mut cur = lock_lang(&self.state).status.clone();
-                // 只改本模块的状态：旧会话收尾时的通知不能覆盖新会话
-                if cur.module.as_deref() != Some(&self.module)
-                    || !matches!(cur.state.as_str(), "indexing" | "ready")
-                {
+                // 只改自己这一代的状态：旧会话收尾时的通知不能覆盖新会话。
+                // 🔴 按代数判、不按模块名判：flat 形态下切模块只换「当前页」标签，
+                // 进程不重启，用模块名比会让首次导入剩下的通知全被丢掉，
+                // 状态栏就永远停在「正在建立索引」。
+                let mut cur = {
+                    let run = lock_lang(&self.state);
+                    if run.generation != self.generation {
+                        return;
+                    }
+                    run.status.clone()
+                };
+                if !matches!(cur.state.as_str(), "starting" | "indexing" | "ready") {
                     return;
                 }
                 if kind == "ServiceReady" {
@@ -310,8 +315,8 @@ impl LspHandler for Handler {
                 set_status(&self.app, &self.state, cur);
             }
             "textDocument/publishDiagnostics" => {
-                let mapped =
-                    crate::lang::swap_prefix(&params, &self.shadow_prefix, &self.real_prefix);
+                // 服务端 → 客户端方向：影子前缀换回真实前缀（最长匹配，见 `swap_prefix_multi`）。
+                let mapped = crate::lang::swap_prefix_multi(&params, &self.pairs, false);
                 let _ = self
                     .app
                     .emit("lang-notify", json!({ "method": method, "params": mapped }));
@@ -328,29 +333,58 @@ fn start_blocking(
     module: String,
     home: NcHome,
     xmx_mb: u32,
+    shadow: ShadowMode,
 ) -> Result<LangStatus, String> {
-    // 同模块已在跑（或正在拉起）就不重复拉起
-    let old = {
+    // 已在跑的实例能否直接复用：`single` 形态下必须同模块（切模块 = 重启，老行为）；
+    // `flat` 形态下一个实例覆盖全工作区，只要工作区相同就复用，只是把「当前页模块」
+    // 记到状态里给状态栏显示。
+    let (old, epoch, reuse) = {
         let mut run = lock_lang(&state);
-        let same = run.status.module.as_deref() == Some(&module)
-            && matches!(run.status.state.as_str(), "starting" | "indexing" | "ready");
-        if same {
-            return Ok(run.status.clone());
-        }
-        run.status = LangStatus {
-            state: "starting".into(),
-            module: Some(module.clone()),
-            message: "正在准备…".into(),
-            ..LangStatus::stopped()
+        let alive = matches!(run.status.state.as_str(), "starting" | "indexing" | "ready");
+        let same_scope = if shadow == ShadowMode::Flat {
+            run.workspace.as_deref() == Some(root.as_path())
+        } else {
+            run.status.module.as_deref() == Some(&module)
         };
-        run.session.take()
+        if alive && same_scope {
+            if run.status.module.as_deref() != Some(&module) {
+                // 换模块：只改「当前页」标签，进程与索引都不动
+                run.status.module = Some(module.clone());
+            }
+            (None, run.cancel_epoch, true)
+        } else {
+            run.status = LangStatus {
+                state: "starting".into(),
+                module: Some(module.clone()),
+                message: "正在准备…".into(),
+                ..LangStatus::stopped()
+            };
+            // 立刻登记目标工作区：flat 冷导要 3~6 分钟，这期间用户会继续点别的模块的
+            // `.java`，每次都会再发一个 `lang_start`。不在这里占位的话，每个请求都会
+            // 判定「工作区不同」→ 杀掉刚起的进程重启，永远导不完。
+            run.workspace = Some(root.clone());
+            (run.session.take(), run.cancel_epoch, false)
+        }
     };
+    if reuse {
+        let status = lock_lang(&state).status.clone();
+        let _ = app.emit("lang-status", status.clone());
+        return Ok(status);
+    }
     let _ = app.emit("lang-status", lock_lang(&state).status.clone());
     // 切模块 = 重启（已验证的做法；在原进程里换 classpath 未验证）
     if let Some(s) = old {
         s.client.shutdown();
     }
-    match launch(&app, &state, &root, &module, &home, xmx_mb) {
+    // A cancelled launch can still prepare files after its visible state is stopped.
+    let _cache = state
+        .language_cache
+        .read()
+        .unwrap_or_else(|error| error.into_inner());
+    if lock_lang(&state).cancel_epoch != epoch {
+        return Err(CANCELLED.into());
+    }
+    match launch(&app, &state, &root, &module, &home, xmx_mb, shadow) {
         Ok(st) => Ok(st),
         Err(e) if e == CANCELLED => Err(e), // 取消不是失败：状态已由 stop_now 置成 stopped
         Err(e) => {
@@ -370,7 +404,11 @@ fn start_blocking(
 }
 
 /// jdt.ls 工作区缓存的版式号：目录规则变了就加一，旧缓存自然不再命中、随后被淘汰。
-const DATA_LAYOUT: u32 = 1;
+///
+/// v2（2026-11-21）：数据目录从「按模块」改成「按工作区」——flat 形态下一个实例覆盖
+/// 全工作区，索引本来就只该有一份。旧目录（v1，名字里带模块）不再命中，靠
+/// `touch_and_prune` 的 LRU 自然淘汰。
+const DATA_LAYOUT: u32 = 2;
 /// 最多保留几个「工程 + 模块」的索引缓存。
 ///
 /// 一份大约百 MB 级。原来是 4 份，按「同时跟两个工程」估的；实际现场是顾问手上
@@ -394,20 +432,35 @@ fn stable_hash(parts: &[&str]) -> u64 {
     h
 }
 
-/// 某个模块自己的 jdt.ls 工作区缓存目录：`<base>/jdtls-ws/<模块>-<指纹>`。
+/// 工作区的 jdt.ls 缓存目录：`<base>/jdtls-ws/<工作区名>-<指纹>`。
 ///
-/// 指纹覆盖工作区根、模块、NC home、jdt.ls 目录（含版本）与版式号：任一变化都换新目录，
+/// 指纹覆盖工作区根、NC home、jdt.ls 目录（含版本）、形态与版式号：任一变化都换新目录，
 /// 旧的不再被读到。NC home 里 jar 增减不在指纹里——影子工程的 .classpath 每次启动都重生成，
 /// jdt.ls 自己会按新的类路径重新解析。
-fn data_dir_for(base: &Path, root: &Path, module: &str, nc_home: &Path, ls_dir: &Path) -> PathBuf {
+///
+/// 🔴 指纹里**不能有 module**：flat 形态下一个实例覆盖全工作区，按模块分目录会让每个模块
+/// 各自冷导一次全工作区（实测 3~6 分钟），比按模块切工程还慢。`shadow` 参与指纹是因为
+/// flat 与 single 的工程形态不同，jdt.ls 会按旧 `.classpath` 缓存工程结构，必须换目录重导。
+fn data_dir_for(
+    base: &Path,
+    root: &Path,
+    nc_home: &Path,
+    ls_dir: &Path,
+    shadow: ShadowMode,
+) -> PathBuf {
     let key = stable_hash(&[
         &DATA_LAYOUT.to_string(),
         &root.to_string_lossy(),
-        module,
-        &nc_home.to_string_lossy(),
-        &ls_dir.to_string_lossy(),
+        nc_home.to_string_lossy().as_ref(),
+        ls_dir.to_string_lossy().as_ref(),
+        shadow.as_str(),
     ]);
-    let safe: String = module
+    // 目录名用工作区末段（`newar`），纯给人看：真正区分靠后面 16 位指纹
+    let name = root
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let safe: String = name
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
@@ -482,6 +535,7 @@ fn launch(
     module: &str,
     home: &NcHome,
     xmx_mb: u32,
+    shadow: ShadowMode,
 ) -> Result<LangStatus, String> {
     // 从这一刻起就算「本次拉起的意图」。下面每一步都可能耗时数秒（扫模块、生成影子工程、
     // 起进程、initialize 握手），期间用户完全可能关掉开关或切工作区。
@@ -523,11 +577,18 @@ fn launch(
     // jdt.ls 的工作区缓存按「工作区 + 模块 + NC home + jdt.ls 目录」各存一份：
     // 以前只有一份、换模块就整个删掉，A → B → A 回到 A 要从头建索引。
     // 现在各模块互不混用，又能复用；只留最近用过的 DATA_KEEP 份控制磁盘占用。
-    let data_dir = data_dir_for(&base, root, module, &nc_home, &ls_dir);
+    let data_dir = data_dir_for(&base, root, &nc_home, &ls_dir, shadow);
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("无法创建代码智能目录: {e}"))?;
     remove_legacy_data(&base);
     touch_and_prune(&data_dir, DATA_KEEP, now_ms());
 
+    // flat：一个工程挂全工作区的源根（NC 官方 Eclipse 形态）。清单每次现扫 ——
+    // 模块目录会增删，缓存清单过期会让新模块永远进不了索引。
+    let flat_modules: Vec<String> = if shadow == ShadowMode::Flat {
+        shadow::workspace_modules(root)
+    } else {
+        Vec::new()
+    };
     let project = shadow::generate(&ShadowSpec {
         workspace_root: root,
         module,
@@ -536,7 +597,16 @@ fn launch(
         index: &index,
         extra_jars: &seed,
         overrides: &overrides,
+        // None = single（回滚路径 / `lang.shadowMode = single`），Some = flat
+        extra_modules: (shadow == ShadowMode::Flat).then_some(flat_modules.as_slice()),
     })?;
+    // 留下形态与规模：出问题时能一眼看出是 single 还是 flat、挂了多少源根
+    log::info!(
+        "影子工程：{} 个模块，{} 个源文件，{} 个 jar",
+        project.modules.len(),
+        project.source_files,
+        project.jar_count
+    );
     // 影子目录被外部工具（备份/复制/还原）展开成真目录时，上面已把旧副本改名挪开。
     // 必须留痕：用户会奇怪自己的目录怎么换了名字。
     if !project.displaced.is_empty() {
@@ -589,8 +659,21 @@ fn launch(
     )
     .ok_or(CANCELLED)?;
 
+    // 换模块时只改「当前页」标签，不动进程与索引（flat）；single 形态下这段与以前一致。
     let real_dir = root.join(module);
     let shadow_module = shadow_dir.join(module);
+    // 通道映射：flat 时服务器返回的 URI 可能来自任意一个模块的 junction，
+    // 只登记当前模块会让其他模块的路径原样漏回前端（编辑器找不到 model，跳转整体失效）。
+    let pairs: Vec<crate::lang::PathPair> = project
+        .modules
+        .iter()
+        .map(|m| crate::lang::PathPair::new(&root.join(m), &shadow_dir.join(m)))
+        .collect();
+    let roots: Vec<(PathBuf, PathBuf)> = project
+        .modules
+        .iter()
+        .map(|m| (root.join(m), shadow_dir.join(m)))
+        .collect();
     let runtime_s = runtime.to_string_lossy().into_owned();
     // stderr 落到固定的一个文件（不追加：只关心最近一次拉起为什么没起来）。
     let stderr_log = base.join("jdtls-stderr.log");
@@ -599,8 +682,7 @@ fn launch(
         app: app.clone(),
         state: state.clone(),
         module: module.to_string(),
-        real_prefix: path_to_uri(&real_dir.to_string_lossy()),
-        shadow_prefix: path_to_uri(&shadow_module.to_string_lossy()),
+        pairs,
         runtime_home: runtime_s.clone(),
         stderr_log: stderr_log.clone(),
         osgi_dir: osgi_dir.clone(),
@@ -616,6 +698,7 @@ fn launch(
         data_dir: &data_dir,
         config_dir: &osgi_dir,
         xmx_mb,
+        syntax_server: false,
     }
     .command()?;
     let client = LspClient::spawn_with_stderr(cmd, Arc::new(handler), &stderr_log)?;
@@ -655,11 +738,9 @@ fn launch(
         jar_count: project.jar_count,
     };
     let session = Arc::new(
-        LangSession::new(client, module, &real_dir, &shadow_module).with_completion_catalog(
-            index,
-            catalog,
-            &shadow_dir,
-        ),
+        LangSession::new(client, module, &real_dir, &shadow_module)
+            .with_roots(roots)
+            .with_completion_catalog(index, catalog, &shadow_dir),
     );
     {
         let mut run = lock_lang(state);
@@ -708,12 +789,97 @@ pub async fn lang_start(
     let (root, module, _dir) = resolve_module(&state, &path).await?;
     let home = nc_home::resolve(cfg.nc_home.as_deref())?;
     let xmx = cfg.lang_xmx_mb.unwrap_or(DEFAULT_XMX_MB);
+    let shadow = cfg.lang_shadow_mode;
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        start_blocking(app, state, root, module, home, xmx)
+        start_blocking(app, state, root, module, home, xmx, shadow)
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// 打开工作区后**预热**代码智能：不等用户点第一个 `.java`，直接把 flat 影子工程与
+/// jdt.ls 拉起来。冷导实测 154~355 秒，提前开始能让用户第一次按 F12 时少等几分钟。
+///
+/// 立即返回：冷导几分钟，把它挂在 IPC 上会让前端超时。进度全部走 `lang-status`。
+/// 幂等：实例已在本工作区跑着（或正在拉起）就什么都不做，见 `start_blocking`。
+///
+/// 只在 `flat` 模式下预热：`single` 形态下每次预热都用「工作区里第一个模块」，
+/// 用户真正打开的若是别的模块就得重启一次，白导一遍 —— 那是回滚路径，保持老体验。
+#[tauri::command]
+pub async fn lang_prepare(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<(), crate::app_error::AppError> {
+    use crate::app_error::AppError;
+    let cfg = state.config.read().await.clone();
+    if !cfg.lang_enabled || !cfg.lang_auto_start || cfg.lang_shadow_mode != ShadowMode::Flat {
+        return Ok(());
+    }
+    let (_, root) = workspace_roots(&state)
+        .await
+        .map_err(|e| AppError::unavailable("lang.prepare.no-workspace", e))?;
+    // 🔴 **先踢声明索引，再起 jdt.ls**：索引 ~21s 就能答跳转，jdt.ls 冷导要约 99~355s。
+    //    早先只在「第一次 Ctrl+点击」时才建 —— 用户点下去的第一次照样要等，而且这 21s
+    //    里每次点击都退回全盘内容搜索。这里 fire-and-forget，不阻塞也不影响 jdt.ls 预热。
+    crate::fast_decl::lookup_or_kick(&app, state.inner(), &root, cfg.nc_home.clone());
+    // 起始模块：flat 下 `spec.module` 只用于「目录存在且有 .java」的校验，任意一个都行
+    let Some(module) = shadow::workspace_modules(&root).into_iter().next() else {
+        return Ok(());
+    };
+    let home = nc_home::resolve(cfg.nc_home.as_deref())
+        .map_err(|e| AppError::unavailable("lang.prepare.no-nc-home", e))?;
+    let xmx = cfg.lang_xmx_mb.unwrap_or(DEFAULT_XMX_MB);
+    let shadow = cfg.lang_shadow_mode;
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(e) = start_blocking(app, state, root, module, home, xmx, shadow) {
+            log::info!("代码智能预热未完成：{e}");
+        }
+    });
+    Ok(())
+}
+
+/// `workspace/didChangeWatchedFiles` 的变更类型码（LSP `FileChangeType`）。
+const FILE_CHANGED: u8 = 2;
+
+/// 把**外部**改动的源文件转成影子 URI 推给 jdt.ls。
+///
+/// 🔴 必须显式推：影子工程的源根是 junction，jdt.ls 自己监视不到穿透后的改动
+/// （2026-11-21 S0 探针：普通目录能自动更新，junction 不能；显式推 junction 侧 URI 有效）。
+/// 不推的话 SVN 更新完、别的编辑器保存后，跳转还指着旧内容。
+///
+/// 节流由调用方负责（`watcher` 已按 350ms 合并成一批），这里不做二次去抖。
+/// 服务没在跑时静默返回：下次拉起时 jdt.ls 会全量导入，本来就读的是最新内容。
+pub(crate) fn notify_external_changes(app: &tauri::AppHandle, paths: &[String]) {
+    if paths.is_empty() {
+        return;
+    }
+    let Some(state) = app.try_state::<Arc<AppState>>() else {
+        return;
+    };
+    // 先取 session 再放锁：发通知是 IPC 写管道，不该攥着语言服务的全局锁
+    let Some(session) = lock_lang(&state).session.clone() else {
+        return;
+    };
+    let changes: Vec<Value> = paths
+        .iter()
+        .filter_map(|p| {
+            session
+                .shadow_uri_of(p)
+                .ok()
+                .map(|uri| json!({ "uri": uri, "type": FILE_CHANGED }))
+        })
+        .collect();
+    if changes.is_empty() {
+        return;
+    }
+    if let Err(e) = session.client.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({ "changes": changes }),
+    ) {
+        log::info!("推送外部改动给代码智能失败（不影响文件本身）：{e}");
+    }
 }
 
 /// 停掉当前会话并把状态置为已停止。
@@ -723,6 +889,7 @@ fn stop_now(app: &tauri::AppHandle, state: &AppState) {
         // 先记「这一代作废」再摘 session：正在 launch 的那条线程会拿不到旧的
         // `cancel_epoch`，登记前复检时就会自己退场（见 launch 里的复检）。
         run.cancel_epoch += 1;
+        run.workspace = None;
         run.session.take()
     };
     if let Some(s) = old {
@@ -766,19 +933,24 @@ pub async fn lang_regenerate(
         resolve_module(&state, &PathBuf::from(ws).join(&module).to_string_lossy()).await?;
     let home = nc_home::resolve(cfg.nc_home.as_deref())?;
     let xmx = cfg.lang_xmx_mb.unwrap_or(DEFAULT_XMX_MB);
+    let shadow = cfg.lang_shadow_mode;
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         stop_now(&app, &state);
-        // 只清这个模块自己的 jdt.ls 工作区缓存（别的模块的索引照样留着）。
+        // 只清这个工作区自己的 jdt.ls 工作区缓存（别的工程的索引照样留着）。
         // 进程已停，没有人占着这个目录；目录里没有 junction，递归删除是安全的。
         if let Ok(ls_dir) = find_jdtls(&app, &state.config_dir) {
+            let _cache = state
+                .language_cache
+                .write()
+                .unwrap_or_else(|error| error.into_inner());
             let base = state.config_dir.join("lang");
-            let dir = data_dir_for(&base, &root, &module, Path::new(&home.root), &ls_dir);
+            let dir = data_dir_for(&base, &root, Path::new(&home.root), &ls_dir, shadow);
             if plain_dir(&dir) {
                 let _ = std::fs::remove_dir_all(&dir);
             }
         }
-        start_blocking(app, state, root, module, home, xmx)
+        start_blocking(app, state, root, module, home, xmx, shadow)
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?
@@ -794,6 +966,9 @@ pub struct LangConfigPatch {
     /// 内存上限（MB）。`0` = 恢复默认（用 0 表示「清空」，避免 JSON 里区分缺省与 null）。
     #[serde(default)]
     pub lang_xmx_mb: Option<u32>,
+    /// 影子工程形态（`flat` / `single`）。改了**不会**动正在跑的实例，下次拉起生效。
+    #[serde(default)]
+    pub lang_shadow_mode: Option<ShadowMode>,
 }
 
 /// 改代码智能的设置。内存上限越界时明确报错；关掉总开关时顺手停掉正在跑的 jdt.ls。
@@ -819,6 +994,9 @@ pub async fn lang_config_set(
             }
             if let Some(v) = xmx {
                 cfg.lang_xmx_mb = v;
+            }
+            if let Some(v) = patch.lang_shadow_mode {
+                cfg.lang_shadow_mode = v;
             }
             Ok(())
         })
@@ -1020,35 +1198,73 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn 索引缓存按模块与环境隔离() {
+    fn 索引缓存按工作区与环境隔离() {
         let base = Path::new("C:\\cfg\\lang");
         let ws = Path::new("C:\\work\\aier\\newar");
         let home = Path::new("D:\\ncc\\1909home");
         let ls = Path::new("C:\\cfg\\jdtls-1.40");
-        let a = data_dir_for(base, ws, "gl", home, ls);
-        // 同一组参数必须落到同一目录（A → B → A 才能复用），大小写不影响
+        let a = data_dir_for(base, ws, home, ls, ShadowMode::Flat);
+        // 同一组参数必须落到同一目录（关掉再开才能复用），大小写不影响
         assert_eq!(
             a,
-            data_dir_for(base, Path::new("c:\\WORK\\aier\\newar"), "gl", home, ls)
+            data_dir_for(
+                base,
+                Path::new("c:\\WORK\\aier\\newar"),
+                home,
+                ls,
+                ShadowMode::Flat
+            )
         );
         assert!(a.starts_with(base.join("jdtls-ws")));
-        assert!(a.file_name().unwrap().to_string_lossy().starts_with("gl-"));
-        // 模块 / 工作区 / NC home / jdt.ls 版本任一变化都换目录
-        assert_ne!(a, data_dir_for(base, ws, "ia", home, ls));
+        // 目录名用工作区末段：给人看的部分是 `newar-<指纹>`
+        assert!(a
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("newar-"));
+        // 工作区 / NC home / jdt.ls 版本 / 形态任一变化都换目录
         assert_ne!(
             a,
-            data_dir_for(base, Path::new("C:\\work\\other"), "gl", home, ls)
+            data_dir_for(
+                base,
+                Path::new("C:\\work\\other"),
+                home,
+                ls,
+                ShadowMode::Flat
+            )
         );
         assert_ne!(
             a,
-            data_dir_for(base, ws, "gl", Path::new("D:\\ncc\\nc65home"), ls)
+            data_dir_for(
+                base,
+                ws,
+                Path::new("D:\\ncc\\nc65home"),
+                ls,
+                ShadowMode::Flat
+            )
         );
         assert_ne!(
             a,
-            data_dir_for(base, ws, "gl", home, Path::new("C:\\cfg\\jdtls-1.41"))
+            data_dir_for(
+                base,
+                ws,
+                home,
+                Path::new("C:\\cfg\\jdtls-1.41"),
+                ShadowMode::Flat
+            )
         );
-        // 模块名里的怪字符不能跑出缓存根
-        let odd = data_dir_for(base, ws, "..\\x y", home, ls);
+        // flat 与 single 的工程形态不同，jdt.ls 会按旧 .classpath 缓存工程结构 ⇒ 必须换目录
+        assert_ne!(a, data_dir_for(base, ws, home, ls, ShadowMode::Single));
+        // 🔴 模块不在签名里，是编译期保证：flat 下一个实例覆盖全工作区，按模块分会各导一遍
+        //    全工作区（3~6 分钟 × 63），比按模块切工程还慢。
+        // 工作区名里的怪字符不能跑出缓存根
+        let odd = data_dir_for(
+            base,
+            Path::new("C:\\x\\..\\x y"),
+            home,
+            ls,
+            ShadowMode::Flat,
+        );
         assert_eq!(odd.parent().unwrap(), base.join("jdtls-ws"));
     }
 

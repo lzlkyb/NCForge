@@ -6,6 +6,7 @@ import { missingResourceId } from "../../lib/resourceMissing";
 import { ResourceDownloadButton } from "../resource/ResourceDownloadButton";
 import { Card } from "../ui/card";
 import { LangMemoryField } from "./LangMemoryField";
+import { DeclIndexStatusLine } from "./DeclIndexStatusLine";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Badge } from "../ui/badge";
 import { SettingsRow } from "../ui/SettingsRow";
@@ -150,6 +151,9 @@ export function LangSettings() {
           <p className="text-xs text-muted-foreground">{off ? "代码智能已暂停，编译功能仍可使用。" : view.state === "error" && view.message ? view.message : STATE_DESCRIPTIONS[view.state]}</p>
           {!off && view.state === "error" && missingResourceId(view.message) === "jdtls" && <ResourceDownloadButton id="jdtls" />}
         </div>
+        {/* 快通道（声明索引）与 jdt.ls 是两套东西：jdt.ls 没起来时跳转全靠它，
+            所以即使「轻量模式」也显示 —— 那正是它最有用的时候。 */}
+        <DeclIndexStatusLine />
         <ToggleRow
           id="lang-enabled"
           label="启用代码智能"
@@ -217,11 +221,17 @@ export function LangSettings() {
         <div>
         <p>
           <b className="text-foreground">能跳的：</b>
-          当前模块内的类与方法；NC 标准类（有 _src.jar 的看到真实源码，其余看到方法签名）；其他模块的二开类只能看到签名（来自上次编译的 class）。
+          整个工作区的类与方法——不分模块，切到别的模块的 <code>.java</code> 也不用重新准备；
+          NC 标准类（有 _src.jar 的看到真实源码，其余看到方法签名）。
+        </p>
+        <p>
+          <b className="text-foreground">首次准备：</b>
+          打开工作区后会自动在后台准备索引，大工程第一次需要几分钟（与 IDEA / Eclipse 冷启动同量级）。
+          这期间可以正常看文件，只是补全与跳转还没就绪；准备好之后再切模块是<b className="text-foreground">零等待</b>。
         </p>
         <p>
           <b className="text-foreground">补全不到的情况：</b>
-          刚切过来的模块索引还没建好时补全会缺类；其他业务模块的私有类也可能补不出来，切过去即可。
+          索引还没准备好的那几分钟里补全会缺类；准备完成后即可跨模块补全。
         </p>
         <p>
           <b className="text-foreground">超大文件：</b>

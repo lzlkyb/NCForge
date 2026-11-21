@@ -1,7 +1,7 @@
 import { invoke } from "./tauri";
 import { trackOperation } from "./operations";
 import type { LinkedOverride } from "./linkedProjects";
-import type { DbConnConfig } from "./bindings.generated";
+import type { DbConnConfig, ShadowMode } from "./bindings.generated";
 
 /**
  * 应用配置（与 Rust `config::AppConfig` 一一对应）。
@@ -27,6 +27,11 @@ export interface AppConfig {
   lang_enabled: boolean;
   lang_auto_start: boolean;
   lang_xmx_mb: number | null;
+  /**
+   * 影子工程形态：`flat` = 一个实例覆盖全工作区（默认）；`single` = 只挂当前模块（回滚路径）。
+   * 改了不会动正在跑的实例，下次拉起生效。
+   */
+  lang_shadow_mode: ShadowMode;
   /**
    * 多工程覆盖表（停用 / 排前 / 追加目录）。
    *
@@ -97,6 +102,8 @@ export interface LangConfigPatch {
   lang_enabled?: boolean;
   lang_auto_start?: boolean;
   lang_xmx_mb?: number;
+  /** `flat` / `single`。改了下次拉起生效（要立刻生效就先 `langStop` 再启动）。 */
+  lang_shadow_mode?: ShadowMode;
 }
 
 export const langConfigSet = (patch: LangConfigPatch) =>

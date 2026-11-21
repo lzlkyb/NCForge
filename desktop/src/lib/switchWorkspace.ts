@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { closeModel } from "./editorStore";
-import { stopLang } from "./lang";
+import { prepareLang, stopLang } from "./lang";
 import { resetSearchForm } from "./searchStore";
 import { resetSymbolCache } from "./symbols";
 import { getSession, setSession } from "./workspaceSession";
@@ -64,6 +64,10 @@ export async function applyWorkspace(
   clearClosed();
   resetMru();
   // 文件树按 root 归属缓存，由 FileTree 自己重置（key={root}），这里不动
+
+  // 新工作区就绪即预热代码智能：冷导要几分钟，别等用户点第一个 .java 才开始。
+  // 必须在 `stopLang()` 之后——`prepareLang` 走同一条串行队列，排在 stop 后面才不会被它杀掉。
+  prepareLang(shown);
 
   void queryClient?.invalidateQueries({ queryKey: ["svn-info"] });
   void queryClient?.invalidateQueries({ queryKey: ["svn-status"] });

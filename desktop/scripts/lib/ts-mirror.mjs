@@ -78,12 +78,16 @@ function tsType(type, known, ctx, depth = 0) {
     }
     throw new Error(`${ctx}：不支持的泛型 ${head}<...>（先在 ts-mirror.mjs 里加映射）`);
   }
-  if (known.has(t)) return t;
+  if (known.has(t)) return known.get(t) ?? t;
   throw new Error(`${ctx}：未知类型 ${t}（若它要过桥，给它加 // @ts-mirror）`);
 }
 
 /**
- * 第一趟：把每个被标记的结构体连 body 一起抠出来（还不知道谁引用了谁）。
+ * 第一趟：把每个被标记的结构体/枚举连 body 一起抠出来（还不知道谁引用了谁）。
+ *
+ * 枚举只为「配置里存字符串字面量」这一类存在（`ShadowMode` = `"flat" | "single"`）：
+ * 它没有字段，生成的是一行 `export type X = "a" | "b"`。带负载的枚举（`Foo::Bar(v)`）
+ * 一律报错 —— 那种形状 TS 侧该用可辨识联合，不是这里能猜的。
  */
 function scanBlocks(text, file) {
   const lines = text.split("\n");
@@ -101,12 +105,13 @@ function scanBlocks(text, file) {
       continue;
     }
     if (line.startsWith("//") || line === "") continue;
-    const head = line.match(/^pub struct (\w+)\s*\{$/);
+    const head = line.match(/^pub (struct|enum) (\w+)\s*\{$/);
     if (!head || !pending) { pending = null; continue; }
     let j = i + 1;
     while (j < lines.length && lines[j].trim() !== "}") j++;
     blocks.push({
-      name: head[1],
+      kind: head[1],
+      name: head[2],
       direction: pending.direction,
       attrs: pending.attrs,
       body: lines.slice(i + 1, j),
@@ -119,6 +124,36 @@ function scanBlocks(text, file) {
     i = j;
   }
   return blocks;
+}
+
+/** 枚举变体名 → 序列化后的字面量（`#[serde(rename)]` > `rename_all` > 原名）。 */
+function parseEnumVariants(block) {
+  const errors = [];
+  const renameAll = block.attrs
+    .map((a) => a.match(/^#\[serde\(rename_all\s*=\s*"(\w+)"\)\]$/)?.[1])
+    .find(Boolean);
+  const variants = [];
+  let attrs = [];
+  block.body.forEach((raw, idx) => {
+    const body = raw.trim();
+    if (body === "" || body.startsWith("//")) return;
+    if (body.startsWith("#[")) { attrs.push(body); return; }
+    const m = body.match(/^([A-Za-z_]\w*),$/);
+    if (!m) {
+      errors.push(
+        `${block.file}:${block.bodyStart + idx}（${block.name}）：枚举变体只支持无负载的 \`Name,\`，实际：${body}`,
+      );
+      attrs = [];
+      return;
+    }
+    const rename = attrs.map((a) => a.match(/^#\[serde\(rename\s*=\s*"([^"]+)"\)\]$/)?.[1]).find(Boolean);
+    variants.push({
+      source: m[1],
+      literal: rename ?? (renameAll === "lowercase" ? m[1].toLowerCase() : renameAll === "camelCase" ? camel(m[1]) : m[1]),
+    });
+    attrs = [];
+  });
+  return { variants, errors };
 }
 
 function parseFields(block, known) {
@@ -175,10 +210,26 @@ export function parseMirrors(sources) {
       blocks.push(b);
     }
   }
-  const known = new Set(blocks.map((b) => b.name));
+  // known：类型名 → 引用它时该写的 TS。`null` = 结构体（直接用名字）。
+  const known = new Map(blocks.map((b) => [b.name, null]));
+  const enums = [];
+  const seenEnum = new Set();
+  // 枚举先解析：结构体字段可能引用它们，`tsType` 要能查到字面量联合
+  for (const b of blocks.filter((x) => x.kind === "enum")) {
+    if (seenEnum.has(b.name)) {
+      errors.push(`${b.file}:${b.line}：${b.name} 被重复镜像（同一类型只能标一处）`);
+      continue;
+    }
+    seenEnum.add(b.name);
+    const { variants, errors: variantErrors } = parseEnumVariants(b);
+    errors.push(...variantErrors);
+    const ts = variants.length ? variants.map((v) => JSON.stringify(v.literal)).join(" | ") : "never";
+    known.set(b.name, ts);
+    enums.push({ name: b.name, variants, file: b.file, line: b.line });
+  }
   const structs = [];
   const seen = new Set();
-  for (const b of blocks) {
+  for (const b of blocks.filter((x) => x.kind === "struct")) {
     if (seen.has(b.name)) {
       errors.push(`${b.file}:${b.line}：${b.name} 被重复镜像（同一类型只能标一处）`);
       continue;
@@ -188,16 +239,16 @@ export function parseMirrors(sources) {
     errors.push(...fieldErrors);
     structs.push({ name: b.name, direction: b.direction, fields, file: b.file, line: b.line });
   }
-  return { structs, errors };
+  return { structs, enums, errors };
 }
 
 /** 生成 TS 源码。同样的输入必须产出同样的字节，`--check` 才能直接比文本。 */
-export function renderBindings(structs) {
+export function renderBindings(structs, enums = []) {
   const head = [
     "/**",
     " * ⚠️ 本文件由 `scripts/gen-bindings.mjs` 从 Rust 源码生成，**不要手改**。",
     " *",
-    " * 来源：`src-tauri/src/**` 里带 `// @ts-mirror` 标记的结构体。改了 Rust 字段就重跑：",
+    " * 来源：`src-tauri/src/**` 里带 `// @ts-mirror` 标记的结构体/枚举。改了 Rust 字段就重跑：",
     " *   npm run bindings:generate",
     " *",
     " * 与手写类型的相等性由 `src/lib/bindings.check.ts` 在 tsc 阶段钉住——",
@@ -205,6 +256,10 @@ export function renderBindings(structs) {
     " */",
     "",
   ];
+  const enumBlocks = enums.map((e) => {
+    const union = e.variants.length ? e.variants.map((v) => JSON.stringify(v.literal)).join(" | ") : "never";
+    return [`/** ${e.file}:${e.line} · 枚举 */`, `export type ${e.name} = ${union};`, ""].join("\n");
+  });
   const blocks = structs.map((s) => {
     const lines = s.fields.map((f) => {
       const name = /^[A-Za-z_$][\w$]*$/.test(f.name) ? f.name : JSON.stringify(f.name);
@@ -212,5 +267,5 @@ export function renderBindings(structs) {
     });
     return [`/** ${s.file}:${s.line} · ${s.direction} */`, `export interface ${s.name} {`, ...lines, "}", ""].join("\n");
   });
-  return head.join("\n") + blocks.join("\n");
+  return head.join("\n") + enumBlocks.join("\n") + blocks.join("\n");
 }

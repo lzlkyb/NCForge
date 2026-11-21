@@ -42,6 +42,7 @@ mod java_diagnostics_cmds;
 mod java_run_cmds;
 mod lang_cache;
 mod lang_cmds;
+mod lang_fast_cmds;
 mod library_cmds;
 mod linked_cmds;
 mod local_history_cmds;
@@ -102,6 +103,7 @@ pub use java_diagnostics_cmds::*;
 pub use java_run_cmds::*;
 pub use lang_cache::*;
 pub use lang_cmds::*;
+pub use lang_fast_cmds::*;
 pub use library_cmds::*;
 pub use linked_cmds::*;
 pub use local_history_cmds::*;
@@ -206,10 +208,13 @@ macro_rules! nc_forge_commands {
         $crate::commands::build_history,
         $crate::commands::decompile_class,
         $crate::commands::lang_start,
+        $crate::commands::lang_prepare,
         $crate::commands::lang_stop,
         $crate::commands::lang_regenerate,
         $crate::commands::lang_config_set,
         $crate::commands::lang_status,
+        $crate::commands::lang_fast_definition,
+        $crate::commands::lang_fast_status,
         $crate::commands::lang_request,
         $crate::commands::lang_notify,
         $crate::commands::lang_semantic_tokens,

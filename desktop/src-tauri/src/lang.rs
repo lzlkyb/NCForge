@@ -141,25 +141,52 @@ pub fn stage_of(message: &str, kind: &str) -> String {
 /// 一次运行中的语言服务。
 pub struct LangSession {
     pub client: LspClient,
+    /// 前端语义上的「当前模块」。flat 下**不再决定映射**，只用于文案与补全目录。
     pub module: String,
-    real_dir: PathBuf,
-    shadow_dir: PathBuf,
-    real_prefix: String,
-    shadow_prefix: String,
+    /// 真实目录 ↔ 影子目录。single 时 1 条；flat 时每个源码模块 1 条（实测 53 条）。
+    roots: Vec<(PathBuf, PathBuf)>,
+    /// 影子工程根（`.project` 所在目录）。flat 下是各模块影子目录的共同父目录。
+    shadow_root: PathBuf,
+    /// 由 `roots` 派生的 URI 前缀对，避免每次请求都重新格式化。
+    pairs: Vec<PathPair>,
     pub completion_catalog: Option<(Arc<ClassIndex>, Arc<TypeCatalog>, PathBuf)>,
+}
+
+/// 由 `roots` 派生 URI 前缀对。顺序不影响匹配结果（`swap_one_multi` 取最长）。
+fn pairs_of(roots: &[(PathBuf, PathBuf)]) -> Vec<PathPair> {
+    roots
+        .iter()
+        .map(|(real, shadow)| PathPair::new(real, shadow))
+        .collect()
 }
 
 impl LangSession {
     pub fn new(client: LspClient, module: &str, real_dir: &Path, shadow_dir: &Path) -> Self {
+        let roots = vec![(real_dir.to_path_buf(), shadow_dir.to_path_buf())];
         Self {
             client,
             module: module.to_string(),
-            real_dir: real_dir.to_path_buf(),
-            shadow_dir: shadow_dir.to_path_buf(),
-            real_prefix: path_to_uri(&real_dir.to_string_lossy()),
-            shadow_prefix: path_to_uri(&shadow_dir.to_string_lossy()),
+            pairs: pairs_of(&roots),
+            shadow_root: shadow_dir.to_path_buf(),
+            roots,
             completion_catalog: None,
         }
+    }
+
+    /// flat 形态：一个 jdt.ls 实例覆盖多个模块，映射表要按模块逐条登记。
+    ///
+    /// `roots` 为空时退化成 `new` 的签名语义（调用方不该传空，这里只是不 panic）。
+    /// 影子工程根取第一条影子目录的父目录 —— flat 下所有模块影子都是它的子目录。
+    pub fn with_roots(mut self, roots: Vec<(PathBuf, PathBuf)>) -> Self {
+        if let Some((_, first_shadow)) = roots.first() {
+            self.shadow_root = first_shadow
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| first_shadow.clone());
+            self.pairs = pairs_of(&roots);
+            self.roots = roots;
+        }
+        self
     }
 
     pub fn with_completion_catalog(
@@ -178,24 +205,25 @@ impl LangSession {
 
     /// 影子工程根（`.project` 所在目录）。调试器要把源码根报给 java-debug。
     pub fn shadow_root(&self) -> &Path {
-        &self.shadow_dir
+        &self.shadow_root
     }
 
     /// 真实文件路径 → 影子工程里的 URI。不在当前模块内返回 `Err`。
     pub fn shadow_uri_of(&self, real_path: &str) -> Result<String, String> {
-        let rel = rel_under(&self.real_dir.to_string_lossy(), real_path)
-            .ok_or_else(|| format!("文件不在当前代码智能模块（{}）内", self.module))?;
-        Ok(path_to_uri(&self.shadow_dir.join(rel).to_string_lossy()))
+        match find_root(&self.roots, real_path, false) {
+            Some((shadow, rel)) => Ok(path_to_uri(&shadow.join(rel).to_string_lossy())),
+            None => Err(format!("文件不在当前代码智能工程（{}）内", self.module)),
+        }
     }
 
     /// 发给 jdt.ls 的消息：真实前缀 → 影子前缀。
     pub fn to_server(&self, v: &Value) -> Value {
-        swap_prefix(v, &self.real_prefix, &self.shadow_prefix)
+        swap_prefix_multi(v, &self.pairs, true)
     }
 
     /// jdt.ls 返回的消息：影子前缀 → 真实前缀。
     pub fn from_server(&self, v: &Value) -> Value {
-        swap_prefix(v, &self.shadow_prefix, &self.real_prefix)
+        swap_prefix_multi(v, &self.pairs, false)
     }
 
     /// 调试适配器返回的消息：`path` 字段里的影子目录路径 → 真实目录路径。
@@ -203,7 +231,7 @@ impl LangSession {
     /// DAP 的 `source.path` 是普通文件路径而不是 URI，`from_server` 换不到它，
     /// 栈帧点开就是影子 junction 里的那份副本（编辑器里的标签、断点都对不上）。
     pub fn from_server_paths(&self, v: &Value) -> Value {
-        swap_path_fields(v, &self.shadow_dir, &self.real_dir)
+        swap_path_fields_multi(v, &self.roots)
     }
 }
 
@@ -211,6 +239,10 @@ impl LangSession {
 pub struct LangRun {
     pub session: Option<Arc<LangSession>>,
     pub status: LangStatus,
+    /// 当前实例服务的工作区根。flat 形态下一个实例覆盖全工作区，切模块时靠它判断
+    /// 「要不要重启」——同工作区就复用，只有换工作区才重新拉起。
+    /// `single` 形态下仍按模块重启，这两个字段一起决定（见 `lang_cmds::start_blocking`）。
+    pub workspace: Option<PathBuf>,
     /// 每次拉起自增。进程退出回调据此判断「退出的是不是当前这一代」，
     /// 避免旧进程收尾时把刚起来的新会话误判成崩溃。
     pub generation: u64,
@@ -229,6 +261,7 @@ impl Default for LangRun {
         Self {
             session: None,
             status: LangStatus::stopped(),
+            workspace: None,
             generation: 0,
             cancel_epoch: 0,
         }
@@ -261,6 +294,86 @@ pub fn rel_under(base: &str, path: &str) -> Option<String> {
     Some(rel.to_string())
 }
 
+/// 一条「真实目录 ↔ 影子目录」的对应，两侧都是 **URI 前缀**（不带尾斜杠）。
+///
+/// single 模式下只有一条；flat 模式下每个源码模块一条（实测 53 条）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PathPair {
+    pub real: String,
+    pub shadow: String,
+}
+
+impl PathPair {
+    pub fn new(real_dir: &Path, shadow_dir: &Path) -> Self {
+        Self {
+            real: path_to_uri(&real_dir.to_string_lossy()),
+            shadow: path_to_uri(&shadow_dir.to_string_lossy()),
+        }
+    }
+}
+
+/// 多前缀映射：按**最长前缀**选一条 `PathPair` 再做头替换。
+///
+/// 为什么必须最长优先：模块名之间存在前缀关系（实测工作区里有 `gl` 与 `gl2`、
+/// `ic` 与 `ic-*`）。若按声明顺序取第一条，`file:///…/ws/gl2/A.java` 会被
+/// `gl` 这条误命中——`swap_head` 的「rest 必须以 `/` 开头」保护在这里不成立，
+/// 因为 `gl2` 的 rest 是 `2/A.java`，本来就过不了；真正的风险是
+/// **同一个影子目录被两条规则都能解释**的嵌套布局（`ws` 与 `ws/gl` 都建了链接）。
+///
+/// 语义与 `swap_prefix` 完全一致：只换字符串值的开头与对象的键，不动正文。
+pub fn swap_prefix_multi(v: &Value, pairs: &[PathPair], to_shadow: bool) -> Value {
+    match v {
+        Value::String(s) => Value::String(swap_one_multi(s, pairs, to_shadow)),
+        Value::Array(a) => Value::Array(
+            a.iter()
+                .map(|x| swap_prefix_multi(x, pairs, to_shadow))
+                .collect(),
+        ),
+        Value::Object(m) => Value::Object(
+            m.iter()
+                .map(|(k, x)| {
+                    (
+                        swap_one_multi(k, pairs, to_shadow),
+                        swap_prefix_multi(x, pairs, to_shadow),
+                    )
+                })
+                .collect(),
+        ),
+        _ => v.clone(),
+    }
+}
+
+/// 单个字符串的多前缀替换。没有命中原样返回。
+fn swap_one_multi(s: &str, pairs: &[PathPair], to_shadow: bool) -> String {
+    let mut best: Option<(usize, &str)> = None; // (前缀长度, 目标前缀)
+    for p in pairs {
+        let (from, to) = if to_shadow {
+            (p.real.as_str(), p.shadow.as_str())
+        } else {
+            (p.shadow.as_str(), p.real.as_str())
+        };
+        let Some(rest) = s.strip_prefix(from) else {
+            continue;
+        };
+        // 与 `swap_head` 同一条边界规则：前缀之后必须是 `/` 或结束。
+        if !(rest.is_empty() || rest.starts_with('/')) {
+            continue;
+        }
+        // 不用 `is_none_or`：它要 Rust 1.82+，而本项目的 MSRV 没定那么高。
+        let better = match best {
+            Some((n, _)) => from.len() > n,
+            None => true,
+        };
+        if better {
+            best = Some((from.len(), to));
+        }
+    }
+    match best {
+        Some((n, to)) => format!("{to}{}", &s[n..]),
+        None => s.to_string(),
+    }
+}
+
 /// 把 JSON 里所有以 `from` 开头的 URI 字符串换成 `to` 开头。
 ///
 /// 只换「字符串值的开头」，不会动正文里碰巧出现的同样文字（比如源码里写着一个 file:/// 路径）。
@@ -284,27 +397,28 @@ pub fn swap_prefix(v: &Value, from: &str, to: &str) -> Value {
 ///
 /// 只认 `path` 键（DAP 的 `Source.path`），其它字符串不动；大小写、斜杠风格不敏感，
 /// 含 `..` 的路径不换（见 `rel_under`）。
+/// 单模块版路径字段映射 —— 现在只给单测当「一条特例」的回归基线用，
+/// 生产走 `swap_path_fields_multi`（`LangSession::from_server_paths`）。
+#[cfg(test)]
 fn swap_path_fields(v: &Value, from_dir: &Path, to_dir: &Path) -> Value {
+    // 参数方向是 (影子, 真实)，而 `roots` 存 (真实, 影子)，这里刻意反过来传。
+    swap_path_fields_multi(v, &[(to_dir.to_path_buf(), from_dir.to_path_buf())])
+}
+
+/// 多模块版本：`path` 字段按**最长影子前缀**换回对应模块的真实目录。
+///
+/// 单模块（single 模式）时与旧实现逐字节等价 —— 旧实现就是它的 1 条特例。
+fn swap_path_fields_multi(v: &Value, roots: &[(PathBuf, PathBuf)]) -> Value {
     match v {
-        Value::Array(a) => Value::Array(
-            a.iter()
-                .map(|x| swap_path_fields(x, from_dir, to_dir))
-                .collect(),
-        ),
+        Value::Array(a) => {
+            Value::Array(a.iter().map(|x| swap_path_fields_multi(x, roots)).collect())
+        }
         Value::Object(m) => Value::Object(
             m.iter()
                 .map(|(k, x)| {
                     let swapped = match (k.as_str(), x) {
-                        ("path", Value::String(s)) => rel_under(&from_dir.to_string_lossy(), s)
-                            .map(|rel| {
-                                // rel_under 只做字符串替换，返回的相对部分始终是反斜杠分隔。
-                                // 直接 Path::join 在 unix 上会拼出 `…/gl\src\A.java` 这种混斜杠路径，
-                                // 这里先换回本平台的分隔符再拼。
-                                let rel = rel.replace('\\', std::path::MAIN_SEPARATOR_STR);
-                                Value::String(to_dir.join(rel).to_string_lossy().into_owned())
-                            })
-                            .unwrap_or_else(|| x.clone()),
-                        _ => swap_path_fields(x, from_dir, to_dir),
+                        ("path", Value::String(s)) => map_one_path(s, roots),
+                        _ => swap_path_fields_multi(x, roots),
                     };
                     (k.clone(), swapped)
                 })
@@ -312,6 +426,51 @@ fn swap_path_fields(v: &Value, from_dir: &Path, to_dir: &Path) -> Value {
         ),
         _ => v.clone(),
     }
+}
+
+/// 把一个影子路径换到它所属模块的真实目录下；不属于任何模块则原样返回。
+fn map_one_path(s: &str, roots: &[(PathBuf, PathBuf)]) -> Value {
+    match find_root(roots, s, true) {
+        Some((real, rel)) => {
+            // rel_under 只做字符串替换，返回的相对部分始终是反斜杠分隔。
+            // 直接 Path::join 在 unix 上会拼出 `…/gl\src\A.java` 这种混斜杠路径，
+            // 这里先换回本平台的分隔符再拼。
+            let rel = rel.replace('\\', std::path::MAIN_SEPARATOR_STR);
+            Value::String(real.join(rel).to_string_lossy().into_owned())
+        }
+        None => Value::String(s.to_string()),
+    }
+}
+
+/// 在 `roots` 里按**最长前缀**找 `path` 属于哪一条，返回（对侧目录, 相对路径）。
+///
+/// `from_shadow = true` 表示 `path` 是影子侧路径，返回真实目录；反之返回影子目录。
+/// 最长优先是必需的：flat 下 53 条前缀里存在嵌套（工作区根与某个模块目录都登记过）。
+fn find_root<'a>(
+    roots: &'a [(PathBuf, PathBuf)],
+    path: &str,
+    from_shadow: bool,
+) -> Option<(&'a PathBuf, String)> {
+    let mut best: Option<(usize, &PathBuf, String)> = None;
+    for (real, shadow) in roots {
+        let (base, target) = if from_shadow {
+            (shadow, real)
+        } else {
+            (real, shadow)
+        };
+        let base_s = base.to_string_lossy();
+        let Some(rel) = rel_under(&base_s, path) else {
+            continue;
+        };
+        let better = match best {
+            Some((n, _, _)) => base_s.len() > n,
+            None => true,
+        };
+        if better {
+            best = Some((base_s.len(), target, rel));
+        }
+    }
+    best.map(|(_, target, rel)| (target, rel))
 }
 
 /// 字符串开头是 `from` 就换成 `to` 开头，否则原样返回。
@@ -549,5 +708,80 @@ mod tests {
         let there = swap_prefix(&v, &real, &shadow);
         assert!(there["uri"].as_str().unwrap().starts_with(&shadow));
         assert_eq!(swap_prefix(&there, &shadow, &real), v);
+    }
+
+    /// flat 形态：多个模块各自一条前缀，全部要能双向映射，且不串台。
+    #[test]
+    fn swap_prefix_multi_maps_every_module() {
+        let mods = ["gl", "gl2", "ic", "ic-extra", "ar"];
+        let pairs: Vec<PathPair> = mods
+            .iter()
+            .map(|m| PathPair {
+                real: format!("file:///C:/ws/{m}"),
+                shadow: format!("file:///D:/s/{m}"),
+            })
+            .collect();
+        for m in mods {
+            let real = json!({ "uri": format!("file:///C:/ws/{m}/src/A.java") });
+            let to_shadow = swap_prefix_multi(&real, &pairs, true);
+            assert_eq!(
+                to_shadow["uri"],
+                format!("file:///D:/s/{m}/src/A.java"),
+                "{m} 去程"
+            );
+            assert_eq!(
+                swap_prefix_multi(&to_shadow, &pairs, false),
+                real,
+                "{m} 回程"
+            );
+        }
+    }
+
+    /// 前缀存在包含关系时必须取最长的那条。
+    ///
+    /// 布局刻意让两条给出**不同**结果，否则测不出优先级：
+    /// 短前缀 → `D:/s/gl/src/A.java`，长前缀 → `E:/gl-shadow/src/A.java`。
+    #[test]
+    fn swap_prefix_multi_prefers_longest_prefix() {
+        let pairs = vec![
+            PathPair {
+                real: "file:///C:/ws".into(),
+                shadow: "file:///D:/s".into(),
+            },
+            PathPair {
+                real: "file:///C:/ws/gl".into(),
+                shadow: "file:///E:/gl-shadow".into(),
+            },
+        ];
+        let v = json!({ "uri": "file:///C:/ws/gl/src/A.java" });
+        let out = swap_prefix_multi(&v, &pairs, true);
+        assert_eq!(out["uri"], "file:///E:/gl-shadow/src/A.java");
+    }
+
+    /// `gl` 不能吃掉 `gl2` —— 前缀之后必须是 `/` 或结束。
+    #[test]
+    fn swap_prefix_multi_does_not_confuse_sibling_prefixes() {
+        let pairs = vec![PathPair {
+            real: "file:///C:/ws/gl".into(),
+            shadow: "file:///D:/s/gl".into(),
+        }];
+        let sibling = json!({ "uri": "file:///C:/ws/gl2/A.java" });
+        assert_eq!(swap_prefix_multi(&sibling, &pairs, true), sibling);
+    }
+
+    /// `find_root` 是 `shadow_uri_of` 与 DAP 路径映射的共同底座。
+    #[test]
+    fn find_root_picks_longest_and_rejects_outsiders() {
+        let roots = vec![
+            (PathBuf::from("D:/ws"), PathBuf::from("D:/s")),
+            (PathBuf::from("D:/ws/gl"), PathBuf::from("E:/gl-shadow")),
+        ];
+        let (shadow, rel) = find_root(&roots, "D:/ws/gl/src/A.java", false).expect("应命中长前缀");
+        assert_eq!(shadow, &PathBuf::from("E:/gl-shadow"));
+        assert_eq!(rel, "src\\A.java");
+        let (real, _) =
+            find_root(&roots, "E:/gl-shadow/src/A.java", true).expect("影子侧应命中最长");
+        assert_eq!(real, &PathBuf::from("D:/ws/gl"));
+        assert!(find_root(&roots, "F:/other/A.java", false).is_none());
     }
 }

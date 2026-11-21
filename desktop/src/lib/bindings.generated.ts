@@ -1,12 +1,14 @@
 /**
  * ⚠️ 本文件由 `scripts/gen-bindings.mjs` 从 Rust 源码生成，**不要手改**。
  *
- * 来源：`src-tauri/src/**` 里带 `// @ts-mirror` 标记的结构体。改了 Rust 字段就重跑：
+ * 来源：`src-tauri/src/**` 里带 `// @ts-mirror` 标记的结构体/枚举。改了 Rust 字段就重跑：
  *   npm run bindings:generate
  *
  * 与手写类型的相等性由 `src/lib/bindings.check.ts` 在 tsc 阶段钉住——
  * 那条断言就是「改一个 Rust 字段，`tsc` 当场红」的落点。
  */
+/** src-tauri/src/config.rs:24 · 枚举 */
+export type ShadowMode = "flat" | "single";
 /** src-tauri/src/commands/system.rs:61 · request */
 export interface ConfigPatch {
   autostart_enabled?: boolean;
@@ -23,7 +25,7 @@ export interface ConfigPatch {
   hotswap_auto?: boolean;
 }
 
-/** src-tauri/src/config.rs:19 · response */
+/** src-tauri/src/config.rs:42 · response */
 export interface AppConfig {
   autostart_enabled: boolean;
   workspace_root: string | null;
@@ -44,6 +46,7 @@ export interface AppConfig {
   lang_enabled: boolean;
   lang_auto_start: boolean;
   lang_xmx_mb: number | null;
+  lang_shadow_mode: "flat" | "single";
   deploy_on_start: boolean;
   hotswap_enabled: boolean;
   hotswap_auto: boolean;
@@ -58,14 +61,14 @@ export interface AppConfig {
   linked_overrides: LinkedOverrideConfig[];
 }
 
-/** src-tauri/src/config.rs:180 · response */
+/** src-tauri/src/config.rs:209 · response */
 export interface LinkedOverrideConfig {
   action: string;
   target: string;
   dir: string | null;
 }
 
-/** src-tauri/src/config.rs:204 · response */
+/** src-tauri/src/config.rs:233 · response */
 export interface DbConnConfig {
   id: string;
   name: string;

@@ -281,6 +281,7 @@ fn 真机走完一条调试会话() {
         data_dir: &data,
         config_dir: &cfg,
         xmx_mb: 1024,
+        syntax_server: false,
     };
     let lsp = LspClient::spawn(launch.command().unwrap(), Arc::new(Quiet)).expect("jdt.ls 起不来");
     let init = lsp
