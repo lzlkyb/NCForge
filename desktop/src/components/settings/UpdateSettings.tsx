@@ -5,7 +5,7 @@ import { useUpdateDownloadPreference, setUpdateDownloadPreference } from "../../
 import { Switch } from "../ui/switch";
 import { useUpdate, friendlyError } from "../../contexts/UpdateContext";
 import { useAppInfo } from "../../hooks/useAppInfo";
-import { formatBytes, formatBytesPerSec } from "../../lib/utils";
+import { UpdateReadout } from "../update/UpdateReadout";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { SettingsRow } from "../ui/SettingsRow";
@@ -56,15 +56,7 @@ export function UpdateSettings() {
       {lastResult && <SettingsRow id="last-update-result" label="最近更新结果" keywords={["安装记录"]}
         valueText={lastResultText} control={<span>{lastResultText}</span>}
         sub={`v${lastResult.from} → v${lastResult.to} · ${new Date(lastResult.at).toLocaleString()}`} />}
-      {status === "downloading" && <div className="settings-update-progress">
-        <div className="settings-update-track" role="progressbar" aria-label="软件更新下载进度" aria-valuemin={0} aria-valuemax={100}
-          aria-valuenow={update.progressIndeterminate ? undefined : pct} aria-valuetext={update.progressIndeterminate ? "总大小未知" : undefined}>
-          <span className={update.progressIndeterminate ? "is-indeterminate" : undefined}
-            style={update.progressIndeterminate ? undefined : { transform: `scaleX(${pct / 100})` }} />
-        </div>
-        <div className="settings-update-metrics"><span>{formatBytes(update.downloadedBytes)}{update.totalBytes ? ` / ${formatBytes(update.totalBytes)}` : " · 总大小未知"}</span>
-          <span>{pct >= 100 && !update.progressIndeterminate ? "校验中" : update.bytesPerSec > 0 ? formatBytesPerSec(update.bytesPerSec) : "正在连接…"}</span></div>
-      </div>}
+      {status === "downloading" && <UpdateReadout />}
       {update.error && <InlineNotice variant="error">{friendlyError(update.error, update.errorCode).friendly}</InlineNotice>}
       {status === "ready" && <p className="settings-maintenance-footnote">安装由你确认，稍后安装可以继续工作。</p>}
       {update.installBlock && <InlineNotice variant="warning">{update.installBlock} {update.openInstallBlock && <Button size="sm" variant="outline" onClick={update.openInstallBlock}>前往处理</Button>}</InlineNotice>}

@@ -243,7 +243,7 @@ pub(crate) fn read_table(path: &Path) -> Result<Table, String> {
     }
     let table: Table = serde_json::from_reader(File::open(path).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    if table.version != 1 || table.entries.len() > MAX_ENTRIES {
+    if table.version != 2 || table.entries.len() > MAX_ENTRIES {
         return Err("库文件目录缓存失效".into());
     }
     Ok(table)
@@ -292,7 +292,7 @@ fn feed(table: &mut Table, bytes: &mut Vec<u8>, name: &str, raw: Result<Vec<u8>,
         table.skipped += 1;
         return;
     };
-    if raw.contains(&0) {
+    if raw.contains(&0) && crate::workspace::utf16_encoding(&raw).is_none() {
         table.skipped += 1;
         return;
     }
@@ -312,7 +312,7 @@ fn feed(table: &mut Table, bytes: &mut Vec<u8>, name: &str, raw: Result<Vec<u8>,
 fn build_source(source: &Source, meta: &Path, blob: &Path) -> Result<Table, String> {
     let _io = CACHE_IO.lock().unwrap_or_else(|e| e.into_inner());
     let mut table = Table {
-        version: 1,
+        version: 2,
         stamps: source.stamps.clone(),
         entries: Vec::new(),
         skipped: 0,
@@ -580,7 +580,7 @@ mod tests {
             assert!(!valid_entry(name));
         }
         let mut table = Table {
-            version: 1,
+            version: 2,
             stamps: vec![],
             entries: vec![],
             skipped: 0,

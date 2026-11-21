@@ -29,4 +29,23 @@ describe("运行任务入口",()=>{
     const clear=[...document.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent==="清除已结束")!;act(()=>clear.click());expect(getOperations()).toHaveLength(1);
     const go=[...document.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent==="返回来源")!;act(()=>go.click());expect(h.setSession).toHaveBeenCalledWith({panelOpen:true,panelTab:"svc"});act(()=>task.finish());
   });
+  it("后台进度和部分完成只更新计数，详情保持关闭，输入焦点不变",()=>{
+    act(()=>root.render(<><textarea defaultValue="draft"/><OperationStatus compact/></>));
+    const editor=host.querySelector("textarea")!;
+    editor.focus(); editor.setSelectionRange(1, 3);
+    const task=beginOperation({key:"ui-partial",label:"导出"})!;
+    act(()=>{task.update({progress:{done:4,total:10}});task.finish("partial","保留 4 行");});
+    expect(host.textContent).toContain("1 待查看");
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(editor);
+    expect([editor.selectionStart,editor.selectionEnd]).toEqual([1,3]);
+    act(()=>host.querySelector("button")!.click());
+    expect(document.querySelector(".op-panel")?.getAttribute("data-anchor")).toBe("bottom");
+    expect(document.querySelector(".op-panel")?.textContent).toContain("保留 4 行");
+    editor.focus();
+    const escape=new KeyboardEvent("keydown",{key:"Escape",bubbles:true,cancelable:true});
+    act(()=>editor.dispatchEvent(escape));
+    expect(escape.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(editor);
+  });
 });

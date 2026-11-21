@@ -83,6 +83,18 @@ describe("文件索引的缓存策略", () => {
     expect(other[0].path).toBe("C:\\w2\\x\\X.java");
   });
 
+  it("旧工程较晚完成时不会覆盖新工程的文件清单", async () => {
+    let finishOld!: (value: { files: string[]; truncated: boolean }) => void;
+    deps.invoke.mockReturnValueOnce(new Promise(resolve => { finishOld = resolve; }));
+    deps.invoke.mockResolvedValueOnce({ files: ["B.java"], truncated: false });
+    const old = mod.getFileIndex("C:\\old");
+    const next = await mod.getFileIndex("C:\\new");
+    finishOld({ files: ["A.java"], truncated: false });
+    await old;
+    expect(next[0].path).toBe("C:\\new\\B.java");
+    expect(mod.peekFileIndex("C:\\new")).toBe(next);
+  });
+
   it("加载失败返回空表而不抛（面板照常可用）", async () => {
     deps.invoke.mockRejectedValueOnce(new Error("目录没了"));
     await expect(mod.getFileIndex("C:\\w")).resolves.toEqual([]);

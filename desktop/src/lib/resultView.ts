@@ -124,6 +124,8 @@ const FONT_FAMILY = UI_FONT_FAMILY;
 let measureCtx: CanvasRenderingContext2D | null | undefined;
 let measureFont = "";
 const widthCache = new Map<string, number>();
+const WIDTH_TEXT_BUDGET = 1024 * 1024;
+let measuredBytes = 0;
 let measuredRevision = -1;
 
 /**
@@ -166,6 +168,7 @@ export function textWidth(text: string, bold = false): number {
   if (measuredRevision !== revision) {
     measuredRevision = revision;
     widthCache.clear();
+    measuredBytes = 0;
     measureFont = "";
   }
   if (!text) return 0;
@@ -185,7 +188,17 @@ export function textWidth(text: string, bold = false): number {
     w = estimate(text);
   }
   // 上限兜底：一屏上千格，缓存不封顶会把大结果集的内存吃穿
-  if (widthCache.size < 8000) widthCache.set(key, w);
+  const bytes = key.length * 2;
+  if (bytes <= 1024) {
+    while (widthCache.size >= 8000 || measuredBytes + bytes > WIDTH_TEXT_BUDGET) {
+      const oldest = widthCache.keys().next();
+      if (oldest.done) break;
+      widthCache.delete(oldest.value);
+      measuredBytes -= oldest.value.length * 2;
+    }
+    widthCache.set(key, w);
+    measuredBytes += bytes;
+  }
   return w;
 }
 

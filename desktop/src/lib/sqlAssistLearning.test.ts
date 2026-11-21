@@ -106,6 +106,47 @@ describe("SQL 学习只使用已确认的执行对象", () => {
     expect(joins.sqlHistoricalJoinSuggestions(scope, sources, columns)).toHaveLength(0);
   });
 
+  it("按语句位置学习手输字段，同批去重并跳过投影别名和字面量", async () => {
+    const l = await import("./sqlAssistLearning"), u = await import("./sqlUsage");
+    const scope = l.sqlAssistScope("conn")!;
+    const sql = "SELECT lower(m.code) AS name FROM bd_material m WHERE m.code = 'private-value' ORDER BY name, m.code";
+    l.recordSqlExecutionUsage(identity(sql, 1), undefined, "run:fields");
+    l.recordSqlExecutionUsage(identity(sql, 2), undefined, "run:fields");
+    await vi.waitFor(() => expect(Object.keys(u.usageSnapshot(scope)).sort()).toEqual([
+      u.sqlUsageKey("bd_material"), ...["select", "where", "order"].map(clause => u.sqlUsageKey("bd_material", "code", clause)),
+    ].sort()));
+    expect(u.usageSnapshot(scope)[u.sqlUsageKey("bd_material", "code", "where")].execute).toBe(1);
+    expect(data.columns).toHaveBeenCalledTimes(1);
+    u.flushSqlUsage();
+    expect(localStorage.getItem("ncforge-sql-usage")).not.toContain("private-value");
+  });
+
+  it("多表查询只学习唯一可归属的裸字段，限定名仍可区分同名字段", async () => {
+    const l = await import("./sqlAssistLearning"), u = await import("./sqlUsage");
+    const scope = l.sqlAssistScope("conn")!;
+    data.columns.mockImplementation(async (_conn, table) => table === "bd_material" ? [{ name: "CODE" }, { name: "NAME" }] : [{ name: "CODE" }]);
+    l.recordSqlExecutionUsage(identity("SELECT name, code, o.code FROM bd_material m JOIN bd_org o ON m.code = o.code"));
+    await vi.waitFor(() => expect(u.usageSnapshot(scope)[u.sqlUsageKey("bd_material", "name", "select")]?.execute).toBe(1));
+    expect(u.usageSnapshot(scope)[u.sqlUsageKey("bd_org", "code", "select")]?.execute).toBe(1);
+    expect(u.usageSnapshot(scope)[u.sqlUsageKey("bd_material", "code", "select")]).toBeUndefined();
+  });
+
+  it("关闭记忆跳过读取，清空后迟到的字段不会重新出现", async () => {
+    const l = await import("./sqlAssistLearning"), u = await import("./sqlUsage"), joins = await import("./sqlJoinHistory");
+    const scope = l.sqlAssistScope("conn")!, execution = identity("SELECT code FROM bd_material");
+    u.setSqlUsageEnabled(false);
+    l.recordSqlExecutionUsage(execution);
+    expect(data.columns).not.toHaveBeenCalled();
+    u.setSqlUsageEnabled(true);
+    let deliver!: (columns: { name: string }[]) => void;
+    data.columns.mockImplementation(() => new Promise(resolve => { deliver = resolve; }));
+    l.recordSqlExecutionUsage(execution, joins.sqlJoinHistoryGeneration(scope));
+    u.clearSqlUsage(scope); joins.clearSqlJoinHistory(scope);
+    deliver([{ name: "CODE" }]);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(u.usageSnapshot(scope)).toEqual({});
+  });
+
   it("清除偏好或切换 schema 后，迟到字段结果不能回填历史", async () => {
     const l = await import("./sqlAssistLearning"), joins = await import("./sqlJoinHistory");
     const pending: ((cols: { name: string }[]) => void)[] = [];

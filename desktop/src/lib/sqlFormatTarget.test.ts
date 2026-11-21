@@ -42,4 +42,13 @@ describe("fallbackFormatEdits（真实解析器）", () => {
     expect(result).toEqual({ edits: expect.any(Array), skipped: 0, error: null });
     expect(result.edits).toHaveLength(2);
   });
+
+  it.each([
+    ["mysql", "DELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; END$$\nDELIMITER ;"],
+    ["postgresql", "DO $$ BEGIN RAISE NOTICE 'hello'; END $$;\nSELECT 1;"],
+  ] as const)("脚本兜底不切开 %s 过程体", async (dialect, text) => {
+    const result = await fallbackFormatEdits(modelOf(text), text, dialect);
+    expect(result.edits).toEqual([]);
+    expect(result.error).toContain("已保留原文");
+  });
 });

@@ -21,6 +21,12 @@ describe("ORA 错误定位", () => {
     expect(hint.location?.occurrences).toBe(2);
   });
 
+  it("Oracle 携带别名时定位实际列，忽略 q 引号中的同名文本", () => {
+    const sql = "select q'[it's a BD_XXX]',\n       a.bd_xxx from t a";
+    const hint = oraHint('ORA-00904: "A"."BD_XXX": invalid identifier', sql)!;
+    expect(hint.location).toMatchObject({ ident: "BD_XXX", line: 2, column: 10, occurrences: 1 });
+  });
+
   it("语句里找不到这个名字就不给位置（不猜）", () => {
     const hint = oraHint('ORA-00904: "OTHER": invalid identifier', "select id from t")!;
     expect(hint.location).toBeUndefined();

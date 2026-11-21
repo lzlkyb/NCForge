@@ -117,6 +117,31 @@ pub(crate) async fn allowed_read_roots(state: &AppState) -> Vec<String> {
     .unwrap_or_else(|_| vec![fallback])
 }
 
+async fn resolve_tree_read_path(state: &AppState, path: String) -> Result<PathBuf, String> {
+    let primary = workspace_root(state).await?;
+    let target = if path.is_empty() {
+        primary.clone()
+    } else {
+        path
+    };
+    // Most tree reads stay inside the current project. Keep canonical path checks in this
+    // fast path so a linked directory that leaves the root still uses the full allowlist.
+    if std::path::Path::new(&target).starts_with(&primary) {
+        if let Ok(path) = crate::security::path::resolve_safe_path_async(
+            target.clone(),
+            vec![primary],
+            Vec::new(),
+            true,
+        )
+        .await
+        {
+            return Ok(path);
+        }
+    }
+    let roots = allowed_read_roots(state).await;
+    crate::security::path::resolve_safe_path_async(target, roots, Vec::new(), true).await
+}
+
 /// 选择工程目录（系统文件夹对话框）。用户取消返回 null。
 ///
 /// 对话框由后端拉起，前端不直接拿 `dialog:` 权限：插件权限一旦授予 WebView，
@@ -244,33 +269,22 @@ pub async fn fs_list_dir(
     state: tauri::State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<Vec<DirItem>, String> {
-    let roots = allowed_read_roots(&state).await;
-    if roots.is_empty() {
-        return Err("尚未选择工作区目录".to_string());
-    }
-    let target = if path.is_empty() {
-        roots[0].clone()
-    } else {
-        path
-    };
-    let dir =
-        crate::security::path::resolve_safe_path_async(target, roots, Vec::new(), true).await?;
+    let dir = resolve_tree_read_path(&state, path).await?;
     tauri::async_runtime::spawn_blocking(move || workspace::list_dir(&dir))
         .await
         .map_err(|e| format!("后台任务失败: {e}"))?
 }
 
-/// 索引单个已展开源码根的包目录，沿用文件树的读取范围。
+/// 索引一个源码根的包目录，沿用文件树的读取范围。
 #[tauri::command]
 pub async fn fs_package_dirs(
     state: tauri::State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<Vec<workspace::PackageDir>, String> {
-    let roots = allowed_read_roots(&state).await;
-    if roots.is_empty() || path.is_empty() {
+    if path.is_empty() {
         return Err("未指定源码根".into());
     }
-    let dir = crate::security::path::resolve_safe_path_async(path, roots, Vec::new(), true).await?;
+    let dir = resolve_tree_read_path(&state, path).await?;
     tauri::async_runtime::spawn_blocking(move || workspace::package_dirs(&dir))
         .await
         .map_err(|e| format!("后台任务失败: {e}"))?
@@ -286,8 +300,7 @@ pub async fn fs_java_kinds(
     if names.len() > crate::java_tree::MAX_BATCH || path.is_empty() {
         return Err("Java 类型识别批次超出范围".into());
     }
-    let roots = allowed_read_roots(&state).await;
-    let dir = crate::security::path::resolve_safe_path_async(path, roots, Vec::new(), true).await?;
+    let dir = resolve_tree_read_path(&state, path).await?;
     tauri::async_runtime::spawn_blocking(move || crate::java_tree::kinds_in_directory(&dir, names))
         .await
         .map_err(|e| format!("后台任务失败: {e}"))

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allResultSelection, gridSelectionCell, gridSelectionHeading, selectedEditableCells } from "./gridSelection";
+import { allResultSelection, gridSelectionCell, gridSelectionHeading, reconcileGridSelection, selectedEditableCells } from "./gridSelection";
 it("全选依据筛选和排序后的行、显示列顺序，空数据不生成选区", () => {
   expect(allResultSelection([3, 0, 2], [4, 1])).toEqual({ anchor: { r: 3, c: 4 }, end: { r: 2, c: 1 } });
   expect(allResultSelection([], [0])).toBeNull(); expect(allResultSelection([0], [])).toBeNull();
@@ -24,6 +24,15 @@ describe("logical grid selection perimeter", () => {
   it("a single cell receives all four edges without losing active semantics",()=>{
     expect(gridSelectionCell({rowStart:0,rowEnd:0,colStart:0,colEnd:0},0,0,true)).toEqual({"data-cell":true,"aria-selected":true,"data-range-edges":"top bottom left right","data-active-cell":true});
   });
+});
+
+it("排序只保留由相同行列组成的连续选区", () => {
+  const selection = { anchor: { r: 0, c: 0 }, end: { r: 2, c: 1 } };
+  const rows = [0, 1, 2, 3], columns = [0, 1, 2];
+  expect(reconcileGridSelection(selection, rows, columns, [3, 2, 1, 0], [2, 1, 0])).toBe(selection);
+  expect(reconcileGridSelection(selection, rows, columns, [0, 3, 1, 2], columns)).toEqual({ anchor: selection.end, end: selection.end });
+  expect(reconcileGridSelection(selection, rows, columns, [0, 1, 3], columns)).toBeNull();
+  expect(reconcileGridSelection(selection, rows, columns, rows, [0, 2, 1])).toEqual({ anchor: selection.end, end: selection.end });
 });
 
 describe("选区里的可编辑格", () => {

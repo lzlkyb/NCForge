@@ -139,14 +139,6 @@ html.forge-controls :is(.ui-surface[role="menu"], .ui-surface[role="listbox"], .
   outline: 2px solid hsl(var(--ring));
   outline-offset: 1px;
 }
-/* Floating and inset surfaces have different depth and shared concentric corners. */
-html.forge-controls .wb-settings-body .ui-card {
-  padding: 20px;
-  border: 1px solid var(--forge-edge);
-  border-radius: var(--r-card);
-  background: hsl(var(--card));
-  box-shadow: var(--forge-card-depth);
-}
 .forge-controls .settings-choice { padding: 3px; border-radius: var(--forge-radius); }
 .forge-controls .settings-choice button { min-height: 32px; border-radius: 5px; }
 .forge-controls .settings-choice button[aria-checked="true"] { box-shadow: var(--forge-button-depth); }

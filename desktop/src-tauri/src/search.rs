@@ -16,6 +16,7 @@
 //!   所以高亮一律由后端给，纯文本模式也走同一字段，前端只写一份渲染逻辑。
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -28,7 +29,11 @@ use crate::content_pack;
 use crate::workspace;
 
 /// 递归时不进入的目录。
-const SKIP_DIRS: [&str; 4] = [".svn", ".git", ".idea", "node_modules"];
+const SKIP_DIRS: [&str; 5] = [".svn", ".git", ".idea", "node_modules", ".nc-compile"];
+
+fn skip_search_dir(name: &str) -> bool {
+    SKIP_DIRS.iter().any(|dir| dir.eq_ignore_ascii_case(name))
+}
 
 /// 按扩展名直接判为二进制的文件，连打开都不打开。
 ///
@@ -46,9 +51,8 @@ const SKIP_EXTS: [&str; 34] = [
     "dll", "exe", "so", "dylib",
 ];
 
-/// 单个文件的搜索上限：比 `workspace::MAX_FILE_BYTES` 更保守，
-/// 大文件里命中一次也不值得让整体变慢。
-const MAX_SEARCH_BYTES: u64 = 4 * 1024 * 1024;
+/// Larger files remain on disk so indexing them cannot inflate the in-memory content pack.
+pub(crate) const PACK_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
 /// 结果条数上限（一次搜索最多回这么多行）。
 const HARD_MAX_RESULTS: usize = 500;
@@ -263,6 +267,8 @@ pub struct SearchHit {
     /// 相对工作区根的路径，统一用 `/` 分隔（前端展示与点击打开都省事）。
     pub path: String,
     pub line: u32,
+    /// 1-based UTF-16 column in the source, independent of snippet clipping.
+    pub column: u32,
     /// 该行文本（已按 `MAX_LINE_CHARS` 截断）。
     pub text: String,
     /// 相对 `text` 的命中区间，用于前端画 `<mark>`。
@@ -482,6 +488,7 @@ impl Matcher {
             } else {
                 RegexBuilder::new(&format!("(?m){}", opts.text))
                     .case_insensitive(!opts.case_sensitive)
+                    .crlf(true)
                     .build()
                     .ok()
             };
@@ -492,10 +499,14 @@ impl Matcher {
             });
         }
         Ok(Matcher::Plain {
-            needle: opts.text.trim().to_string(),
+            needle: opts.text.trim().replace("\r\n", "\n"),
             case_sensitive: opts.case_sensitive,
             whole_word: opts.whole_word,
         })
+    }
+
+    fn is_multiline(&self) -> bool {
+        matches!(self, Self::Plain { needle, .. } if needle.contains('\n'))
     }
 
     /// 返回该行所有命中区间的**字节**偏移（调用方负责换算成 UTF-16）。
@@ -628,6 +639,9 @@ impl<'a> Prefilter<'a> {
 
 /// 这个文件里还有可能有命中吗？没有就整块跳过，省掉逐行切分与匹配器调用。
 fn file_may_match(matcher: &Matcher, prefilter: Option<&Prefilter<'_>>, text: &str) -> bool {
+    if matcher.is_multiline() {
+        return true;
+    }
     match matcher {
         // 正则走整文件 `(?m)` 预判：一次 DFG/SIMD 扫描，比按行调 500 次 `find_iter` 便宜一个量级。
         Matcher::Re { file, lits, .. } => {
@@ -808,9 +822,9 @@ pub fn search_cancellable(
     // ── 内容包就绪就直接走包：免掉「走树 + 8 千次 open」──
     // 包未就绪 / 属于别的工作区时回落磁盘路径（完整扫描，只是慢）；
     // `current_for` 顺带把「磁盘上有包但还没加载」的情况加载起来。
-    if let Some(pack) = content_pack::current_for(root) {
+    if let Some(pack) = content_pack::for_search(root) {
         return Ok(search_pack(
-            &pack, opts, &matcher, &filter, &scope, limit, started, budget_ms, cancel, None,
+            root, &pack, opts, &matcher, &filter, &scope, limit, started, budget_ms, cancel, None,
         ));
     }
 
@@ -829,6 +843,7 @@ pub fn search_cancellable(
     // 扫描期计数会把被上限整份砍掉的文件也算进去。
     let collected = AtomicUsize::new(0);
     let stop = AtomicBool::new(false);
+    let incomplete = AtomicBool::new(false);
 
     // 文件少时线程开销反而更大，直接串行
     let threads = if candidates.len() < 64 {
@@ -869,7 +884,15 @@ pub fn search_cancellable(
                     }
 
                     let before = local.len();
-                    let was_text = scan_candidate(path, rel, &overlay, &matcher, room, &mut local);
+                    let was_text = scan_candidate(
+                        path,
+                        rel,
+                        &overlay,
+                        &matcher,
+                        room,
+                        &mut local,
+                        &incomplete,
+                    );
                     if was_text {
                         scanned.fetch_add(1, Ordering::Relaxed);
                     }
@@ -921,6 +944,7 @@ pub fn search_cancellable(
         truncated: capped
             || stop.load(Ordering::Relaxed)
             || walk_truncated
+            || incomplete.load(Ordering::Relaxed)
             || panicked
             || cancel.load(Ordering::Relaxed),
         elapsed_ms: started.elapsed().as_millis() as u64,
@@ -1006,8 +1030,9 @@ pub fn search_stream(
 
     // 包就绪时不必「边扫边推」：整次查询只有几十毫秒，一次性把结果推过去即可。
     // 仍然调 sink 是给前端保持「同一套事件流」的心智模型（最终结果仍以返回值为准）。
-    if let Some(pack) = content_pack::current_for(root) {
+    if let Some(pack) = content_pack::for_search(root) {
         return Ok(search_pack(
+            root,
             &pack,
             opts,
             &matcher,
@@ -1026,6 +1051,7 @@ pub fn search_stream(
     let scanned = AtomicUsize::new(0);
     let collected = AtomicUsize::new(0);
     let stop = AtomicBool::new(false);
+    let incomplete = AtomicBool::new(false);
     let mut hits: Vec<SearchHit> = Vec::new();
 
     // ── 优先文件：最近打开的那些先来，让第一条结果几乎立刻可见 ──
@@ -1035,14 +1061,24 @@ pub fn search_stream(
         if stop.load(Ordering::Relaxed) || cancel.load(Ordering::Relaxed) {
             break;
         }
+        if started.elapsed().as_millis() > budget_ms {
+            stop.store(true, Ordering::Relaxed);
+            break;
+        }
         let Some(rel) = normalize_rel_dir(rel) else {
             continue;
         };
-        if !scanned_first.insert(rel.to_ascii_lowercase()) {
+        if rel
+            .rsplit_once('/')
+            .is_some_and(|(parent, _)| parent.split('/').any(skip_search_dir))
+        {
             continue;
         }
         let path = root.join(&rel);
-        if !accept_candidate(&path, &rel, &filter) {
+        if !in_scope(&scope, &rel)
+            || !accept_candidate(&path, &rel, &filter)
+            || !scanned_first.insert(rel.to_ascii_lowercase())
+        {
             continue;
         }
         let room = limit.saturating_sub(collected.load(Ordering::Relaxed));
@@ -1050,7 +1086,15 @@ pub fn search_stream(
             break;
         }
         let before = hits.len();
-        if scan_candidate(&path, &rel, &overlay, &matcher, room, &mut hits) {
+        if scan_candidate(
+            &path,
+            &rel,
+            &overlay,
+            &matcher,
+            room,
+            &mut hits,
+            &incomplete,
+        ) {
             scanned.fetch_add(1, Ordering::Relaxed);
         }
         let added = hits.len() - before;
@@ -1096,6 +1140,7 @@ pub fn search_stream(
                 let mut local: Vec<SearchHit> = Vec::new();
                 // 攒够一小批再推：每命中一行就 emit 一次会把 IPC 打满
                 let mut pending: Vec<SearchHit> = Vec::new();
+                let mut last_emit = None::<Instant>;
                 loop {
                     if stop.load(Ordering::Relaxed) {
                         break;
@@ -1117,8 +1162,15 @@ pub fn search_stream(
                         break;
                     }
                     let before = local.len();
-                    let was_text =
-                        scan_candidate(&path, &rel, &overlay, &matcher, room, &mut local);
+                    let was_text = scan_candidate(
+                        &path,
+                        &rel,
+                        &overlay,
+                        &matcher,
+                        room,
+                        &mut local,
+                        &incomplete,
+                    );
                     if was_text {
                         scanned.fetch_add(1, Ordering::Relaxed);
                     }
@@ -1130,9 +1182,13 @@ pub fn search_stream(
                             stop.store(true, Ordering::Relaxed);
                         }
                     }
-                    if pending.len() >= STREAM_BATCH {
+                    if !pending.is_empty()
+                        && (pending.len() >= STREAM_BATCH
+                            || last_emit.is_none_or(|at| at.elapsed() >= Duration::from_millis(60)))
+                    {
                         sink(&pending);
                         pending.clear();
+                        last_emit = Some(Instant::now());
                     }
                 }
                 if !pending.is_empty() {
@@ -1175,6 +1231,7 @@ pub fn search_stream(
         truncated: capped
             || stop.load(Ordering::Relaxed)
             || walk_truncated
+            || incomplete.load(Ordering::Relaxed)
             || panicked
             || cancel.load(Ordering::Relaxed),
         elapsed_ms: started.elapsed().as_millis() as u64,
@@ -1212,6 +1269,7 @@ fn next_candidate(feed: &Feed, stop: &AtomicBool) -> Option<(PathBuf, String)> {
 /// 走目录、把候选投进队列。返回是否因预算 / 取消提前结束。
 fn feed_candidates(walk: &Walk) -> bool {
     let feed = walk.feed;
+    let cache = content_pack::dir();
     let mut stack: Vec<PathBuf> = if walk.dirs.is_empty() {
         vec![walk.root.to_path_buf()]
     } else {
@@ -1226,6 +1284,9 @@ fn feed_candidates(walk: &Walk) -> bool {
             truncated = true;
             break;
         }
+        if cache.as_ref().is_some_and(|cache| dir.starts_with(cache)) {
+            continue;
+        }
         let Ok(rd) = std::fs::read_dir(&dir) else {
             continue;
         };
@@ -1233,7 +1294,7 @@ fn feed_candidates(walk: &Walk) -> bool {
             let Ok(ft) = entry.file_type() else { continue };
             let name = entry.file_name().to_string_lossy().into_owned();
             if ft.is_dir() {
-                if !SKIP_DIRS.contains(&name.as_str()) {
+                if !skip_search_dir(&name) {
                     stack.push(entry.path());
                 }
                 continue;
@@ -1246,7 +1307,7 @@ fn feed_candidates(walk: &Walk) -> bool {
             if walk.skip.contains(&rel.to_ascii_lowercase()) {
                 continue;
             }
-            if !accept_candidate(&path, &rel, walk.filter) {
+            if !walk.filter.accepts(&rel, &name) || has_binary_ext(&name) {
                 continue;
             }
             if !push_candidate(
@@ -1304,7 +1365,7 @@ fn push_candidate(
     true
 }
 
-/// 候选准入：掩码、二进制扩展名、大小。枚举与投喂两侧共用同一套判断。
+/// 候选准入：掩码、二进制扩展名。大小由读取阶段处理，以便准确标记未覆盖的文件。
 fn accept_candidate(path: &Path, rel: &str, filter: &FileFilter) -> bool {
     let name = path
         .file_name()
@@ -1313,7 +1374,7 @@ fn accept_candidate(path: &Path, rel: &str, filter: &FileFilter) -> bool {
     if name.is_empty() || !filter.accepts(rel, &name) || has_binary_ext(&name) {
         return false;
     }
-    std::fs::metadata(path).is_ok_and(|md| md.is_file() && md.len() <= MAX_SEARCH_BYTES)
+    std::fs::symlink_metadata(path).is_ok_and(|md| md.is_file())
 }
 
 /// 走一遍工作区，返回通过掩码、大小合适的候选文件 `(绝对路径, 相对路径)`。
@@ -1332,6 +1393,7 @@ fn collect_candidates(
     cancel: &AtomicBool,
 ) -> (Vec<(PathBuf, String)>, bool) {
     let mut out = Vec::new();
+    let cache = content_pack::dir();
     let mut stack: Vec<PathBuf> = if dirs.is_empty() {
         vec![root.to_path_buf()]
     } else {
@@ -1342,6 +1404,9 @@ fn collect_candidates(
         if started.elapsed().as_millis() > budget_ms || cancel.load(Ordering::Relaxed) {
             return (out, true);
         }
+        if cache.as_ref().is_some_and(|cache| dir.starts_with(cache)) {
+            continue;
+        }
         let Ok(rd) = std::fs::read_dir(&dir) else {
             continue;
         };
@@ -1351,7 +1416,7 @@ fn collect_candidates(
             let name = entry.file_name().to_string_lossy().into_owned();
 
             if ft.is_dir() {
-                if !SKIP_DIRS.contains(&name.as_str()) {
+                if !skip_search_dir(&name) {
                     stack.push(entry.path());
                 }
                 continue;
@@ -1367,10 +1432,6 @@ fn collect_candidates(
             }
             // 扩展名就能定的二进制不要打开（见 SKIP_EXTS：本地一半候选是 .class）
             if has_binary_ext(&name) {
-                continue;
-            }
-            let Ok(md) = entry.metadata() else { continue };
-            if md.len() > MAX_SEARCH_BYTES {
                 continue;
             }
             out.push((path, rel));
@@ -1391,16 +1452,20 @@ pub struct PackSource {
 
 /// 走一遍工作区，收集「会被内容搜索读到」的文件及其 size/mtime。
 ///
-/// 跳过规则必须与 [`collect_candidates`] 完全一致（目录、二进制扩展名、4 MB 上限），
+/// 跳过规则必须与 [`collect_candidates`] 完全一致（目录、二进制扩展名），
 /// 否则包里会多出搜索根本不会读的文件，或者少掉本该能搜到的文件。
 /// 这里刻意**不**套用范围与掩码：包是整工作区的快照，范围在查询时按相对路径过滤，
 /// 否则换个组件搜就得重新建包。
 pub fn pack_sources(root: &Path, cancel: &AtomicBool) -> Vec<PackSource> {
     let mut out: Vec<PackSource> = Vec::new();
     let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+    let cache = content_pack::dir();
     while let Some(dir) = stack.pop() {
         if cancel.load(Ordering::Relaxed) {
             break;
+        }
+        if cache.as_ref().is_some_and(|cache| dir.starts_with(cache)) {
+            continue;
         }
         let Ok(rd) = std::fs::read_dir(&dir) else {
             continue;
@@ -1409,7 +1474,7 @@ pub fn pack_sources(root: &Path, cancel: &AtomicBool) -> Vec<PackSource> {
             let Ok(ft) = entry.file_type() else { continue };
             let name = entry.file_name().to_string_lossy().into_owned();
             if ft.is_dir() {
-                if !SKIP_DIRS.contains(&name.as_str()) {
+                if !skip_search_dir(&name) {
                     stack.push(entry.path());
                 }
                 continue;
@@ -1418,9 +1483,6 @@ pub fn pack_sources(root: &Path, cancel: &AtomicBool) -> Vec<PackSource> {
                 continue;
             }
             let Ok(md) = entry.metadata() else { continue };
-            if md.len() > MAX_SEARCH_BYTES {
-                continue;
-            }
             let path = entry.path();
             out.push(PackSource {
                 rel: relative_slash(root, &path),
@@ -1470,6 +1532,7 @@ fn file_name(rel: &str) -> &str {
 /// `priority` 在包路径上没有意义（没有逐文件 I/O 的顺序问题），忽略。
 #[allow(clippy::too_many_arguments)]
 fn search_pack(
+    root: &Path,
     pack: &content_pack::Pack,
     opts: &SearchOptions,
     matcher: &Matcher,
@@ -1515,6 +1578,38 @@ fn search_pack(
 
     // ── 分块候选：只保留通过范围/掩码、且不在 overlay 里的文件 ──
     let table = pack.table();
+    for rel in &table.disk_files {
+        if cancel.load(Ordering::Relaxed) || started.elapsed().as_millis() > budget_ms {
+            stop.store(true, Ordering::Relaxed);
+        }
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
+        if normalize_rel_dir(rel).as_ref() != Some(rel)
+            || overlay.contains_key(rel)
+            || !in_scope(scope, rel)
+            || !filter.accepts(rel, file_name(rel))
+        {
+            continue;
+        }
+        let room = limit.saturating_sub(collected.load(Ordering::Relaxed));
+        let before = hits.len();
+        if scan_candidate(
+            &root.join(rel),
+            rel,
+            &overlay,
+            matcher,
+            room,
+            &mut hits,
+            &chunk_failed,
+        ) {
+            scanned.fetch_add(1, Ordering::Relaxed);
+        }
+        let added = hits.len() - before;
+        if added > 0 && collected.fetch_add(added, Ordering::Relaxed) + added >= limit {
+            stop.store(true, Ordering::Relaxed);
+        }
+    }
     let mut per_chunk: Vec<Vec<&content_pack::FileMeta>> = vec![Vec::new(); table.chunks.len()];
     for f in &table.files {
         if overlay.contains_key(&f.path) || !in_scope(scope, &f.path) {
@@ -1657,11 +1752,15 @@ pub fn list_files(root: &Path) -> (Vec<String>, bool) {
     let started = Instant::now();
     let mut out: Vec<String> = Vec::new();
     let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+    let cache = content_pack::dir();
     let mut truncated = false;
     while let Some(dir) = stack.pop() {
         if started.elapsed().as_millis() > TIME_BUDGET_MS || out.len() >= LIST_FILES_CAP {
             truncated = true;
             break;
+        }
+        if cache.as_ref().is_some_and(|cache| dir.starts_with(cache)) {
+            continue;
         }
         let Ok(rd) = std::fs::read_dir(&dir) else {
             continue;
@@ -1671,7 +1770,7 @@ pub fn list_files(root: &Path) -> (Vec<String>, bool) {
             let Ok(ft) = entry.file_type() else { continue };
             let name = entry.file_name().to_string_lossy().into_owned();
             if ft.is_dir() {
-                if !SKIP_DIRS.contains(&name.as_str()) {
+                if !skip_search_dir(&name) {
                     stack.push(entry.path());
                 }
             } else if ft.is_file() && !has_binary_ext(&name) {
@@ -1767,7 +1866,7 @@ pub fn mark_list_dirty() {
 /// 扩展名。编译写出的 `.class` 因此不算——否则每次编译都会让索引整棵重扫。
 pub fn is_listed_path(path: &Path) -> bool {
     let in_skipped_dir = path.components().any(|c| match c {
-        std::path::Component::Normal(n) => n.to_str().is_some_and(|s| SKIP_DIRS.contains(&s)),
+        std::path::Component::Normal(n) => n.to_str().is_some_and(skip_search_dir),
         _ => false,
     });
     !in_skipped_dir
@@ -1909,6 +2008,7 @@ fn scan_candidate(
     matcher: &Matcher,
     room: usize,
     out: &mut Vec<SearchHit>,
+    incomplete: &AtomicBool,
 ) -> bool {
     match overlay.get(rel) {
         Some(text) => {
@@ -1924,7 +2024,11 @@ fn scan_candidate(
             Prefilter::of(matcher).as_ref(),
             room,
             out,
-        ),
+        )
+        .unwrap_or_else(|_| {
+            incomplete.store(true, Ordering::Relaxed);
+            false
+        }),
     }
 }
 
@@ -1943,20 +2047,29 @@ fn scan_file(
     prefilter: Option<&Prefilter<'_>>,
     room: usize,
     out: &mut Vec<SearchHit>,
-) -> bool {
-    let Ok(bytes) = std::fs::read(path) else {
-        return false;
-    };
-    // 二进制探测：前 8KB 里出现 NUL 就跳过（.class / .jar / 图片都会被挡住）。
-    if bytes.iter().take(8192).any(|b| *b == 0) {
-        return false;
+) -> std::io::Result<bool> {
+    let mut file = std::fs::File::open(path)?;
+    let size = file.metadata()?.len();
+    let max = workspace::MAX_FILE_BYTES;
+    let cap = if size > max { 8192 } else { max + 1 };
+    let mut bytes = Vec::with_capacity(size.min(cap) as usize);
+    (&mut file).take(cap).read_to_end(&mut bytes)?;
+    if !is_searchable_text(&bytes) {
+        return Ok(false);
+    }
+    if size > max || bytes.len() as u64 > max {
+        return Err(std::io::Error::other("文件超过搜索读取上限"));
     }
     let text = workspace::decode_lossy(&bytes);
     if !file_may_match(matcher, prefilter, &text) {
-        return true;
+        return Ok(true);
     }
     scan_text(rel, &text, matcher, room, out);
-    true
+    Ok(true)
+}
+
+pub(crate) fn is_searchable_text(bytes: &[u8]) -> bool {
+    workspace::utf16_encoding(bytes).is_some() || !bytes.iter().take(8192).any(|b| *b == 0)
 }
 
 /// 在一份已经解码好的文本里找出命中行。
@@ -1964,8 +2077,12 @@ fn scan_file(
 /// 磁盘路径（`scan_file`）与内容包路径共用这一份：切行口径、`MAX_LINE_CHARS` 截断、
 /// UTF-16 区间换算必须完全一致，否则「同样的关键词在两条路上结果不同」。
 fn scan_text(rel: &str, text: &str, matcher: &Matcher, room: usize, out: &mut Vec<SearchHit>) {
+    if matcher.is_multiline() {
+        scan_multiline(rel, text, matcher, room, out);
+        return;
+    }
     let before = out.len();
-    for (idx, line_text) in text.split('\n').enumerate() {
+    for (idx, line_text) in text.lines().enumerate() {
         if out.len() - before >= room {
             break;
         }
@@ -1977,7 +2094,34 @@ fn scan_text(rel: &str, text: &str, matcher: &Matcher, room: usize, out: &mut Ve
         out.push(SearchHit {
             path: rel.to_string(),
             line: (idx + 1) as u32,
+            column: line_text[..spans[0].0].encode_utf16().count() as u32 + 1,
             text: clipped,
+            ranges,
+        });
+    }
+}
+
+fn scan_multiline(rel: &str, text: &str, matcher: &Matcher, room: usize, out: &mut Vec<SearchHit>) {
+    let normalized = text.contains("\r\n").then(|| text.replace("\r\n", "\n"));
+    let text = normalized.as_deref().unwrap_or(text);
+    let mut line = 1;
+    let mut line_start = 0;
+    for (start, end) in matcher.spans(text, room) {
+        let prefix = &text[line_start..start];
+        line += memchr::memchr_iter(b'\n', prefix.as_bytes()).count() as u32;
+        if let Some(at) = prefix.rfind('\n') {
+            line_start += at + 1;
+        }
+        let display_end = text[end..].find('\n').map_or(text.len(), |at| end + at);
+        let (display, ranges) = clip_with_ranges(
+            &text[line_start..display_end],
+            &[(start - line_start, end - line_start)],
+        );
+        out.push(SearchHit {
+            path: rel.to_string(),
+            line,
+            column: text[line_start..start].encode_utf16().count() as u32 + 1,
+            text: display,
             ranges,
         });
     }
@@ -2033,14 +2177,30 @@ fn is_word_byte(b: u8) -> bool {
 /// 按字符截断过长的行，同时把命中区间映射到截断后文本的 UTF-16 偏移。
 fn clip_with_ranges(line: &str, spans: &[(usize, usize)]) -> (String, Vec<MatchRange>) {
     let trimmed = line.trim_end_matches('\r');
-    let mut out = String::new();
+    let start = spans.first().map_or(0, |&(start, _)| {
+        let previous = &trimmed[..start.min(trimmed.len())];
+        if previous.chars().take(MAX_LINE_CHARS / 2).count() < MAX_LINE_CHARS / 2 {
+            0
+        } else {
+            previous
+                .char_indices()
+                .rev()
+                .nth(75)
+                .map_or(0, |(idx, _)| idx)
+        }
+    });
+    let mut out = if start > 0 {
+        String::from("…")
+    } else {
+        String::new()
+    };
     let mut cut = trimmed.len();
-    for (chars, (idx, ch)) in trimmed.char_indices().enumerate() {
+    for (chars, (idx, ch)) in trimmed[start..].char_indices().enumerate() {
         if chars >= MAX_LINE_CHARS {
-            cut = idx;
+            cut = start + idx;
             break;
         }
-        out.push(ch);
+        out.push(if ch == '\n' { '↵' } else { ch });
     }
     if cut < trimmed.len() {
         out.push('…');
@@ -2048,12 +2208,13 @@ fn clip_with_ranges(line: &str, spans: &[(usize, usize)]) -> (String, Vec<MatchR
 
     let mut ranges = Vec::new();
     for &(s, e) in spans {
-        if e <= s || s >= cut {
+        if e <= s || s >= cut || e <= start {
             continue;
         }
         let end = e.min(cut);
-        let start16 = trimmed[..s].encode_utf16().count() as u32;
-        let end16 = trimmed[..end].encode_utf16().count() as u32;
+        let offset = u32::from(start > 0);
+        let start16 = trimmed[start..s.max(start)].encode_utf16().count() as u32 + offset;
+        let end16 = trimmed[start..end].encode_utf16().count() as u32 + offset;
         if end16 > start16 {
             ranges.push(MatchRange {
                 start: start16,
@@ -2094,6 +2255,130 @@ mod tests {
             dirs: dirs.iter().map(|d| d.to_string()).collect(),
             ..opts(text)
         }
+    }
+
+    #[test]
+    fn unicode_multiline_long_lines_and_disk_files_match_with_or_without_pack() {
+        let root = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let text = format!(
+            "header\r\n{}非ICL客户不能同步\r\n下一行 结束\r\n",
+            "😀".repeat(350)
+        );
+        let query = opts("非ICL客户不能同步\n下一行");
+        std::fs::create_dir(root.path().join(".nc-compile")).unwrap();
+        std::fs::write(root.path().join(".nc-compile/class-index.tsv"), &text).unwrap();
+        for (name, little) in [("little.txt", true), ("big.txt", false)] {
+            let mut bytes = if little {
+                vec![0xff, 0xfe]
+            } else {
+                vec![0xfe, 0xff]
+            };
+            for unit in text.encode_utf16() {
+                bytes.extend(if little {
+                    unit.to_le_bytes()
+                } else {
+                    unit.to_be_bytes()
+                });
+            }
+            let path = root.path().join(name);
+            std::fs::write(&path, bytes).unwrap();
+            let document = workspace::read_text_file(&path).unwrap();
+            assert!(document.lossless && document.has_bom);
+            assert_eq!(document.text, text.replace("\r\n", "\n"));
+        }
+        let mut big = "a".repeat(PACK_FILE_BYTES as usize);
+        big.push_str("\n非ICL客户不能同步\n下一行\n");
+        std::fs::write(root.path().join("large.txt"), big).unwrap();
+
+        let cold = search(root.path(), &query).unwrap();
+        let cancel = AtomicBool::new(false);
+        content_pack::build(root.path(), cache.path(), &cancel).unwrap();
+        let pack = content_pack::Pack::open(cache.path()).unwrap();
+        let warm = search_pack(
+            root.path(),
+            &pack,
+            &query,
+            &Matcher::build(&query).unwrap(),
+            &FileFilter::parse(""),
+            &plan_scope(root.path(), &[]),
+            HARD_MAX_RESULTS,
+            Instant::now(),
+            TIME_BUDGET_MS,
+            &cancel,
+            None,
+        );
+        assert!(!cold.truncated && !warm.truncated);
+        assert_eq!(cold.hits.len(), 3);
+        assert_eq!(
+            serde_json::to_value(&cold.hits).unwrap(),
+            serde_json::to_value(&warm.hits).unwrap()
+        );
+        for hit in &warm.hits {
+            assert_eq!(hit.line, 2);
+            assert_eq!(hit.column, if hit.path == "large.txt" { 1 } else { 701 });
+            let snippet: Vec<u16> = hit.text.encode_utf16().collect();
+            let range = &hit.ranges[0];
+            assert_eq!(
+                String::from_utf16(&snippet[range.start as usize..range.end as usize]).unwrap(),
+                "非ICL客户不能同步↵下一行"
+            );
+        }
+    }
+
+    #[test]
+    fn scan_reports_incomplete_when_text_exceeds_the_editor_limit() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("large.txt");
+        std::fs::write(&path, "a".repeat(8192)).unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_len(workspace::MAX_FILE_BYTES + 1)
+            .unwrap();
+        let out = search(root.path(), &opts("needle")).unwrap();
+        assert!(out.hits.is_empty() && out.truncated);
+    }
+
+    #[test]
+    #[ignore = "requires the local NC workspace from the user report"]
+    fn user_reported_gbk_phrase() {
+        let root = PathBuf::from(
+            std::env::var_os("NCFORGE_SEARCH_REPRO_ROOT").expect("local NC workspace"),
+        );
+        let query = opts("非ICL客户不能同步");
+        let relative_path = "uapbd/src/private/nccloud/webservice/jc/SendCustomerForJC.java";
+        let started = Instant::now();
+        let first_match_ms = AtomicUsize::new(0);
+        let result = search_stream(
+            &root,
+            &query,
+            TIME_BUDGET_MS,
+            &AtomicBool::new(false),
+            &|hits| {
+                if hits.iter().any(|hit| hit.path == relative_path) {
+                    first_match_ms.store(started.elapsed().as_millis() as usize, Ordering::Relaxed);
+                }
+            },
+        )
+        .unwrap();
+        let hit = result
+            .hits
+            .iter()
+            .find(|hit| hit.path == relative_path)
+            .expect("GBK phrase should be searchable");
+        assert_eq!(hit.line, 26);
+        assert!(!hit.ranges.is_empty());
+        println!(
+            "{}:{}:{} · first match={}ms · scanned={}, incomplete={}",
+            hit.path,
+            hit.line,
+            hit.column,
+            first_match_ms.load(Ordering::Relaxed),
+            result.files_scanned,
+            result.truncated
+        );
     }
 
     /// 文件级预筛是**必要条件**：逐行能命中的，整文件预筛绝不能判否。
@@ -2312,6 +2597,7 @@ mod tests {
         let filter = FileFilter::parse(&o.include);
         let scope = plan_scope(&root, &o.dirs);
         let out = search_pack(
+            &root,
             &pack,
             &o,
             &matcher,
@@ -2392,14 +2678,18 @@ mod tests {
     }
 
     #[test]
-    fn 区间随截断裁剪() {
+    fn 长行预览保留截断位置之后的命中() {
         let long = "x".repeat(MAX_LINE_CHARS + 10);
         let line = format!("{long}尾巴foo");
-        // 命中落在截断后的「…」之外 → 不产出区间
         let start = long.len() + "尾巴".len();
         let (text, ranges) = clip_with_ranges(&line, &[(start, start + 3)]);
-        assert!(text.ends_with('…'));
-        assert!(ranges.is_empty(), "看不见的区间不该回给前端");
+        assert!(text.starts_with('…'));
+        let range = &ranges[0];
+        let utf16: Vec<_> = text.encode_utf16().collect();
+        assert_eq!(
+            String::from_utf16(&utf16[range.start as usize..range.end as usize]).unwrap(),
+            "foo"
+        );
     }
 
     #[test]
@@ -3315,6 +3605,9 @@ pub fn replace(
         return Err("搜索词为空".to_string());
     }
     let matcher = Matcher::build(opts)?;
+    if matcher.is_multiline() {
+        return Err("跨行搜索暂不支持批量替换".to_string());
+    }
     // 正则模式下 $1/${name} 是分组引用，指向不存在组的引用会被静默替换成空串
     // （用户在替换框里打的字面 $ 会被吃掉）。先整串转义一遍：只放行合法引用。
     let replacement = matcher.escape_replacement(replacement);
@@ -3916,16 +4209,32 @@ mod pack_parity {
         // ② 建包后同一条路走包（按新布局写进 `<base>/<根哈希>/`）
         let base = root.join("search-pack");
         let pack_dir = crate::content_pack::dir_for(&base, &root);
-        crate::content_pack::build(&root, &pack_dir, &AtomicBool::new(false)).unwrap();
+        let cancel = AtomicBool::new(false);
+        crate::content_pack::build(&root, &pack_dir, &cancel).unwrap();
         crate::content_pack::set_cache_dir(&root);
-        assert!(
-            crate::content_pack::current_for(&root).is_some(),
-            "建完包必须能加载"
-        );
+        let pack = crate::content_pack::current_for(&root).expect("建完包必须能加载");
+        assert!(list_files(&root)
+            .0
+            .iter()
+            .all(|file| !file.starts_with("search-pack/")));
 
         for (i, o) in cases.iter().enumerate() {
-            let packed =
-                search_cancellable(&root, o, TIME_BUDGET_MS, &AtomicBool::new(false)).unwrap();
+            // A fresh disk pack is not admitted until the workspace watcher verifies it.
+            let packed = search_pack(
+                &root,
+                &pack,
+                o,
+                &Matcher::build(o).unwrap(),
+                &FileFilter::parse(&o.include),
+                &plan_scope(&root, &o.dirs),
+                HARD_MAX_RESULTS,
+                Instant::now(),
+                TIME_BUDGET_MS,
+                &cancel,
+                None,
+            );
+            let fallback = search_cancellable(&root, o, TIME_BUDGET_MS, &cancel).unwrap();
+            assert_eq!(disk[i], sig(&fallback), "磁盘搜索不应搜到包缓存");
             assert_eq!(
                 disk[i],
                 sig(&packed),

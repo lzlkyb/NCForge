@@ -3,7 +3,7 @@ import { markBootStage } from "./bootTrace";
 import { invoke } from "./tauri";
 
 // 与 Rust `workspace.rs` 的 serde 结构一一对应（camelCase，枚举用字面值）。
-export type TextEncoding = "UTF-8" | "GBK";
+export type TextEncoding = "UTF-8" | "GBK" | "UTF-16LE" | "UTF-16BE";
 export type Eol = "LF" | "CRLF" | "MIXED";
 
 export interface DirItem {

@@ -1,10 +1,8 @@
-import { useContext, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
+import { useContext, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import type { EncodingMark } from "../../lib/workspace";
 import type { TabMeta } from "../../lib/workspaceSession";
-import type { FileTreeHandle } from "./FileTree";
 import type { useFileSession } from "../../hooks/useFileSession";
 import { FileTree } from "./FileTree";
-import { TreeHeader } from "./TreeHeader";
 import { TreeSvnContext } from "./TreeSvnContext";
 import { TreeSvnProvider } from "./TreeSvnProvider";
 import { EditorGroupTools } from "./EditorGroupTools";
@@ -67,7 +65,6 @@ export interface FilePaneModel {
   compiling: boolean;
   canBack: boolean;
   canForward: boolean;
-  treeRef: RefObject<FileTreeHandle>;
 }
 
 export interface FilePaneActions {
@@ -114,7 +111,7 @@ export function FilePaneSlots({
   const {
     root, projects, tabs, activePath, active, splitPath, activeMark,
     showLargeHint, conflictPath, encodingIssue, saving, reveal,
-    panelOpen, panelTab, panels, compiling, canBack, canForward, treeRef,
+    panelOpen, panelTab, panels, compiling, canBack, canForward,
   } = model;
   const activeTool = dock?.activeTool ?? model.activeTool;
   const {
@@ -147,25 +144,18 @@ export function FilePaneSlots({
   useSearchOpenRequests(request => {
     dock?.showCode();
     if (request.kind === "file") openPath(request.path, { line: request.line, column: request.column });
-    else if (request.kind === "library") session.openJdt(libraryUri(request.hit), request.hit.line, true, (request.hit.ranges[0]?.start ?? 0) + 1);
+    else if (request.kind === "library") session.openJdt(libraryUri(request.hit), request.hit.line, true, request.hit.column ?? (request.hit.ranges[0]?.start ?? 0) + 1);
     else session.openJdt(jarClassUri(request.jar, request.className, request.source), request.line);
   });
 
   const tree = (
-    <>
-          <TreeHeader root={root} projectCount={projects.length}
-            onCreateFile={() => treeRef.current?.startCreate("file")}
-            onCreateDir={() => treeRef.current?.startCreate("dir")} />
-          <FileTree key={root} ref={treeRef} root={root} projects={projects} activePath={activePath}
-            onOpen={openInCode} onPin={session.pin}
-            onCreated={(p) => { invalidateIndex(); dock?.showCode(); void session.openFile(p); }}
-            onRenamed={(a, b) => { invalidateIndex(); session.handleRenamed(a, b); }}
-            onDeleted={(ps) => { invalidateIndex(); session.handleDeleted(ps); }}
-            openPaths={tabs.map((t) => t.path)}
-            onCompileModule={compileModulePath}
-            onCleanModule={cleanModulePath}
-            onRebuildModule={rebuildModulePath} />
-    </>
+    <FileTree key={root} root={root} projects={projects} activePath={activePath}
+      onOpen={openInCode} onPin={session.pin}
+      onCreated={(p) => { invalidateIndex(); dock?.showCode(); void session.openFile(p); }}
+      onRenamed={(a, b) => { invalidateIndex(); session.handleRenamed(a, b); }}
+      onDeleted={(ps) => { invalidateIndex(); session.handleDeleted(ps); }}
+      openPaths={tabs.map((t) => t.path)}
+      onCompileModule={compileModulePath} onCleanModule={cleanModulePath} onRebuildModule={rebuildModulePath} />
   );
 
   const tabStrip = (
@@ -181,7 +171,6 @@ export function FilePaneSlots({
 
   const editor = (
     <>
-      <FileReadFeedback root={root} onOpen={p=>p.startsWith("jdt://")?session.openJdt(p,1):session.openFile(p)}/>
       <EditorBanners active={active} activePath={activePath} conflictPath={conflictPath}
         encodingIssue={encodingIssue} showLargeHint={showLargeHint} onUnifyEol={session.unifyEol}
         onReload={(p) => void session.reloadFile(p)} onOverwriteSave={(p) => void session.saveFile(p, true)}
@@ -201,7 +190,8 @@ export function FilePaneSlots({
   const status = (
     <ShellStatusBar root={root} active={active} mark={activeMark} saving={saving}
       panelOpen={panelOpen} onTogglePanel={() => setPanelOpen((v) => !v)}
-      activeTool={activeTool} />
+      activeTool={activeTool}
+      readFeedback={<FileReadFeedback root={root} onOpen={p=>p.startsWith("jdt://")?session.openJdt(p,1):session.openFile(p)}/>}/>
   );
 
   return (
@@ -251,7 +241,7 @@ export function EmptyProjectSlots({
       {slot("status", (
         <footer className="wb-status">
           <span className="wb-status-path wb-no-project">尚未打开工程</span>
-          <OperationStatus compact/><span className="wb-status-sp" />
+          <span className="wb-status-sp" /><OperationStatus compact/>
         </footer>
       ))}
       {slot("output", servicesPanel && (!activeTool || activeTool === "files") ? output : null)}

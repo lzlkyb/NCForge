@@ -11,7 +11,16 @@
  * - 在该连接上执行了 DDL 语句（`dropDdl(connId)`，结构可能已变）
  */
 const LIMIT = 120;
+const LIMIT_BYTES = 8 * 1024 * 1024;
 const cache = new Map<string, string>();
+let bytes = 0;
+
+function forget(key: string) {
+  const value = cache.get(key);
+  if (value === undefined) return;
+  bytes -= (key.length + value.length) * 2;
+  cache.delete(key);
+}
 
 /** 缓存键：同一个名字在不同 schema / 不同类型下是完全不同的对象。 */
 export function ddlKey(connId: string, table: string, otype?: string | null, schema?: string): string {
@@ -28,26 +37,36 @@ export function readDdl(key: string): string | undefined {
 }
 
 export function writeDdl(key: string, text: string): void {
-  cache.delete(key);
+  forget(key);
+  const size = (key.length + text.length) * 2;
+  if (size > LIMIT_BYTES) return;
   cache.set(key, text);
-  if (cache.size <= LIMIT) return;
-  const oldest = cache.keys().next();
-  if (!oldest.done) cache.delete(oldest.value);
+  bytes += size;
+  while (cache.size > LIMIT || bytes > LIMIT_BYTES) {
+    const oldest = cache.keys().next();
+    if (oldest.done) break;
+    forget(oldest.value);
+  }
 }
 
 /** 不传 connectionId = 全清。 */
 export function dropDdl(connId?: string): void {
   if (!connId) {
     cache.clear();
+    bytes = 0;
     return;
   }
   const prefix = `${connId}|`;
   for (const key of [...cache.keys()]) {
-    if (key.startsWith(prefix)) cache.delete(key);
+    if (key.startsWith(prefix)) forget(key);
   }
 }
 
 /** 测试用：读当前条数。 */
 export function ddlCacheSize(): number {
   return cache.size;
+}
+
+export function ddlCacheMetrics() {
+  return { entries: cache.size, bytes, limitBytes: LIMIT_BYTES };
 }

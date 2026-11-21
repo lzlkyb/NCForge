@@ -46,6 +46,7 @@ mod lang_fast_cmds;
 mod library_cmds;
 mod linked_cmds;
 mod local_history_cmds;
+mod maintenance_cmds;
 mod md_dict_cmds;
 mod nc_log_cmds;
 mod nc_manifest_cmds;
@@ -107,6 +108,7 @@ pub use lang_fast_cmds::*;
 pub use library_cmds::*;
 pub use linked_cmds::*;
 pub use local_history_cmds::*;
+pub use maintenance_cmds::*;
 pub use md_dict_cmds::*;
 pub use nc_log_cmds::*;
 pub use nc_manifest_cmds::*;
@@ -152,6 +154,13 @@ macro_rules! nc_forge_commands {
         $crate::commands::boot_stage,
         $crate::commands::lang_cache_stats,
         $crate::commands::lang_cache_clear,
+        $crate::commands::storage_usage,
+        $crate::commands::storage_preview,
+        $crate::commands::storage_apply,
+        $crate::commands::storage_cancel,
+        $crate::commands::storage_idle_cleanup,
+        $crate::commands::storage_memory,
+        $crate::commands::storage_release_compilers,
         $crate::commands::nc_vo_tables,
         $crate::commands::patch_config,
         $crate::commands::get_autostart,

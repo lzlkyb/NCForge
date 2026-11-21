@@ -16,13 +16,14 @@ import { explain, newConsole, runStatements } from "../../lib/dbActions";
 import { dangerousStatements } from "../../lib/sqlDanger";
 import { cancelOperation, getOperations } from "../../lib/operations";
 import { dbApi, dbSourceOf } from "../../lib/dbApi";
-import { connectionKey, resultTargetIssue } from "../../lib/dbResultContext";
+import { connectionKey } from "../../lib/dbResultContext";
 import { sqlQuickFixes } from "../../lib/sqlQuickFix";
 import { bindQuery, canParameterizeQuery, queryParameters } from "../../lib/sqlQueryParameters";
 import { SqlParameterDialog } from "./SqlParameterDialog";
 import { friendlyDbError } from "../../lib/db";
 import { guessTable } from "../../lib/resultExport";
-import { changeSchema, closeSessionPanel, columnsOf, connOf, isRunning, openSessionPanel, rtOf, sqlTabOf, useDbSelector, type ResultEntry, type SqlTab } from "../../lib/dbStore";
+import { changeSchema, closeSessionPanel, columnsOf, connOf, isRunning, openSessionPanel, rtOf, sqlTabOf, useDbSelector, type SqlTab } from "../../lib/dbStore";
+import { repairResultContext } from "../../lib/dbQuickFixContext";
 import { useSqlConsoleSplit, type SqlConsoleFocus } from "../../hooks/useSqlConsoleSplit";
 import { useSqlRunConfirm } from "../../hooks/useSqlRunConfirm";
 import { useViewActive } from "../../lib/viewActivity";
@@ -36,6 +37,8 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
   const api = useRef<SqlEditorApi | null>(null);
   const split = useSqlConsoleSplit(tab.id);
   const [scope,setScope]=useState<SqlExecutionScope | null>(null);
+  const [outline, setOutline] = useState<{ tabId: string; statements: RunStmt[] } | null>(null);
+  const revealOutline = useCallback((line: number) => api.current?.reveal(line), []);
   const scopeRef = useRef(scope); scopeRef.current = scope;
   const executingScopes = useRef(new Map<string, SqlExecutionScope>());
   const activeTabId = useRef(tab.id); activeTabId.current = tab.id;
@@ -61,7 +64,10 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
       executingScopes.current.set(tabId, executionScope);
       try {
         const outcome = await runStatements(tabId, stmts, { collectStats, ...bound });
-        if (outcome.failLine && activeRef.current && activeTabId.current === tabId) api.current?.reveal(outcome.failLine);
+        if (outcome.failLine && activeRef.current && activeTabId.current === tabId && api.current?.canRevealExecutionError?.(stmts[0])) {
+          if (outcome.failColumn !== undefined) api.current.reveal(outcome.failLine, outcome.failColumn);
+          else api.current.reveal(outcome.failLine);
+        }
       } finally {
         if (executingScopes.current.get(tabId) === executionScope) executingScopes.current.delete(tabId);
       }
@@ -163,20 +169,12 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
       else api.current?.focus();
     });
   };
-  const repairContext = (entry: ResultEntry) => {
-    const current = sqlTabOf(tabId);
-    const target = entry.context?.target;
-    const runtime = rtOf(current?.connId);
-    if (!current?.connId || target?.editorSql === undefined || target.startOffset === undefined ||
-        target.editorSql !== current.sql || target.editorSql.slice(target.startOffset, target.startOffset + entry.sql.length) !== entry.sql ||
-        resultTargetIssue(entry.context, connOf(current.connId), runtime.currentSchema ?? runtime.info?.schema)) return null;
-    return { connId: current.connId, editorSql: target.editorSql, offset: target.startOffset, tables: runtime.tables?.map(t => t.name) ?? [] };
-  };
   return (
     <div className="dbx-console">
       <SqlToolbar
         tab={tab}
         scope={isRunning(tab) ? executingScopes.current.get(tab.id) ?? null : scope}
+        scriptCount={outline?.tabId === tab.id ? outline.statements.length : undefined}
         focusMode={split.focus}
         onFocusChange={focus}
         onRun={(m, collectStats) => void run(m, collectStats)}
@@ -196,7 +194,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         onSessions={() => (sessOpen ? closeSessionPanel() : openSessionPanel(tab.connId))}
       />
       {/* 多语句脚本的导航：点了跳到该语句首行。条数少时组件自己返回 null。 */}
-      {scope && scope.tabId === tab.id && <SqlOutlineBar statements={scope.statements} onPick={(line) => api.current?.reveal(line)} />}
+      {outline?.tabId === tab.id && <SqlOutlineBar statements={outline.statements} onPick={revealOutline} />}
       {danger && tab.connId && (
         <SqlDangerDialog items={danger.items} total={danger.total} connId={tab.connId} slot={tab.slot ?? null} onCancel={cancelDanger} onConfirm={confirmDanger} />
       )}
@@ -224,7 +222,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
               写 SQL 后 Ctrl+Enter 执行 · 直接打表名就有提示 · 按 <kbd>?</kbd> 看全部快捷键
             </div>
           )}
-          <SqlEditor tabId={tab.id} initial={tab.sql} onRun={(m) => void run(m)} apiRef={api} onScope={setScope} visible={active && split.focus !== "results"} />
+          <SqlEditor tabId={tab.id} initial={tab.sql} onRun={(m) => void run(m)} apiRef={api} onScope={setScope} onOutline={setOutline} visible={active && split.focus !== "results"} />
           <div
             className="dbx-splitbar"
             hidden={split.focus !== "split"}
@@ -241,18 +239,19 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
             onPointerDown={e => {
               if (!e.isPrimary || e.button !== 0) return;
               e.preventDefault();
-              split.startDrag(e.clientY);
+              try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch { /* Window listeners cover environments without capture. */ }
+              split.startDrag(e.clientY, e.pointerId);
             }}
           />
           <ResultPanel tab={tab} height={split.resultHeight} onReviewOriginal={sql => void newConsole(tab.connId, sql)} fixes={{
             find: async entry => {
-              const current = repairContext(entry);
+              const current = repairResultContext(entry, tabId);
               return current ? sqlQuickFixes(entry.error ?? "", entry.sql, current.tables,
                 async table => (await columnsOf(current.connId, table)).map(column => column.name),
                 async name => dbApi.locate(current.connId, name)) : [];
             },
             apply: (entry, fix) => {
-              const current = repairContext(entry);
+              const current = repairResultContext(entry, tabId);
               const stale = () => toast("SQL 或连接已变化，请重新执行后再修复。", "warning");
               if (!current) { stale(); return; }
               if (fix.schema !== undefined) {

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { invoke, listen } from "../lib/tauri";
 import { beginOperation, type OperationHandle } from "../lib/operations";
+import { createOperationEstimator } from "../lib/operationEstimate";
 import { formatBytes, RESOURCE_IDS, resourceBusy, type PackStatusInfo, type PackSummary, type ResourceErrorCode, type ResourceErrorPayload, type ResourcePhase, type ResourceReadyPayload } from "../lib/resource";
 import { RESOURCE_DOWNLOAD_EVENT, RESOURCE_OPEN_EVENT, openResourceDownloads } from "../lib/resourceActions";
 import { ResourceSetupDialog } from "../components/resource/ResourceSetupDialog";
@@ -51,6 +52,7 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
   const attemptIds = useRef<string[]>([]);
   const statusReads = useRef({ request: 0, revision: 0 });
   const resourceTask = useRef<OperationHandle | null>(null);
+  const estimateTransfer = useRef<ReturnType<typeof createOperationEstimator>>();
   // 子组件的 effect 可以先发起下载，握手必须在首次渲染时就存在。
   const listenersRef = useRef<ResourceListeners | null>(null);
   if (!listenersRef.current) listenersRef.current = createResourceListeners();
@@ -85,7 +87,6 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
   const start = useCallback(async (force = false, selected?: string[], resume = false) => {
     const listeners = listenersRef.current!;
     if (!listeners.active) return;
-    commit({ panelOpen: true });
     if (locked.current || resourceBusy(stateRef.current.phase)) return;
     // 认「本地快照 ∪ 前端已知表」：快照是后端 ALL_PACKS 的权威副本，后端加包后
     // 前端不必同步就能下；硬编码白名单曾把 ncdb 拦在门外（点批量下载一个都不下，
@@ -110,6 +111,7 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
       lastInstalled: resume ? stateRef.current.lastInstalled : [], partialInstalled: resume ? stateRef.current.partialInstalled : [],
       currentId: null, downloadedBytes: 0, totalBytesCurrent: null, bytesPerSec: 0, adoptedLegacy: false });
     resourceTask.current = beginOperation({ key: "resources.ensure", label: force ? "重新下载运行组件" : "下载运行组件", page: "settings", phase: "检查组件清单", reveal: openResourceDownloads });
+    estimateTransfer.current = createOperationEstimator();
     try {
       // 监听注册完毕后才能发起网络操作，否则快速完成的事件可能丢失。
       const ready = await Promise.race([listeners.start?.() ?? listeners.ready, listeners.closed]);
@@ -151,7 +153,7 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
     const stage = (phase: "verifying" | "installing", id: string) => {
       locked.current = true;
       commit({ phase, currentId: id, bytesPerSec: 0 });
-      resourceTask.current?.update({ phase: `${phase === "verifying" ? "校验" : "安装"}组件 ${id}`, progress: undefined, detail: "下载已完成，正在准备组件" });
+      resourceTask.current?.update({ phase: `${phase === "verifying" ? "校验" : "安装"}组件 ${id}`, progress: undefined, estimate: undefined, detail: "下载已完成，正在准备组件" });
     };
     const register = async <T,>(event: string, handler: (payload: T) => void) => {
       if (cancelled) return;
@@ -175,12 +177,18 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
       await register<{ id: string }>("resource:downloading", ({ id }) => {
         locked.current = true;
         commit({ phase: "downloading", currentId: id, downloadedBytes: 0, totalBytesCurrent: null, bytesPerSec: 0 });
-        resourceTask.current?.update({ phase: `下载组件 ${id}`, detail: undefined, progress: undefined });
+        estimateTransfer.current = createOperationEstimator();
+        resourceTask.current?.update({ phase: `下载组件 ${id}`, detail: undefined, progress: undefined, estimate: undefined });
       });
       await register<{ id: string; downloaded: number; total: number | null; bytesPerSec: number }>("resource:progress", payload => {
-        if (stateRef.current.currentId && payload.id !== stateRef.current.currentId) return;
+        if (stateRef.current.phase !== "downloading" || payload.id !== stateRef.current.currentId) return;
         commit({ downloadedBytes: payload.downloaded, totalBytesCurrent: payload.total, bytesPerSec: payload.bytesPerSec });
-        resourceTask.current?.update({ phase: `下载组件 ${payload.id}`, progress: { done: payload.downloaded, total: payload.total ?? undefined }, detail: `${formatBytes(payload.downloaded)}${payload.total ? ` / ${formatBytes(payload.total)}` : " · 总大小未知"} · ${payload.bytesPerSec > 0 ? `${formatBytes(payload.bytesPerSec)}/s` : "计算速率中…"}` });
+        resourceTask.current?.update({
+          phase: `下载组件 ${payload.id}`,
+          progress: { done: payload.downloaded, total: payload.total ?? undefined, unit: "字节" },
+          detail: `${formatBytes(payload.downloaded)}${payload.total ? ` / ${formatBytes(payload.total)}` : " · 总大小未知"} · ${payload.bytesPerSec > 0 ? `${formatBytes(payload.bytesPerSec)}/s` : "计算速率中…"}`,
+          estimate: estimateTransfer.current?.(payload.id, payload.downloaded, payload.total),
+        });
       });
       await register<{ id: string }>("resource:verifying", ({ id }) => stage("verifying", id));
       await register<{ id: string }>("resource:installing", ({ id }) => stage("installing", id));

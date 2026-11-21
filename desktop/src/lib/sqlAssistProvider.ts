@@ -23,7 +23,7 @@ import { archiveExpansion, archiveProjectionAt, archiveRelations } from "./sqlAr
 import { completionContext, sqlIdentifier } from "./sqlCompletionContext";
 import { sqlAssistSort, sqlMatchQuality, sqlSnippetText } from "./sqlAssistRanking";
 import { sqlAssistFunctionsFor, sqlAssistKeywords } from "./sqlAssistDialect";
-import { sqlUsageKey, sqlUsageReason, sqlUsageScope } from "./sqlUsage";
+import { sqlJoinUsageKey, sqlUsageKey, sqlUsageReason, sqlUsageScope } from "./sqlUsage";
 import { filterSnippets, listSnippets } from "./dbSnippets";
 import { clearSqlBusinessCache, peekSqlBusinessMetadata, readSqlBusinessMetadata, sqlConditionSuggestions, sqlEnumSuggestions, sqlJoinSuggestions, sqlRelatedQueries, type BusinessSuggestion } from "./sqlBusiness";
 import { sqlHistoricalJoinSuggestions } from "./sqlJoinHistory";
@@ -318,7 +318,8 @@ async function provideSqlAssistInner(model: monaco.editor.ITextModel, position: 
       ncforgePreview: { title: "主子表联查", icon: `ncforge-join-${sqlJoinIcon(spec.table, spec.group, tableList.some(t => t.name.toLowerCase() === spec.table && t.kind.toUpperCase().includes("VIEW")))}`,
         text: sqlJoinAppendText(insertion, [spec.sql.trimStart()]).preview, note: `${spec.table} · ${spec.source}`, current: editCurrent },
       ncforgeApply: editor => applySqlJoinAppend(editor, model, insertion, analysis.tokens[source.declaration].start,
-        [spec.sql.trimStart()], editCurrent, joinCurrent),
+        [spec.sql.trimStart()], editCurrent, joinCurrent,
+        { scope, keys: [sqlJoinUsageKey(name, spec.table, spec.rootColumns, spec.otherColumns)] }),
       documentation: { value: `${rt?.ncNames?.[spec.table] || spec.table} · ${spec.source}\n\n\`\`\`sql\nSELECT *\nFROM ${name}\n${spec.sql.trimStart().replace(" ON ", "\n    ON ")}\n\`\`\`` },
     })));
     return { suggestions, recommend: details.length > 0 && prefix.toLowerCase() === name && identifier.text.toLowerCase() === name };

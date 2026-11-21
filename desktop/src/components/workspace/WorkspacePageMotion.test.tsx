@@ -12,9 +12,16 @@ const animation = { finished: Promise.resolve(), cancel: vi.fn() };
 const animate = vi.fn(() => animation);
 let host: HTMLDivElement;
 let root: Root;
-function Page({ page }: { page: string }) {
+function Page({ page, ready = true }: { page: string; ready?: boolean }) {
   const target = useRef<HTMLDivElement>(null);
-  return <><div ref={target}><div className="wb-code-surface"><span className="wb-tab" data-active>Source.java</span><textarea defaultValue="draft" /></div></div><WorkspacePageMotion page={page} target={target} /></>;
+  return <><div ref={target}>
+    <div className="wb-code-surface" hidden={page !== "files"}><div className="wb-tabs">Source.java</div><textarea defaultValue="draft" /></div>
+    <div className="wb-document-surface" hidden={page === "files"}>
+      {!ready ? <div data-workspace-skeleton={page} data-loading-region="document" />
+        : page === "db" ? <><div className="dbx-doctabs" /><div className="dbx-editor" /></>
+        : <div className="lg-page" />}
+    </div>
+  </div><WorkspacePageMotion page={page} target={target} /></>;
 }
 beforeEach(() => {
   vi.clearAllMocks();
@@ -22,8 +29,6 @@ beforeEach(() => {
   vi.spyOn(document, "hidden", "get").mockReturnValue(false);
   Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: animate });
   Object.defineProperty(document, "startViewTransition", { configurable: true, value: undefined });
-  document.documentElement.style.setProperty("--dur-fast", "100ms");
-  document.documentElement.style.setProperty("--ease", "ease-out");
   host = document.createElement("div"); document.body.append(host);
   root = createRoot(host);
 });
@@ -33,14 +38,12 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLElement.prototype, "animate");
   if (originalTransition) Object.defineProperty(document, "startViewTransition", originalTransition);
   else Reflect.deleteProperty(document, "startViewTransition");
-  document.documentElement.style.removeProperty("--dur-fast");
-  document.documentElement.style.removeProperty("--ease");
   delete document.documentElement.dataset.motion;
   vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
-describe("真实内容框的页面淡入", () => {
-  it("应用内减少动效会中断旧引擎回退并保留草稿", () => {
+describe("工作台页面过渡", () => {
+  it("应用内减少动效会中断当前过渡并保留草稿", () => {
     act(() => root.render(<Page page="files" />));
     const input = host.querySelector("textarea")!;
     input.value = "still editing";
@@ -52,17 +55,18 @@ describe("真实内容框的页面淡入", () => {
     expect(host.querySelector("textarea")).toBe(input);
     expect(input.value).toBe("still editing");
   });
-  it("旧 WebView 切页只改变透明度，取消旧动画并保留编辑节点和草稿", () => {
+  it("连续切页只淡入新区域，编辑器立即可读并保留草稿", () => {
     act(() => root.render(<Page page="files" />));
     const input = host.querySelector("textarea")!;
     input.value = "unsaved code";
     expect(animate).not.toHaveBeenCalled();
     act(() => root.render(<Page page="logs" />));
-    expect(animate).toHaveBeenCalledWith([{ opacity: .85 }, { opacity: 1 }], { duration: 100, easing: "ease-out" });
-    expect(animate.mock.contexts[0]).toBe(host.querySelector(".wb-tab"));
+    expect(animate).toHaveBeenCalledWith([{ opacity: .86 }, { opacity: 1 }], { duration: 140, easing: expect.any(String) });
+    expect(animate.mock.contexts[0]).toBe(host.querySelector(".lg-page"));
     act(() => root.render(<Page page="db" />));
     expect(animation.cancel).toHaveBeenCalledTimes(1);
     expect(animate).toHaveBeenCalledTimes(2);
+    expect(animate.mock.contexts[1]).toBe(host.querySelector(".dbx-doctabs"));
     expect(host.querySelector("textarea")).toBe(input);
     expect(input.value).toBe("unsaved code");
   });
@@ -75,7 +79,17 @@ describe("真实内容框的页面淡入", () => {
   it("减少动态效果时保留内容，跳过淡入", () => {
     vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
     act(() => root.render(<Page page="files" />));
+    act(() => root.render(<Page page="db" />));
     expect(animate).not.toHaveBeenCalled();
     expect(host.querySelector("textarea")?.value).toBe("draft");
+  });
+  it("首次进入等待停靠区就绪，且每次导航只播放一次", async () => {
+    await act(async () => root.render(<Page page="files" />));
+    await act(async () => root.render(<Page page="db" ready={false} />));
+    expect(animate).not.toHaveBeenCalled();
+    await act(async () => root.render(<Page page="db" />));
+    expect(animate).toHaveBeenCalledOnce();
+    await act(async () => { host.querySelector('.dbx-editor')!.append('result'); });
+    expect(animate).toHaveBeenCalledOnce();
   });
 });

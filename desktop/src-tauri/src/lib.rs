@@ -103,6 +103,8 @@ pub mod library_search;
 pub mod library_source;
 pub mod local_history;
 pub mod lsp;
+mod maintenance_memory;
+mod maintenance_storage;
 pub mod md_dict;
 pub mod md_dict_sql;
 pub mod module_graph;

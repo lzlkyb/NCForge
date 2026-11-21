@@ -249,7 +249,9 @@ pub async fn read_library_file(
                 source_origin: None,
             })
         } else {
-            if !library_index::text_entry(&entry) || bytes.contains(&0) {
+            if !library_index::text_entry(&entry)
+                || bytes.contains(&0) && crate::workspace::utf16_encoding(&bytes).is_none()
+            {
                 return Err("这个库文件不是可读取的文本".into());
             }
             Ok(LibraryText {

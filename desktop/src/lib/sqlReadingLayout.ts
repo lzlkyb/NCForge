@@ -13,7 +13,7 @@ interface Row {
 
 const words = (row: Row) => row.tokens.map(t => t.kind === "word" ? t.text.toUpperCase() : t.text).join(" ");
 const firstWord = (row: Row) => row.tokens[0]?.kind === "word" ? row.tokens[0].text.toUpperCase() : "";
-const listHeader = (row: Row) => /^(SELECT(?: DISTINCT| ALL)?|GROUP BY|ORDER BY)$/.test(words(row));
+const listHeader = (row: Row) => /^(SELECT(?: DISTINCT| DISTINCTROW| ALL)?|GROUP BY|ORDER BY)$/.test(words(row));
 const shortHeader = (row: Row) => /^(FROM|WHERE|HAVING|LIMIT|OFFSET|FETCH FIRST)$/.test(words(row));
 const isJoin = (row: Row) => /^(?:(?:LEFT|RIGHT|FULL|INNER|OUTER|CROSS|NATURAL) )*JOIN\b/.test(words(row));
 const balanced = (row: Row) => {

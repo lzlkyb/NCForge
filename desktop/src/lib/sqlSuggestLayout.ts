@@ -2,6 +2,7 @@ import { monaco } from "./monacoSetup";
 import type { SqlCompletionItem } from "./sqlExplicitCompletion";
 import { createSqlAssistPreview, type SqlAssistPreview } from "./sqlAssistPreview";
 import { dismissSqlAssistPicker, markSqlAssistPickerShown } from "./sqlAssistPicker";
+import { dialectOfSqlModel } from "./monacoSql";
 
 type Editor = monaco.editor.IStandaloneCodeEditor;
 type Size = { width: number; height: number };
@@ -60,7 +61,10 @@ export function wireSqlSuggestLayout(editor: Editor): monaco.IDisposable {
   const editorNode = editor.getContainerDomNode();
   const doc = node.ownerDocument;
   const canvas = doc.createElement("canvas").getContext("2d");
-  const previewView = createSqlAssistPreview(doc);
+  const previewView = createSqlAssistPreview(doc, () => {
+    const model = editor.getModel();
+    return model ? dialectOfSqlModel(model) : "sql";
+  });
   const { top, panel, code, footer } = previewView;
   top.classList.add("dbx-sql-suggest-heading");
   panel.classList.add("dbx-sql-suggest-preview");

@@ -1,6 +1,7 @@
 import type { Cell, ColumnMeta } from "./dbApi";
 import { defaultTransferOptions, serializeTransfer } from "./resultTransfer";
 import type { CellPos } from "../components/db/ResultGrid";
+import type { TransferFrame, TransferSource } from "./resultTransferContext";
 
 export interface Selection { anchor: CellPos; end: CellPos }
 export function selectedRows(order: number[], sel: Selection): number[] {
@@ -41,6 +42,21 @@ export function gridColumns(columns: ColumnMeta[], layout: GridLayout): number[]
   return names.filter(n => byName.has(n) && !layout.hidden.includes(n)).map(n => byName.get(n)!);
 }
 export interface ResultSnapshot { source: string; schema?: string; originTabId?: string; sql: string; at: number; complete: boolean; columns: ColumnMeta[]; rows: Cell[][] }
+/**
+ * 结果区共用的「取数帧」：复制 / 导出 / 右键菜单都按它取**当前显示顺序**的数据。
+ *
+ * `transferSource` 不传时按「当前结果」造兜底源——SQL 控制台里新执行的结果
+ * 没有快照，但菜单 / 复制仍要能说出自己拿的是哪份数据。
+ * 从 `ResultTable` 抽出来只为守 300 行体量红线，口径原样搬走。
+ */
+export function buildResultFrame({ columns, rows, order, visible, selection, zh, transferSource, layoutKey, snapshot, table }: {
+  columns: ColumnMeta[]; rows: Cell[][]; order: number[]; visible: number[]; selection: Selection | null;
+  zh?: Record<string, string>; transferSource?: TransferSource; layoutKey?: string; snapshot?: ResultSnapshot; table: string;
+}): TransferFrame {
+  return { data: { columns, rows }, order, visible, selection,
+    labels: columns.map(c => zh?.[c.name.toLowerCase()] || c.name),
+    source: transferSource ?? { connId: null, resultId: layoutKey || "result", sql: snapshot?.sql ?? "", source: snapshot?.source ?? "当前结果", complete: snapshot?.complete ?? true, table, canRequery: false } };
+}
 export interface ResultDiff { added: Cell[][]; removed: Cell[][]; changed: { before: Cell[]; after: Cell[] }[] }
 export function compareResults(before: ResultSnapshot, after: ResultSnapshot, keys: string[]): ResultDiff {
   if (!keys.length) throw new Error("请选择能唯一标识记录的字段");

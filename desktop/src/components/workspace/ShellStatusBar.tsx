@@ -10,6 +10,7 @@ import { ReqStatusChip } from "./ReqStatusChip";
 import { useHistoryRestorePath } from "../../lib/historyRestoreGuard";
 import { libraryLocation } from "../../lib/libraryFiles";
 import { isUnsaved } from "../../lib/tabDirty";
+import type { ReactNode } from "react";
 
 /**
  * 外壳状态栏（工作台里只有这一条）。
@@ -29,6 +30,7 @@ export function ShellStatusBar({
   panelOpen,
   onTogglePanel,
   activeTool,
+  readFeedback,
 }: {
   root: string;
   active: TabMeta | null;
@@ -39,6 +41,7 @@ export function ShellStatusBar({
   onTogglePanel: () => void;
   /** 当前页 key：文件页展示编辑器信息，工具页只留全局信息 + 该页贡献。 */
   activeTool: string;
+  readFeedback?: ReactNode;
 }) {
   // 光标自己订阅（lib/cursorStore）：它每秒可能变几十次，
   // 挂在父组件上会拖着整棵文件树一起重渲染。
@@ -61,8 +64,8 @@ export function ShellStatusBar({
         </>
       )}
       <StatusContributions activeTool={activeTool} />
+      {!toolMode && readFeedback}
       <ReqStatusChip activeTool={activeTool} />
-      <OperationStatus compact />
       <span className="wb-status-sp" />
       {saving && <span className="wb-status-warn">保存中…</span>}
       <HotswapStatusChip />
@@ -87,6 +90,7 @@ export function ShellStatusBar({
           {isUnsaved(active) && <span className="wb-status-unsaved">未保存</span>}
         </>
       )}
+      <OperationStatus compact />
     </footer>
   );
 }

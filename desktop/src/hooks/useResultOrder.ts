@@ -3,7 +3,15 @@ import type { Cell, ColumnMeta } from "../lib/dbApi";
 import { viewOrder, type SortState, type ValueFilter } from "../lib/resultView";
 
 type CachedWorker = { worker: Worker; rows: Cell[][]; columns: ColumnMeta[]; idle: boolean; expiry?: ReturnType<typeof setTimeout> };
-function release(cached: CachedWorker | null) { if (cached) { clearTimeout(cached.expiry); cached.worker.terminate(); } }
+let idleWorker: CachedWorker | null = null;
+const IDLE_CELLS = 120_000;
+function release(cached: CachedWorker | null) {
+  if (!cached) return;
+  if (idleWorker === cached) idleWorker = null;
+  clearTimeout(cached.expiry);
+  cached.idle = false;
+  cached.worker.terminate();
+}
 /**
  * Busy work remains cancellable; completed data is reused briefly for consecutive filters.
  *
@@ -27,7 +35,7 @@ export function useResultOrder(rows: Cell[][], columns: ColumnMeta[], filter: st
       try {
         const cached = retained.current;
         const reuse = cached?.idle && cached.rows === rows && cached.columns === columns;
-        if (reuse) { clearTimeout(cached.expiry); cached.idle = false; worker = cached.worker; }
+        if (reuse) { clearTimeout(cached.expiry); idleWorker = null; cached.idle = false; worker = cached.worker; }
         else {
           release(cached);
           retained.current = null;
@@ -40,6 +48,14 @@ export function useResultOrder(rows: Cell[][], columns: ColumnMeta[], filter: st
           setResult({ rows, columns, filter, sort, value, order: event.data.order ?? [] });
           active = false;
           const completed = retained.current!;
+          if (rows.length * columns.length > IDLE_CELLS) {
+            release(completed);
+            retained.current = null;
+            return;
+          }
+          // Only one idle worker may retain a duplicate data set across all result panes.
+          if (idleWorker) release(idleWorker);
+          idleWorker = completed;
           completed.idle = true;
           // Avoid retaining a second copy of a large result indefinitely in an inactive tab.
           completed.expiry = setTimeout(() => { if (retained.current === completed) { release(completed); retained.current = null; } }, 5000);

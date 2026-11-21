@@ -1,5 +1,5 @@
 // Exercise packaged frontend assets under the application's CSP, with memory-only IPC.
-/* global window, document, localStorage, getComputedStyle, innerWidth, CustomEvent */
+/* global window, document, localStorage, getComputedStyle, innerWidth, CustomEvent, matchMedia */
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const dist = new URL('../dist/', import.meta.url);
-const artifacts = new URL('../../docs/工作台材质升级验收-2026-11-13/', import.meta.url);
+const artifacts = new URL(process.env.NCFORGE_QA_TEMP === '1' ? '../../target/material-workbench-acceptance/' : '../../docs/工作台材质升级验收-2026-11-13/', import.meta.url);
 const html = await readFile(new URL('index.html', dist), 'utf8');
 const entry = html.match(/<script type="module"[^>]*src="([^"]+)"[^>]*><\/script>/)?.[1];
 assert.ok(entry, 'Build the frontend before acceptance');
@@ -67,6 +67,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
 let browser, page;
 const errors = [], passed = [], measurements = [];
+const readingByTheme = new Map();
 const check = (condition, label) => { assert.ok(condition, label); passed.push(label); };
 const shot = name => page.screenshot({ path: fileURLToPath(new URL(name + '.png', artifacts)), animations: 'disabled' });
 const navigate = name => page.locator('.app-side').getByRole('button', { name: new RegExp('^' + name) }).click();
@@ -85,17 +86,33 @@ try {
     await page.locator('.dbx-gc:not(.rn)').first().waitFor();
     const reading = await page.evaluate(() => {
       const style = selector => getComputedStyle(document.querySelector(selector));
-      return { background: style('.wb-main').backgroundColor,
-        continuous: ['.dbx-console-body', '.dbx-editor', '.dbx-res', '.dbx-result-head', '.dbx-result-footer'].every(selector => style(selector).backgroundColor === style('.wb-main').backgroundColor && style(selector).boxShadow === 'none'),
+      const surfaces = ['.wb-main', '.dbx-console-body', '.dbx-editor', '.dbx-res', '.dbx-result-head', '.dbx-result-footer'].map(selector => {
+        const { backgroundColor, boxShadow } = style(selector);
+        return { selector, backgroundColor, boxShadow };
+      });
+      return { surfaces,
         radius: parseFloat(style('.wb-root').borderTopLeftRadius), innerRadius: parseFloat(style('.wb-main').borderTopLeftRadius), row: document.querySelector('.dbx-gc').getBoundingClientRect().height,
-        toolbar: document.querySelector('.dbx-command-header').getBoundingClientRect().height, tabs: document.querySelector('.wb-document-surface .wb-tabs').getBoundingClientRect().height };
+        toolbar: document.querySelector('.dbx-command-header').getBoundingClientRect().height, tabs: document.querySelector('.wb-document-surface .wb-tabs').getBoundingClientRect().height,
+        chrome: style('.app-shell').backgroundImage, resource: style('.wb-root .wb-tree').backgroundImage,
+        shellBlur: ['.app-shell', '.wb-root .wb-tree', '.wb-main'].some(selector => style(selector).backdropFilter !== 'none'),
+        sqlOutline: style('.dbx-sql-overflow').outlineStyle };
     });
+    const documentSurfaces = reading.surfaces.filter(surface => surface.selector !== '.dbx-result-head');
+    if (material === 'classic') readingByTheme.set(theme, documentSurfaces);
+    check(JSON.stringify(readingByTheme.get(theme)) === JSON.stringify(documentSurfaces), `${label} shared reading surfaces`);
+    check(reading.chrome.includes('gradient') === (material === 'glass') && reading.resource.includes('gradient') === (material === 'glass'), `${label} chrome and resource materials differ at rest`);
+    check(!reading.shellBlur, `${label} persistent workbench surfaces avoid backdrop blur`);
+    check(reading.sqlOutline === 'none', `${label} SQL widget host never outlines the viewport`);
     measurements.push({ theme, material, reading });
-    check(reading.continuous && reading.radius === 14 && reading.innerRadius === 0, `${label} packaged reading surfaces share one outer perimeter`);
+    check(reading.surfaces.every(surface => surface.backgroundColor.startsWith('rgb(') && surface.boxShadow === 'none') &&
+      reading.radius === 14 && reading.innerRadius === 0, `${label} opaque reading surfaces share one outer perimeter`);
     check(reading.row === 26 && reading.toolbar === 40 && reading.tabs === 36, `${label} workbench density is preserved`);
     const split = page.getByRole('separator', { name: '调整结果区高度', exact: true });
     await page.mouse.move(0, 0); await page.evaluate(() => document.activeElement?.blur());
-    check(await split.evaluate(el => getComputedStyle(el, '::before').opacity) === '0', `${label} splitter is hidden at rest`);
+    check(await split.evaluate(el => {
+      const line = getComputedStyle(el, '::before');
+      return line.opacity === '0' || line.backgroundColor === 'rgba(0, 0, 0, 0)';
+    }), `${label} splitter line is hidden at rest`);
     const before = await page.locator('.dbx-res').boundingBox(); await split.focus(); await page.keyboard.press('ArrowUp');
     check((await page.locator('.dbx-res').boundingBox()).height > before.height, `${label} keyboard result resizing works`);
     await page.keyboard.press('ArrowDown'); await page.evaluate(() => document.activeElement?.blur());
@@ -104,7 +121,21 @@ try {
     await shot(label + '-数据库');
     await page.getByRole('button', { name: '更多数据库操作', exact: true }).click(); await page.getByRole('menu').first().waitFor();
     check(await page.getByRole('menu').first().evaluate(el => document.documentElement.dataset.uiStyle === 'glass' ? getComputedStyle(el).backdropFilter.includes('blur') : getComputedStyle(el).backdropFilter === 'none'), `${label} menus use the selected material`);
-    await shot(label + '-菜单'); await page.keyboard.press('Escape');
+    await shot(label + '-菜单');
+    if (material === 'glass') {
+      const cdp = await context.newCDPSession(page);
+      const menu = page.getByRole('menu').first();
+      for (const [feature, value] of [['prefers-reduced-transparency', 'reduce'], ['forced-colors', 'active']]) {
+        await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: feature, value }] });
+        check(await menu.evaluate((el, query) => matchMedia(query).matches &&
+          getComputedStyle(el).backdropFilter === 'none' &&
+          getComputedStyle(document.querySelector('.app-shell')).backgroundImage === 'none' &&
+          getComputedStyle(document.querySelector('.wb-root .wb-tree')).backgroundImage === 'none', `(${feature}: ${value})`), `${label} ${feature} makes shell and popup opaque`);
+      }
+      await cdp.send('Emulation.setEmulatedMedia', { features: [] });
+      await cdp.detach();
+    }
+    await page.keyboard.press('Escape');
     await navigate('设置'); await page.locator('.wb-settings-page').waitFor();
     await page.locator('.wb-settings-menu button').filter({ hasText: '外观与启动' }).click();
     await page.getByRole('radio', { name: '经典', exact: true }).click();
@@ -113,16 +144,32 @@ try {
     await page.getByRole('radio', { name: '柔光玻璃', exact: true }).click();
     await page.waitForFunction(() => document.documentElement.dataset.uiStyle === 'glass');
     check(await page.locator('.wb-settings-body .srow').evaluateAll(rows => rows.every(el => getComputedStyle(el).borderBottomColor === 'rgba(0, 0, 0, 0)')), `${label} settings have no repeated row separators`);
+    check(await page.locator('.wb-settings-body .ui-card').evaluateAll(cards => cards.length > 0 && cards.every(el => {
+      const style = getComputedStyle(el);
+      return style.borderRadius === '0px' && style.boxShadow === 'none' && style.backgroundColor === 'rgba(0, 0, 0, 0)';
+    })), `${label} settings sections share a continuous reading surface`);
     if (material === 'classic') { await page.getByRole('radio', { name: '经典', exact: true }).click(); await page.waitForFunction(() => document.documentElement.dataset.uiStyle === 'classic'); }
+    check(await page.evaluate(() => {
+      const style = selector => getComputedStyle(document.querySelector(selector));
+      return style('.appearance-preview-window').backgroundImage === style('.app-shell').backgroundImage &&
+        style('.appearance-preview-nav').backgroundImage === style('.wb-root .wb-tree').backgroundImage;
+    }), `${label} settings preview uses the same material surfaces`);
     await shot(label + '-设置');
     await navigate('元数据'); await page.locator('.meta-workbench').waitFor();
     const search = page.getByRole('textbox', { name: '搜索元数据组件', exact: true });
     check(await search.evaluate(el => getComputedStyle(el).backgroundColor === 'rgba(0, 0, 0, 0)' && parseFloat(getComputedStyle(el).borderTopWidth) === 0), `${label} metadata search has one surface`);
     await search.focus(); check(await page.locator('.meta-search').evaluate(el => parseFloat(getComputedStyle(el).outlineWidth) === 2), `${label} metadata search focus remains clear`);
     await page.evaluate(() => document.activeElement?.blur());
-    const guidance = await page.locator('.meta-empty-toolbar + div > p').boundingBox();
-    const action = await page.getByRole('button', { name: '打开元数据资源', exact: true }).boundingBox();
+    const emptyMetadata = page.locator('.meta-empty-state');
+    check(await emptyMetadata.getByRole('button', { name: '打开元数据资源', exact: true }).count() === 0, `${label} wide metadata omits the redundant drawer action`);
+    await emptyMetadata.getByRole('button', { name: '新建组件', exact: true }).waitFor();
+    const guidance = await emptyMetadata.locator('p').boundingBox();
+    const action = await emptyMetadata.getByRole('button', { name: '重新索引', exact: true }).boundingBox();
     check(action.y >= guidance.y + guidance.height && action.y - guidance.y - guidance.height <= 25, `${label} metadata guidance and action are grouped`);
+    await emptyMetadata.getByRole('button', { name: '新建组件', exact: true }).click();
+    const newComponent = page.getByRole('dialog', { name: '新建元数据组件', exact: true });
+    await newComponent.waitFor();
+    await page.keyboard.press('Escape'); await newComponent.waitFor({ state: 'hidden' });
     await shot(label + '-元数据');
     await page.setViewportSize({ width: 560, height: 800 });
     await page.getByRole('button', { name: '打开元数据资源', exact: true }).click();
@@ -131,30 +178,70 @@ try {
     check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${label} narrow metadata drawer works without page overflow`);
     check(await page.evaluate(() => window.materialViolations.length === 0), `${label} packaged CSP has no violations`);
     await page.setViewportSize({ width: 1440, height: 900 });
-    for (const [key, name, selector] of [['files','代码','.wb-code-context'],['svn','版本','.vc-mode'],['logs','日志','.lg-page'],['db','数据库','.dbx-console'],['meta','元数据','.meta-workbench'],['settings','设置','.wb-settings-page']]) {
+    for (const [key, name, selector] of [['files','代码','.wb-code-surface'],['svn','版本','.vc-mode'],['logs','日志','.lg-page'],['db','数据库','.dbx-console'],['meta','元数据','.meta-workbench'],['settings','设置','.wb-settings-page']]) {
       if (key === 'logs') await page.evaluate(() => window.dispatchEvent(new CustomEvent('ncforge-navigate', { detail: 'logs' })));
       else await navigate(name);
       await page.locator('.wb-root[data-tool="' + key + '"]').waitFor(); await page.locator(selector).waitFor();
       if (key === 'files') await page.locator('.wb-code-body .monaco-editor').waitFor();
-      if(['files','svn','db','settings'].includes(key)&&!await page.locator('.wb-tree').isVisible()) {
+      const side = page.locator('.wb-tree');
+      const hasSharedSide = ['files', 'svn', 'db', 'settings'].includes(key);
+      if (hasSharedSide && !await side.isVisible()) {
         await page.getByRole('button',{name:'工作台布局',exact:true}).click();await page.getByRole('menuitem',{name:'资源侧栏',exact:true}).click();
       }
       const shell = await page.evaluate(() => {
         const root=document.querySelector('.wb-root'), outer=root.getBoundingClientRect(), style=getComputedStyle(root);
         const inside=el=>{const r=el.getBoundingClientRect();return r.left>=outer.left-1&&r.right<=outer.right+1&&r.top>=outer.top-1&&r.bottom<=outer.bottom+1;};
         const inner=[...root.querySelectorAll('.wb-tree,.wb-main,.wb-content-frame,.wb-bottom')].filter(el=>el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden');
-        return {radius:['TopLeft','TopRight','BottomRight','BottomLeft'].every(corner=>parseFloat(style['border'+corner+'Radius'])===14),shadow:style.boxShadow!=='none',clipped:style.overflow==='hidden'&&!root.contains(document.elementFromPoint(outer.left+1,outer.top+1)),inner:inner.every(el=>inside(el)&&getComputedStyle(el).borderTopLeftRadius==='0px'&&getComputedStyle(el).boxShadow==='none'),status:inside(root.querySelector('.wb-status')),outside:document.querySelector('.app-header').getBoundingClientRect().bottom<=outer.top&&document.querySelector('.app-side').getBoundingClientRect().right<=outer.left,overflow:document.documentElement.scrollWidth>innerWidth};
+        const flat = shadow => shadow === 'none' || shadow.split(/,(?![^()]*\))/).every(part => part.includes('inset'));
+        return {radius:['TopLeft','TopRight','BottomRight','BottomLeft'].every(corner=>parseFloat(style['border'+corner+'Radius'])===14),shadow:style.boxShadow!=='none',clipped:style.overflow==='hidden'&&!root.contains(document.elementFromPoint(outer.left+1,outer.top+1)),inner:inner.every(el=>inside(el)&&getComputedStyle(el).borderTopLeftRadius==='0px'&&flat(getComputedStyle(el).boxShadow)),status:inside(root.querySelector('.wb-status')),outside:document.querySelector('.app-header').getBoundingClientRect().bottom<=outer.top&&document.querySelector('.app-side').getBoundingClientRect().right<=outer.left,overflow:document.documentElement.scrollWidth>innerWidth};
       });
       measurements.push({theme,material,page:key,shell});
       check(shell.radius&&shell.shadow&&shell.clipped&&shell.inner&&shell.status&&shell.outside&&!shell.overflow, `${label} ${key} resources, document and status share one clipped shell`);
-      if(key==='logs')check(await page.locator('.lg-left').evaluate(el=>getComputedStyle(el).borderRightColor==='rgba(0, 0, 0, 0)'),`${label} log list and detail have no hard vertical seam`);
-      if(key==='settings')check(await page.locator('.wb-layout').evaluate(el=>getComputedStyle(el).backgroundColor===getComputedStyle(el.querySelector('.wb-tree')).backgroundColor),`${label} settings splitter blends into the resource surface`);
+      if (hasSharedSide) {
+        await side.waitFor();
+        const seam = await side.evaluate(el => {
+          const { right, top, height } = el.getBoundingClientRect();
+          const main = el.parentElement.querySelector('.wb-main-with-inspector').getBoundingClientRect();
+          return { gap: main.left - right, x: right, y: Math.round(top + height / 2) };
+        });
+        check(Math.abs(seam.gap) < 0.5, `${label} ${key} sidebar meets the document without a gutter`);
+        if (key === 'files') {
+          const splitter = page.getByRole('separator', { name: '调整侧栏宽度', exact: true });
+          const width = (await side.boundingBox()).width;
+          await page.mouse.move(seam.x + 3, seam.y);
+          await page.mouse.down();
+          await page.mouse.move(seam.x + 23, seam.y);
+          await page.mouse.up();
+          check((await side.boundingBox()).width > width, `${label} flush sidebar still resizes by dragging`);
+          const widened = (await side.boundingBox()).width;
+          await splitter.focus();
+          await page.keyboard.press('ArrowLeft');
+          check((await side.boundingBox()).width < widened, `${label} flush sidebar still resizes by keyboard`);
+          check(await splitter.evaluate(el => getComputedStyle(el).outlineStyle === 'none' &&
+            getComputedStyle(el, '::before').opacity === '1'), `${label} keyboard focus highlights the handle only`);
+          await page.keyboard.press('ArrowLeft');
+        }
+      } else {
+        check(await page.locator('.wb-main-with-inspector').evaluate(el =>
+          Math.abs(el.getBoundingClientRect().left - el.parentElement.getBoundingClientRect().left) < 0.5
+        ), `${label} ${key} workbench leaves no space for the hidden shared sidebar`);
+      }
+      if (key === 'logs') check(await page.locator('.lg-list').evaluate(el => getComputedStyle(el).boxShadow === 'none' &&
+        getComputedStyle(el).backdropFilter === 'none' &&
+        getComputedStyle(el.closest('.lg-left')).borderRightColor === 'rgba(0, 0, 0, 0)'), `${label} log list and detail share a flat reading surface`);
+      if (['files', 'db', 'svn', 'meta'].includes(key)) {
+        const tabs = page.locator('.wb-root :is(.wb-tab, .wb-ptab, .dbx-rtab, .meta-document-tab, .vc-mode-btn):visible');
+        check(await tabs.evaluateAll(elements => elements.length > 0 && elements.every(el => {
+          const style = getComputedStyle(el);
+          return style.borderTopLeftRadius === style.getPropertyValue('--r-control').trim() && style.borderBottomLeftRadius === '0px';
+        })), `${label} ${key} workbench tabs use the shared small radius and straight baseline`);
+      }
       await shot(label+'-'+key+'-整体外壳');
       if(key==='files') {
         if(!await page.locator('.wb-bottom').isVisible())await page.getByRole('button',{name:'显示面板',exact:true}).click();
         const bottom=page.locator('.wb-bottom');await bottom.waitFor();
         check(await bottom.evaluate(el=>getComputedStyle(el).borderTopLeftRadius==='0px'&&getComputedStyle(el).boxShadow==='none'&&el.closest('.wb-root')!==null),`${label} code bottom panels belong to the shared shell`);
-        await page.getByRole('tab',{name:'编译输出',exact:true}).click();
+        await page.getByRole('tab',{name:'运行',exact:true}).click();
         const resize=page.getByRole('separator',{name:'调整底部面板高度',exact:true});const height=(await bottom.boundingBox()).height;
         await resize.focus();await page.keyboard.press('ArrowUp');check((await bottom.boundingBox()).height>height,`${label} shared shell keeps keyboard panel resizing`);await page.keyboard.press('ArrowDown');
         await page.locator('.wb-service-entry').click();await page.locator('.sc-panel').waitFor();
@@ -182,6 +269,6 @@ try {
   await writeFile(new URL('验收结果.json', artifacts), JSON.stringify({ passed, errors, measurements }, null, 2) + '\n');
   console.log(JSON.stringify({ passed, errors }, null, 2));
 } catch (error) {
-  if (page && !page.isClosed()) { await shot('失败现场'); console.log(JSON.stringify({ error: error.message, errors, body: (await page.locator('body').innerText()).slice(0, 5000) }, null, 2)); }
+  if (page && !page.isClosed()) { await shot('失败现场'); console.log(JSON.stringify({ error: error.message, errors, lastMeasurement: measurements.at(-1), body: (await page.locator('body').innerText()).slice(0, 5000) }, null, 2)); }
   throw error;
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

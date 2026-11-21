@@ -59,7 +59,18 @@ pub fn should_rotate(current_len: u64, incoming_len: u64) -> bool {
 }
 
 /// 追加一条前端错误。`line` 由调用方组装成单行或多行文本，这里只负责编码与配额。
+static ROTATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub(crate) fn with_rotation_lock<T>(run: impl FnOnce() -> T) -> T {
+    let _lock = ROTATION.lock().unwrap_or_else(|error| error.into_inner());
+    run()
+}
+
 pub fn append(config_dir: &Path, line: &str) -> Result<(), AppError> {
+    with_rotation_lock(|| append_locked(config_dir, line))
+}
+
+fn append_locked(config_dir: &Path, line: &str) -> Result<(), AppError> {
     let path = log_path(config_dir);
     let dir = path
         .parent()

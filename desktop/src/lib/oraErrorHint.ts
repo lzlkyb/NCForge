@@ -37,8 +37,8 @@ export function oraCodeOf(error: string): string | null {
 
 /** `ORA-00904: "BD_XXX": invalid identifier` 里的那个标识符。 */
 function identifierOf(error: string): string | null {
-  const quoted = /ORA-00904:\s*"([^"]+)"/i.exec(error);
-  if (quoted) return quoted[1].trim();
+  const quoted = /ORA-00904:\s*(?:"(?:[^"]|"")*"\s*\.\s*)*"((?:[^"]|"")+)"/i.exec(error);
+  if (quoted) return quoted[1].replace(/""/g, '"').trim();
   const bare = /ORA-00904:\s*([A-Za-z][\w$#]*)\s*:/i.exec(error);
   return bare ? bare[1].trim() : null;
 }
@@ -53,9 +53,9 @@ function identifierOf(error: string): string | null {
 export function locateIdent(sql: string, ident: string): OraLocation | null {
   const want = ident.toUpperCase();
   const hits: number[] = [];
-  for (const token of scanSql(sql).tokens) {
+  for (const token of scanSql(sql, "plsql").tokens) {
     if (token.kind === "string" || token.kind === "comment" || token.kind === "hint") continue;
-    const name = token.kind === "quoted" ? token.text.slice(1, -1) : token.text;
+    const name = token.kind === "quoted" ? token.text.slice(1, -1).replace(/""/g, '"') : token.text;
     if (name.toUpperCase() === want) hits.push(token.start);
   }
   if (hits.length === 0) return null;

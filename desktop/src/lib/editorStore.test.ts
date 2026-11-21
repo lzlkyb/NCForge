@@ -81,6 +81,15 @@ beforeEach(async () => {
 const jdt = (n: number) => `jdt://contents/x.jar/p/C${n}.class`;
 
 describe("openVirtualModel 预览身份（peek）", () => {
+  it("按正文大小回收预览模型，保留正式打开的文件", () => {
+    const text = "A".repeat(3 * 1024 * 1024);
+    const formal = store.openVirtualModel(jdt(100), text);
+    const first = store.openVirtualModel(jdt(1), text, { peek: true });
+    const second = store.openVirtualModel(jdt(2), text, { peek: true });
+    expect(fake(first).disposed).toBe(true);
+    expect(fake(formal).disposed).toBe(false);
+    expect(fake(second).disposed).toBe(false);
+  });
   it("同一地址复用同一 model，不重复创建", () => {
     const a = store.openVirtualModel(jdt(1), "class C1 {}", { peek: true });
     const b = store.openVirtualModel(jdt(1), "class C1 {}", { peek: true });

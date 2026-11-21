@@ -2,6 +2,7 @@ import type { monaco } from "./monacoSetup";
 import type { SqlActionPreview, SqlCodeAction, SqlJoinBatch, SqlJoinPresentation } from "./sqlBillAssist";
 import { billJoinGroupLabels } from "./sqlBillJoin";
 import { createSqlAssistPreview } from "./sqlAssistPreview";
+import { dialectOfSqlModel } from "./monacoSql";
 import "../sql-join-icons.css";
 
 type Action = { action: SqlCodeAction };
@@ -54,17 +55,21 @@ function sqlMenuRows(rows: MenuRow[]): MenuRow[] {
       const table = row.item!.action.ncforgeJoin!.table;
       counts.set(table, (counts.get(table) ?? 0) + 1);
     }
+    const decorate = (row: MenuRow): MenuRow => {
+      const item = row.item!.action.ncforgeJoin!;
+      const label = item.label === item.table ? item.table : `${item.label} · ${item.table}`;
+      const fields = (counts.get(item.table) ?? 0) > 1 ? item.rootColumns.join(" + ") : "";
+      const icon = `ncforge-join-${item.icon}`;
+      const joinLabel = item.mode === "append" ? { title: item.label, detail: [item.label === item.table ? "" : item.table, item.rootColumns.join(" + ")].filter(Boolean).join(" · ") } : undefined;
+      return { ...row, joinLabel, group: { title: label, icon: { id: icon } }, label: fields ? `${label} · ${fields}` : label };
+    };
+    const rank = (row: MenuRow) => row.item?.action.ncforgeJoin?.usageRank ?? 0;
+    const common = joins.filter(row => !row.disabled && rank(row) > 0).sort((a, b) => rank(b) - rank(a)).slice(0, 3);
+    const promoted = new Set(common);
+    if (common.length) result.push(header("常用关联"), ...common.map(decorate));
     for (const group of ["detail", "related", "lookup"] as const) {
-      const groupRows = joins.filter(row => row.item?.action.ncforgeJoin?.group === group);
-      if (!groupRows.length) continue;
-      result.push(header(billJoinGroupLabels[group]), ...groupRows.map(row => {
-        const item = row.item!.action.ncforgeJoin!;
-        const label = item.label === item.table ? item.table : `${item.label} · ${item.table}`;
-        const fields = (counts.get(item.table) ?? 0) > 1 ? item.rootColumns.join(" + ") : "";
-        const icon = `ncforge-join-${item.icon}`;
-        const joinLabel = item.mode === "append" ? { title: item.label, detail: [item.label === item.table ? "" : item.table, item.rootColumns.join(" + ")].filter(Boolean).join(" · ") } : undefined;
-        return { ...row, joinLabel, group: { title: label, icon: { id: icon } }, label: fields ? `${label} · ${fields}` : label };
-      }));
+      const groupRows = joins.filter(row => !promoted.has(row) && row.item?.action.ncforgeJoin?.group === group);
+      if (groupRows.length) result.push(header(billJoinGroupLabels[group]), ...groupRows.map(decorate));
     }
   }
   let group: MenuRow | undefined;
@@ -160,8 +165,11 @@ function wireJoinBatch(batch: SqlJoinBatch, widget: HTMLElement, list: ActionLis
   widget.append(sourceBar);
   const display = (status?: "loading" | "error") => {
     const items = picked.size ? [...picked] : focused ? [focused] : [];
-    const note = picked.size ? "已选 " + picked.size + " 条关联"
+    const selection = picked.size ? "已选 " + picked.size + " 条关联"
       : focused && [focused.table, focused.rootColumns.join(" + ")].join(" · ");
+    const origins = [...new Set(items.map(item => item.relationSource).filter(Boolean))];
+    const note = [items.some(item => item.mayRepeatRows) && "主表行可能重复", selection,
+      origins.slice(0, 3).join("、"), origins.length > 3 && `另有 ${origins.length - 3} 种来源`].filter(Boolean).join(" · ");
     placement.hidden = !items.length || !!status;
     apply.disabled = !items.length || !!status;
     applyLabel.textContent = picked.size ? "添加 " + picked.size + " 条关联" : "添加关联";
@@ -255,8 +263,9 @@ function wireJoinBatch(batch: SqlJoinBatch, widget: HTMLElement, list: ActionLis
     try {
       const next = await batch.read(source);
       if (request !== revision || !batch.current()) return;
-      choices = next.actions; added = next.added; focused = choices[0]?.ncforgeJoin;
+      choices = next.actions; added = next.added;
       setRows(choices, []);
+      focused = getRows().find(row => row.kind === "action" && !row.disabled)?.item?.action.ncforgeJoin;
       display();
     } catch {
       if (request === revision) display("error");
@@ -324,7 +333,10 @@ export function wireSqlActionMenu(editor: monaco.editor.IStandaloneCodeEditor, p
       list.layout = min => listWidth = fitActionList(list, menu, min, listCap, hasPreview, requiresChoice);
       const rendered = render.call(service, view, list, bar);
       const widget = list.domNode.parentElement;
-      const previewView = hasPreview && widget ? createSqlAssistPreview(doc) : undefined;
+      const previewView = hasPreview && widget ? createSqlAssistPreview(doc, () => {
+        const model = editor.getModel();
+        return model ? dialectOfSqlModel(model) : "sql";
+      }) : undefined;
       const code = previewView?.code;
       if (previewView && widget && code) {
         widget.dataset.sqlPreview = "side";

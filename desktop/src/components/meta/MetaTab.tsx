@@ -9,6 +9,7 @@ import { useMetaDocuments } from "../../hooks/useMetaDocuments";
 import { useMetaLayout } from "../../hooks/useMetaLayout";
 import { toast } from "../ui/toast";
 import { EmptyState } from "../ui/EmptyState";
+import { Button } from "../ui/button";
 import { DockRegion } from "../workspace/WorkbenchDock";
 import { MetaDocumentTabs } from "./MetaDocumentTabs";
 import { MetaDraftBar } from "./MetaDraftBar";
@@ -95,6 +96,12 @@ export function MetaTab() {
     else toast("引用文件不在当前索引中，请重新索引后再试", "info");
   };
   const entity = detail && doc ? selectedMetaEntity(detail, doc.ui.selection) : null;
+  const emptyIndex = idx.data?.entries.length === 0;
+  const emptyDescription = resourceDrawer ? "打开资源栏，查找或新建 BMF 组件。"
+    : idx.loading ? "正在索引工作区和链接工程的 BMF 组件…"
+    : emptyIndex ? "工作区和链接工程中没有找到 BMF 组件。"
+    : idx.data ? "从左侧资源栏选择一个 BMF 组件。"
+    : "组件索引暂不可用，请重新索引。";
   return <DockRegion region="document"><div className="meta-page meta-workbench" ref={layout.ref}
     data-generation={doc?.ui.view === "generate" || undefined}
     data-focused={panels.focused || undefined}
@@ -111,8 +118,12 @@ export function MetaTab() {
     </MetaPanel>
     {!resourceDrawer && <MetaSplitter label="调整资源栏宽度" value={layout.widths.resource} min={190} max={320} onChange={(resource) => layout.setWidths((s) => ({ ...s, resource }))} onReset={() => layout.setWidths((s) => ({ ...s, resource: 224 }))} />}
     <section className="meta-main">
-      {!doc ? <><div className="meta-empty-toolbar"><button type="button" className="meta-link" onClick={() => setPanels((s) => ({ ...s, resources: true }))}>打开元数据资源</button></div>
-        <EmptyState icon="layers" bigIconSize={72} iconSize={24} description="选一个 BMF 组件开始。索引只扫工作区与链接工程，不会碰 NC 安装目录。" className="h-full" /></> : <>
+      {!doc ? <EmptyState icon="layers" iconSize={28} description={emptyDescription} className="meta-empty-state" action={resourceDrawer
+        ? <Button size="sm" onClick={() => setPanels((s) => ({ ...s, resources: true }))}>打开元数据资源</Button>
+        : !idx.loading && (emptyIndex || !idx.data) ? <>
+          {emptyIndex && <Button size="sm" onClick={() => setPanels((s) => ({ ...s, new: true }))}>新建组件</Button>}
+          <Button size="sm" variant={emptyIndex ? "ghost" : "default"} onClick={() => void scan(true)}>重新索引</Button>
+        </> : undefined} /> : <>
         <MetaDocumentTabs documents={docs.documents} active={doc.key} locked={locked} onSelect={(item) => docs.open(item.entry)} onClose={closeDocument} />
         <div className="meta-document-tools"><MetaHead entry={doc.entry} counts={severityCounts(issues)} busy={doc.busy} editing={locked}
           onRevalidate={() => void docs.refresh(doc.entry, true)} onNew={() => setPanels((s) => ({ ...s, new: true }))}

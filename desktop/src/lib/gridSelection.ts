@@ -6,6 +6,19 @@ export function allResultSelection(order: number[], visible: number[]): Selectio
   return { anchor: { r: order[0], c: visible[0] }, end: { r: order[order.length - 1], c: visible[visible.length - 1] } };
 }
 
+export function reconcileGridSelection(selection: Selection, previousRows: number[], previousColumns: number[], rows: number[], columns: number[]): Selection | null {
+  const { anchor, end } = selection;
+  if (!rows.includes(end.r) || !columns.includes(end.c)) return null;
+  const sameRange = (before: number[], after: number[], a: number, b: number) => {
+    const start = before.indexOf(a), end = before.indexOf(b), nextStart = after.indexOf(a), nextEnd = after.indexOf(b);
+    if (Math.min(start, end, nextStart, nextEnd) < 0 || Math.abs(start - end) !== Math.abs(nextStart - nextEnd)) return false;
+    const original = new Set(before.slice(Math.min(start, end), Math.max(start, end) + 1));
+    return after.slice(Math.min(nextStart, nextEnd), Math.max(nextStart, nextEnd) + 1).every(value => original.has(value));
+  };
+  return sameRange(previousRows, rows, anchor.r, end.r) && sameRange(previousColumns, columns, anchor.c, end.c)
+    ? selection : { anchor: end, end };
+}
+
 /** Borders belong to logical row/column indices, never the rendered viewport edge. */
 export function gridSelectionCell(bounds: Bounds, row: number, column: number, active: boolean) {
   const selected = !!bounds && row >= bounds.rowStart && row <= bounds.rowEnd && column >= bounds.colStart && column <= bounds.colEnd;

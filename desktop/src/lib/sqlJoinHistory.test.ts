@@ -41,13 +41,22 @@ describe("成功查询的关联写法记忆", () => {
   });
 
   it("复合关联字段一起学习，逆向写法合并，任一字段未验证不学习子集", async () => {
-    const { learn, suggest } = await fixture();
+    const { h, u, scope, learn, suggest } = await fixture();
     const sql = "select o.id from orders o join orgs g on o.org_version=g.version and o.pk_org=g.id";
     expect(learn(sql, "a")).toBe(1);
     expect(learn("select o.id from orders o join orgs g on g.id=o.pk_org and g.version=o.org_version", "b")).toBe(1);
     expect(suggest()[0].insertText).toBe("o.org_version = g.version and o.pk_org = g.id");
     const partial = { ...columns, orders: columns.orders.filter(c => c.name !== "org_version") };
     expect(learn(sql, "c", partial)).toBe(0); expect(suggest(defaultSql, partial)).toEqual([]);
+    const forward = u.sqlJoinUsageKey("orders", "orgs", ["pk_org", "org_version"], ["id", "version"]);
+    const reverse = u.sqlJoinUsageKey("orgs", "orders", ["version", "id"], ["org_version", "pk_org"]);
+    expect([...h.sqlJoinHistoryRanks(scope, "orders").keys()]).toEqual([forward]);
+    expect([...h.sqlJoinHistoryRanks(scope, "orgs").keys()]).toEqual([reverse]);
+    expect(h.sqlJoinHistoryRanks(u.sqlUsageScope("another", "NC"), "orders").size).toBe(0);
+    u.setSqlUsageEnabled(false);
+    expect(h.sqlJoinHistoryRanks(scope, "orders").size).toBe(0);
+    u.setSqlUsageEnabled(true); h.clearSqlJoinHistory(scope);
+    expect(h.sqlJoinHistoryRanks(scope, "orders").size).toBe(0);
   });
 
   it("只保存表字段身份与统计，不保存SQL正文、字面值、旧alias和连接凭据", async () => {

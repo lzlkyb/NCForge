@@ -1,5 +1,3 @@
-import { QueryField } from "./QueryField";
-import { useOperationById } from "../../lib/operations";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { SqlExecutionFeedback } from "./SqlExecutionFeedback";
@@ -30,11 +28,8 @@ export function ResultPanel({ tab: seed, height, onLocate, onFillSql, fixes, onR
   });
   const { id, connId, slot, run, maxRows, timeoutSec } = tab;
   const rowTab = useMemo(() => ({ id, connId, slot, run, maxRows, timeoutSec }), [id, connId, slot, run, maxRows, timeoutSec]);
-  const [motionHost, setMotionHost] = useState<HTMLDivElement | null>(null);
   /** 看过的结果视图保活：切标签回来时本地筛选、排序、滚动与单元格选择都还在。 */
   const [kept, setKept] = useState<string[]>([]);
-  const operation = useOperationById(tab.run?.id);
-  const active = !!operation && operation.endedAt === undefined;
   // A single replacement query has its status in the header. Keep the old result tabs fixed until it returns.
   const hasResults = tab.results.length > 0;
   const pending = useMemo(() => hasResults && tab.batch?.statements.length === 1 ? [] : pendingResults({ batch: tab.batch }),
@@ -50,8 +45,6 @@ export function ResultPanel({ tab: seed, height, onLocate, onFillSql, fixes, onR
   const [outputVisited, setOutputVisited] = useState(view === "output");
   useEffect(() => { if (view === "output") setOutputVisited(true); }, [view]);
   const showOutput = view === "output" || view !== "plan" && !selectedResult;
-  const previous = !!cur && active && (!cur.completedAt || cur.completedAt < operation.startedAt);
-  const motionState = active ? operation.state : operation?.state ?? "idle";
   useEditRevision();
   useEffect(() => {
     const next = tab.results.filter(r => r.kind === "rows" && (visible.includes(r.id) || kept.includes(r.id))).map(r => r.id);
@@ -115,7 +108,7 @@ export function ResultPanel({ tab: seed, height, onLocate, onFillSql, fixes, onR
       <div className="dbx-result-head">
         <span id={`${prefix}-region`} className="dbx-region-label">结果区</span>
         <ResultTabList prefix={prefix} label="查询结果" items={items} value={view} onSelect={setView} />
-        <ResultBaselineSummary /><SqlExecutionFeedback executionId={tab.run?.id} previousAt={cur ? cur.completedAt ?? 0 : undefined} />
+        <ResultBaselineSummary /><SqlExecutionFeedback tabId={tab.id} executionId={tab.run?.id} previousAt={cur ? cur.completedAt ?? 0 : undefined} />
         {cur?.parentResultId && options.some(result => result.id === cur.parentResultId) &&
           <button type="button" className="dbx-lk" onClick={() => setView(cur.parentResultId!)}>返回来源结果</button>}
         {cur?.kind === "rows" && <button type="button" className="dbx-ibtn" aria-pressed={!!cur.pinned}
@@ -133,8 +126,7 @@ export function ResultPanel({ tab: seed, height, onLocate, onFillSql, fixes, onR
         })}</div>}
         {tab.results.length > 0 && <button type="button" className="dbx-ibtn" disabled={isRunning(tab)} aria-label="释放查询结果" title="释放已读取结果，保留 SQL 和事务" onClick={() => void release()}><Icon name="close" size={14}/></button>}
       </div>
-      <div className="dbx-result-view dbx-query-surface" ref={setMotionHost} id={`${prefix}-panel`} role="tabpanel" tabIndex={0} aria-labelledby={resultTabId(prefix, view)}>
-      {motionHost && <QueryField key={tab.run?.id ?? "idle"} host={motionHost} state={motionState} previous={previous} />}
+      <div className="dbx-result-view" id={`${prefix}-panel`} role="tabpanel" tabIndex={0} aria-labelledby={resultTabId(prefix, view)}>
       <div className="dbx-result-panes" data-layout={layout}>
       {rowViews.map(r => <section key={r.id} className="dbx-result-keep" hidden={!visible.includes(r.id)} style={{ order: visible.indexOf(r.id) }} aria-label={`查询 ${r.index} 结果`}>
         {paneHeading(r)}

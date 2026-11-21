@@ -30,6 +30,14 @@ mockIPC((cmd,args) => {
   if (cmd === 'hotswap_status') return {enabled:true,auto:true,agentOnline:false,agentAttached:true,stale:false,pending:0,pendingClasses:[],last:null,staleReport:null,client:{running:false,agentOnline:false,agentAttached:false,stale:false}};
   if (cmd === 'build_cache_info') return {indexBytes:102400,indexFiles:12,manifestBytes:4096,manifestModules:3,tmpBytes:2048,trackedClasses:125,untrackedClasses:[],history:[],worker:{workerCompiles:0,oneshotCompiles:0}};
   if (cmd === 'build_history') return [];
+  if (cmd === 'storage_usage') {
+    const usage = [6144,32768,16384,2048].map(bytes=>({bytes,incomplete:false}));
+    return {categories:Object.fromEntries(['temporary','cache','components','local'].map((key,i)=>[key,usage[i]])),
+      freeBytes:30*1024**3,totalBytes:100*1024**3,sampledAt:Date.now(),languageBusy:false};
+  }
+  if (cmd === 'storage_preview') return {id:12,incomplete:false,entries:[{key:0,kind:'compile',name:'ecj-44-1.args',bytes:1024}]};
+  if (cmd === 'storage_apply') return {removed:1,removedBytes:1024,skipped:0,reasons:{},cancelled:false};
+  if (cmd === 'storage_memory') return {sampledAt:Date.now(),rows:[{pid:562,group:'main',residentBytes:80*1024**2,privateBytes:65*1024**2}],idleCompilers:0,partial:false};
   if (cmd === 'export_config') return JSON.stringify({app:'ncforge',schema:1,from_version:'0.4.0',config:{workspace_root:'D:/工程/当前工程',nc_home:window.settingsAcceptance.home,lang_enabled:true,lang_xmx_mb:1024}});
   if (cmd === 'import_config') return {};
   if (cmd === 'db_cached_tables') return {tables:[],fetchedAt:0};
@@ -91,7 +99,15 @@ try {
   await page.getByRole("radiogroup", {name:"界面材质",exact:true}).waitFor();
   await page.evaluate(async () => { const {setSession}=await import('/src/lib/workspaceSession.ts');setSession({root:'D:/工程/验收工程'}); });
   const labels = await page.locator(".wb-settings-nav button").allTextContents();
-  assert.equal(labels.length,11);
+  assert.equal(labels.length,12);
+  await navigate("存储与性能");
+  await page.getByRole("button",{name:"建议清理",exact:true}).click();
+  await page.getByRole("region",{name:"清理预览"}).getByText("ecj-44-1.args",{exact:true}).waitFor();
+  await page.getByRole("button",{name:"清理所选",exact:true}).click();
+  await page.getByText(/已移除 1.0 KB/).first().waitFor();
+  await page.getByRole("button",{name:"运行内存",exact:true}).click();
+  await page.getByRole("rowheader",{name:/NCForge 主程序/}).waitFor();
+  assert.equal(await page.getByRole("cell",{name:"80 MB",exact:true}).count(),1);
   for (const dark of flowsOnly ? [] : [false,true]) {
     await navigate("外观与启动");
     await page.getByRole("radiogroup",{name:"明暗主题",exact:true}).getByRole("radio",{name:dark?"深色":"浅色",exact:true}).click();

@@ -102,6 +102,23 @@ test("主子表联查菜单：上下键导航浮层不跳", async () => {
     const toolbar = page.locator(".dbx-sql-action-top");
     await toolbar.getByText("主子表联查", { exact: true }).waitFor();
     await toolbar.getByText("SQL 预览", { exact: true }).waitFor();
+    const material = await page.locator(".dbx-sql-action-view .action-widget").evaluate(el => {
+      const root = document.documentElement;
+      const previous = root.dataset.uiStyle;
+      const read = (style) => {
+        root.dataset.uiStyle = style;
+        const { backdropFilter, backgroundColor } = getComputedStyle(el);
+        return { backdropFilter, backgroundColor };
+      };
+      try {
+        return { classic: read("classic"), glass: read("glass") };
+      } finally {
+        root.dataset.uiStyle = previous;
+      }
+    });
+    assert.equal(material.classic.backdropFilter, "none");
+    assert.match(material.glass.backdropFilter, /blur\(18px\)/);
+    assert.notEqual(material.glass.backgroundColor, material.classic.backgroundColor);
     assert.ok(await page.locator(".action-widget[data-sql-preview] .actionList").evaluate(el =>
       [el, ...el.querySelectorAll(".monaco-list,.monaco-scrollable-element,.shadow")]
         .every(node => getComputedStyle(node).boxShadow === "none")), "only the outer shell casts a shadow");

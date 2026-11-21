@@ -136,7 +136,7 @@ pub fn read_attached(
         Ok(raw) => raw,
         Err(_) => return Ok(None), // Missing member or unreadable attachment: use the binary implementation.
     };
-    if raw.contains(&0) {
+    if raw.contains(&0) && crate::workspace::utf16_encoding(&raw).is_none() {
         return Ok(None);
     }
     Ok(Some(AttachedSource {

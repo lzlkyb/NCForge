@@ -3,8 +3,11 @@ import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { sqlModel, tabIdOfModel } from "../../lib/sqlModels";
 import { registerSqlProviders } from "../../lib/sqlProviders";
 import { wireSqlEditorAssist } from "../../lib/sqlEditorAssist";
+import { wireSqlInspection } from "../../lib/sqlInspectionEditor";
+import { wireSqlBusinessLookup } from "../../lib/sqlBusinessLookup";
 import { wireSqlSuggestLayout } from "../../lib/sqlSuggestLayout";
 import { wireSqlActionMenu } from "../../lib/sqlActionMenu";
+import { wireSqlEditorDrag } from "../../lib/sqlEditorDrag";
 import { pickStatement } from "../../lib/sqlSplit";
 import { statementsOf } from "../../lib/sqlStmtCache";
 import type { SqlFormatScope } from "../../lib/sqlFormatTarget";
@@ -24,8 +27,9 @@ export interface SqlEditorApi {
   /** 执行发起时记下本次语句范围：整行行痕 + overview ruler 标记，按标签保留。 */
   markRun?: (stmts: RunStmt[]) => void;
   format: (scope?: SqlFormatScope) => void;
-  reveal: (line: number) => void;
+  reveal: (line: number, column?: number) => void;
   focus: () => void;
+  canRevealExecutionError?: (stmt: RunStmt) => boolean;
   setText: (text: string) => void;
   fix?: (target: { editorSql: string; start: number; end: number; text: string }) => boolean;
 }
@@ -47,12 +51,13 @@ const CONTEXT_GROUP = "navigation";
  * 这三条同时挂在编辑器右键菜单里（`addAction`），所以工具条的主按钮上不再印键位。
  * Ctrl+点击表名打开它的 DDL——链接由 `lib/sqlProviders.ts` 里的 LinkProvider 挂上。
  */
-export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = true }: {
+export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, onOutline, visible = true }: {
   tabId: string;
   initial: string;
   onRun: (mode: SqlRunMode) => void;
   apiRef: { current: SqlEditorApi | null };
   onScope?: (scope: SqlExecutionScope) => void;
+  onOutline?: (outline: { tabId: string; statements: RunStmt[] }) => void;
   visible?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -64,6 +69,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
   const visibleRef = useRef(visible); visibleRef.current = visible;
   const previousVisible = useRef(visible);
   const onScopeRef=useRef(onScope);onScopeRef.current=onScope;
+  const onOutlineRef = useRef(onOutline); onOutlineRef.current = onOutline;
   const onRunRef = useRef(onRun);
   onRunRef.current = onRun;
 
@@ -145,13 +151,20 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
     };
     let raf = 0;
     let previousScope: SqlExecutionScope | null = null;
+    let outlineModel: monaco.editor.ITextModel | null = null, outlineVersion = -1;
     const highlight = () => {
       const model = editor.getModel(), id = model && tabIdOfModel(model);
       // 与按钮/快捷键最终调用的 target() 共用语句列表，范围不能另行猜测或切分。
       if (id) {
-        const next = { tabId: id, selected: editor.getSelection()?.isEmpty() === false, statements: target("auto") };
+        if (onOutlineRef.current && model && (outlineModel !== model || outlineVersion !== model.getVersionId())) {
+          outlineModel = model; outlineVersion = model.getVersionId();
+          onOutlineRef.current({ tabId: id, statements: target("script") });
+        }
+        const selected = editor.getSelection()?.isEmpty() === false;
+        const statements = target("auto");
+        const next = { tabId: id, selected, statements, current: selected ? target("current")[0] : statements[0] };
         // 语句内移动光标不必让整块结果网格跟随重绘。
-        if (!previousScope || previousScope.tabId !== id || previousScope.selected !== next.selected || previousScope.statements.length !== next.statements.length
+        if (!previousScope || previousScope.tabId !== id || previousScope.selected !== next.selected || previousScope.statements.length !== next.statements.length || previousScope.current?.startOffset !== next.current?.startOffset
           || next.statements.some((stmt, index) => { const previous = previousScope!.statements[index]; return stmt.text !== previous.text || stmt.startLine !== previous.startLine || stmt.endLine !== previous.endLine; })) {
           previousScope = next;
           onScopeRef.current?.(next);
@@ -161,12 +174,11 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
       raf = requestAnimationFrame(() => {
         const model = editor.getModel();
         const pos = editor.getPosition();
-        if (!model || !pos || model.getValueLength() > HL_LIMIT) return deco.clear();
+        if (!model || !pos || editor.getSelection()?.isEmpty() === false || model.getValueLength() > HL_LIMIT) return deco.clear();
         // 切分结果按 model 版本缓存：光标移动不重切，内容变了才切一遍
         const all = statementsOf(model);
         const s = pickStatement(all, model.getOffsetAt(pos));
-        // 只有一条语句时不高亮：整篇都是它，高亮反而是噪音
-        if (!s || all.length < 2) return deco.clear();
+        if (!s) return deco.clear();
         deco.set([{
           range: new monaco.Range(s.startLine, 1, s.endLine, 1),
           options: { isWholeLine: true, className: "dbx-stmt-hl", linesDecorationsClassName: "dbx-stmt-gl" },
@@ -176,7 +188,8 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
     refreshScope.current = highlight;
     const host = hostRef.current;
     const updateEmptyHint = () => host?.toggleAttribute("data-sql-has-text", !!editor.getModel()?.getValueLength());
-    const subs = [wireSqlEditorAssist(editor), wireSqlSuggestLayout(editor), wireSqlActionMenu(editor, overflow),
+    const subs = [wireSqlEditorAssist(editor), wireSqlInspection(editor, () => visibleRef.current), wireSqlBusinessLookup(editor),
+      wireSqlSuggestLayout(editor), wireSqlActionMenu(editor, overflow), wireSqlEditorDrag(editor),
       editor.onDidChangeModel(() => { applyRunTrace(); updateEmptyHint(); }),
       editor.onDidChangeCursorPosition(highlight),
       editor.onDidChangeCursorSelection(highlight),
@@ -199,13 +212,14 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
         applyRunTrace();
       },
       format: (scope) => formatAt(editor, scope),
-      reveal: (line) => {
+      reveal: (line, column = 1) => {
         editor.revealLineInCenter(line);
-        editor.setPosition({ lineNumber: line, column: 1 });
+        editor.setPosition({ lineNumber: line, column });
         rememberView();
         if (visibleRef.current) editor.focus();
       },
       focus: () => { if (visibleRef.current) editor.focus(); },
+      canRevealExecutionError: stmt => visibleRef.current && editor.hasTextFocus() && editor.getModel()?.getVersionId() === stmt.editorVersion,
       fix: ({ editorSql, start, end, text }) => {
         const model = editor.getModel();
         if (!model || model.getValue() !== editorSql) return false;

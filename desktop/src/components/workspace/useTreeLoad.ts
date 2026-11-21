@@ -10,7 +10,10 @@ import { isUnderPath } from "../../lib/treeProjects";
 import { getSession, setSession, setTree, useWorkspaceSelector } from "../../lib/workspaceSession";
 import { usePackageIndexes } from "../../hooks/usePackageIndexes";
 import { usePackageRoots } from "../../hooks/usePackageRoots";
+import { usePackageWarmup } from "../../hooks/usePackageWarmup";
 import { workspaceEpoch } from "../../lib/workspaceEpoch";
+
+let directoryReads: { root: string; epoch: number; pending: Map<string, Promise<void>> } | undefined;
 
 /**
  * 文件树的数据层：按需加载某一层、维护展开态与编码标记。
@@ -32,6 +35,7 @@ export function useTreeLoad(
   projectRoots?: string[],
   hoist?: (dir: string) => boolean,
   packageView = false,
+  activePath: string | null = null,
 ) {
   // 只订阅树：整会话订阅下，每次 dirty 翻转 / 编译状态变化都会把整棵树重渲染一遍
   const tree = useWorkspaceSelector((s) => s.tree);
@@ -45,7 +49,11 @@ export function useTreeLoad(
   filterMode.current = filtered?.mode ?? null;
   const fallbackRoots = useMemo(() => [root], [root]);
   const packageRoots = usePackageRoots(projectRoots ?? fallbackRoots, expanded, packageView);
-  const { indexes: packageIndexes, ensure, invalidate } = usePackageIndexes(packageRoots, expanded, epoch);
+  const { indexes: packageIndexes, ensure, invalidate } = usePackageIndexes(root, packageRoots, expanded, epoch);
+  if (directoryReads?.root !== root || directoryReads.epoch !== epoch) {
+    directoryReads = { root, epoch, pending: new Map() };
+  }
+  const reads = directoryReads.pending;
 
   /**
    * 问后端这一层的 `.java` 里，哪些是「磁盘 UTF-8、Eclipse 却按 GBK 读」。
@@ -78,27 +86,36 @@ export function useTreeLoad(
   );
 
   const load = useCallback(
-    async (path: string) => {
-      if (workspaceEpoch() !== epoch) return;
+    (path: string): Promise<void> => {
+      if (workspaceEpoch() !== epoch || getSession().tree.root !== root) return Promise.resolve();
+      const pending = reads.get(path);
+      if (pending) return pending;
       // 已经有内容就别退回「加载中…」，刷新时列表原地替换，不闪
       setTree((t) =>
         t.dirs[path]?.status === "ok"
           ? t
           : { ...t, dirs: { ...t.dirs, [path]: { status: "loading" } } },
       );
-      try {
-        const items = await listDir(path);
+      const read = listDir(path).then(items => {
         setTree((t) => t.root !== root || workspaceEpoch() !== epoch ? t : { ...t, dirs: { ...t.dirs, [path]: { status: "ok", items } } });
         void markEncodings(path, items);
-      } catch (e) {
+      }, e => {
         setTree((t) => t.root !== root || workspaceEpoch() !== epoch ? t : ({
           ...t,
           dirs: { ...t.dirs, [path]: { status: "error", message: String(e) } },
         }));
-      }
+      }).finally(() => { reads.delete(path); });
+      reads.set(path, read);
+      return read;
     },
-    [markEncodings, root, epoch],
+    [markEncodings, root, epoch, reads],
   );
+  const loadIfMissing = useCallback((path: string) =>
+    getSession().tree.dirs[path]?.status === "ok" ? Promise.resolve() : load(path), [load]);
+  const preparePackage = useCallback(async (path: string) => {
+    await Promise.all([loadIfMissing(path), ensure(path)]);
+  }, [loadIfMissing, ensure]);
+  usePackageWarmup(root, packageRoots, activePath, preparePackage);
 
   /**
    * 外部改动（SVN 更新、Eclipse 保存、脚本生成文件）：后端把改动合并成一批目录报上来。
@@ -115,6 +132,9 @@ export function useTreeLoad(
       createDirRefresher({
         limit: 4,
         read: async (dir: string) => {
+          // The event can arrive after a foreground or warm-up read started. Read again
+          // after it settles, so an older snapshot cannot undo the refresh.
+          await reads.get(dir);
           if (workspaceEpoch() !== epoch) return { status: "error" as const, message: "工作区已切换" };
           try {
             return { status: "ok" as const, items: await listDir(dir) };
@@ -133,7 +153,7 @@ export function useTreeLoad(
           for (const [dir, st] of results) if (st.status === "ok") void markEncodings(dir, st.items);
         },
       }),
-    [root, markEncodings, epoch],
+    [root, markEncodings, epoch, reads],
   );
 
   const refreshDirs = useCallback(
@@ -141,9 +161,7 @@ export function useTreeLoad(
       if (!rescan && changed.length === 0) return;
       const wanted = rescan ? null : new Set(changed.map(pathKey));
       const todo: string[] = [];
-      for (const [dir, entry] of Object.entries(getSession().tree.dirs)) {
-        // 正在读的那一层，结果回来时本身就是新的，不叠加一次
-        if (entry.status === "loading") continue;
+      for (const dir of Object.keys(getSession().tree.dirs)) {
         if (!wanted || wanted.has(pathKey(dir))) todo.push(dir);
       }
       void refresher.request(todo).catch(() => {});
@@ -219,6 +237,17 @@ export function useTreeLoad(
 
   const expand = (path: string) => setExpandedPaths([path], true);
 
+  const keepRootOpen = !packageView && (projectRoots?.length ?? 0) <= 1;
+  const hasBranches = (paths: Set<string>) => paths.size > (keepRootOpen && paths.has(root) ? 1 : 0);
+  const canCollapse = hasBranches(tree.expanded) || (filtered !== null && hasBranches(filtered.expanded));
+  const collapseBranches = useCallback(() => {
+    if (workspaceEpoch() !== epoch) return;
+    const expanded = new Set(keepRootOpen ? [root] : []);
+    // 筛选态有独立的展开记录，两处一起收起，退出筛选时才不会恢复旧分支。
+    setFilteredTree(previous => previous?.root === root ? { ...previous, expanded } : previous);
+    setTree(t => t.root === root ? { ...t, expanded } : t);
+  }, [epoch, keepRootOpen, root]);
+
   /**
    * 展开 / 收起一行。压缩模式下要动整条链：只删链尾的话，上一层在 `expanded` 里还开着，
    * 下一帧又被 `chainOpen` 判成展开，看起来像「点了没反应」。
@@ -229,7 +258,7 @@ export function useTreeLoad(
       : { nodes: [path], label: path, tail: path };
     const open = chainOpen(chain, expanded);
     setExpandedPaths(chain.nodes, !open);
-    if (!open) void load(chain.tail);
+    if (!open) void loadIfMissing(chain.tail);
   };
 
   /**
@@ -245,7 +274,7 @@ export function useTreeLoad(
     const isOpen = expanded.has(path);
     setExpandedPaths([path], !isOpen);
     // 展开且还没加载过（或上次加载失败）才请求
-    if (!isOpen && dirs[path]?.status !== "ok") void load(path);
+    if (!isOpen) void loadIfMissing(path);
   };
 
   /** 从目录列表取实际名称，展开状态和滚动才能命中树渲染使用的路径。 */
@@ -261,5 +290,5 @@ export function useTreeLoad(
     setFilteredTree,
   });
 
-  return { dirs, expanded, marks, mode: filtered?.mode ?? null, setMode, load, expand, toggle, toggleRow, depthOf, reveal, packageRoots, packageIndexes, invalidatePackages: invalidate };
+  return { dirs, expanded, marks, mode: filtered?.mode ?? null, setMode, load, expand, toggle, toggleRow, depthOf, reveal, packageRoots, packageIndexes, invalidatePackages: invalidate, canCollapse, collapseBranches };
 }

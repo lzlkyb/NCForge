@@ -836,7 +836,7 @@ describe("更新任务按事件结束", () => {
     const task = getOperations().find(o => o.key === "update.download")!;
     expect(task.state).toBe("running");
     await emit("update:progress", { downloaded: 1234, total: null });
-    expect(getOperations().find(o => o.id === task.id)?.progress).toEqual({ done: 1234, total: undefined });
+    expect(getOperations().find(o => o.id === task.id)?.progress).toEqual({ done: 1234, total: undefined, unit: "字节" });
     await emit("update:ready");
     expect(getOperations().find(o => o.id === task.id)).toMatchObject({ state: "success", detail: "更新包已下载并验签，等待用户安装" });
   });

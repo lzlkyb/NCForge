@@ -6,6 +6,7 @@ import { ScopeChip } from "./ScopeChip";
 import type { SearchForm } from "../../lib/searchStore";
 import type { ManifestAudit } from "../../lib/ncManifest";
 import type { ComponentOption } from "../../lib/searchScope";
+import { pasteSearchText } from "../../lib/searchInput";
 
 /** 文件过滤的常用预设：NC 工程的代码在 .java，配置与单据模板在 .xml / .properties。 */
 const MASK_PRESETS = ["*.java", "*.xml", "*.properties"];
@@ -48,6 +49,7 @@ export function SearchBar({
   onSearch: () => void;
   onKeyDown: (e: KeyboardEvent) => void;
 }) {
+  const Input = form.query.includes("\n") ? "textarea" : "input";
   const toggleMask = (mask: string) => {
     const items = form.include
       .split(",")
@@ -76,10 +78,11 @@ export function SearchBar({
             size={15}
             className="pointer-events-none absolute left-2.5 text-muted-foreground"
           />
-          <input
+          <Input
             value={form.query}
             onChange={(e) => update({ query: e.target.value })}
             onKeyDown={(e) => onKeyDown(e)}
+            onPaste={(e) => pasteSearchText(e, form.query, query => update({ query }))}
             placeholder={
               form.scope === "all"
                 ? "搜索全部关联工程（回车）"
@@ -90,8 +93,8 @@ export function SearchBar({
             spellCheck={false}
             aria-label="搜索工程文件内容"
             autoFocus
-            list="ncforge-search-history"
-            className="h-[30px] w-full rounded-md border-0 bg-transparent pl-8 pr-8 text-[13px] transition-colors placeholder:text-muted-foreground"
+            {...(Input === "textarea" ? { rows: 2 } : { list: "ncforge-search-history" })}
+            className={`w-full rounded-md border-0 bg-transparent pl-8 pr-8 text-[13px] transition-colors placeholder:text-muted-foreground ${Input === "textarea" ? "resize-none py-1" : "h-[30px]"}`}
           />
           {/* 搜索词历史：datalist 是最省事的原生下拉，不用自己画浮层 */}
           <datalist id="ncforge-search-history">

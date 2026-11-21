@@ -32,6 +32,12 @@ export function useTreeMembers(enabled: boolean, dirs: Record<string, TreeDirSta
     seenDirs.current.delete(path);
     setMembers(prev => { const next = new Map(prev); next.delete(path); return next; });
   }, []);
+  const closeAll = useCallback(() => {
+    open.current.clear();
+    requests.current.clear();
+    seenDirs.current.clear();
+    setMembers(EMPTY);
+  }, []);
   const toggle = (path: string) => {
     if (open.current.has(path)) { close(path); return; }
     open.current.add(path);
@@ -85,5 +91,5 @@ export function useTreeMembers(enabled: boolean, dirs: Record<string, TreeDirSta
     const pending = requests.current;
     return () => pending.clear();
   }, []);
-  return { members: visible, toggle };
+  return { members: visible, toggle, closeAll };
 }

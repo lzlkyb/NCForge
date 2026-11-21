@@ -16,11 +16,22 @@ const KEYWORDS = words("select from where and or not in exists like between is n
 const ORACLE = words("connect start prior nocycle siblings rownum level sysdate systimestamp dual returning bulk collect forall connect_by_root connect_by_isleaf connect_by_iscycle pivot unpivot model sample rowid urowid row_number");
 const TYPES = words("varchar char nchar nvarchar text number numeric decimal integer int smallint bigint float double real binary varbinary date timestamp interval boolean blob clob raw long xml money bit serial json jsonb uuid");
 const ORACLE_TYPES = words("varchar2 nvarchar2 binary_float binary_double nclob pls_integer binary_integer rowtype type");
+const POSTGRESQL = words("ilike similar returning conflict variadic tablesample");
+const TSQL = words("top output apply go nolock try catch throw raiserror tran transaction ties openquery openrowset");
+const MYSQL = words("delimiter distinctrow regexp rlike straight_join duplicate auto_increment");
+const DB2 = words("optimize isolation volatile");
+const SQLITE = words("pragma glob attach detach conflict returning vacuum");
 const identifierStart = /[\p{L}_]/u, identifierPart = /[\p{L}\p{N}_$#]/u;
 export function sqlWordKind(text: string, dialect: SqlLanguage): SqlTokenKind {
   const lower = text.toLowerCase();
   if (TYPES.has(lower) || (dialect === "plsql" && ORACLE_TYPES.has(lower))) return "type";
-  return KEYWORDS.has(lower) || (dialect === "plsql" && ORACLE.has(lower)) ? "keyword" : "identifier";
+  const extensions = dialect === "plsql" ? ORACLE : dialect === "postgresql" ? POSTGRESQL : dialect === "tsql" ? TSQL
+    : dialect === "mysql" || dialect === "mariadb" ? MYSQL : dialect === "db2" ? DB2 : dialect === "sqlite" ? SQLITE : undefined;
+  return KEYWORDS.has(lower) || extensions?.has(lower) ? "keyword" : "identifier";
+}
+
+export function usesSqlAggregateFilter(dialect: SqlLanguage) {
+  return dialect === "postgresql" || dialect === "sqlite";
 }
 
 /** Tolerant scanner: unfinished SQL keeps its string/comment state instead of inventing keywords. */
@@ -46,11 +57,17 @@ export function scanSql(text: string, dialect: SqlLanguage = "sql", previous = i
     }
     const parameter = parameterAt(text.slice(i), dialect);
     if (parameter) { i += parameter.length; emit(start, "parameter"); continue; }
-    const number = /^(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?/i.exec(text.slice(i));
+    const number = /^(?:\d+(?:\.(?!\.)\d*)?|\.\d+)(?:e[+-]?\d+)?/i.exec(text.slice(i));
     if (number) { i += number[0].length; emit(start, "number"); continue; }
     if (identifierStart.test(text[i])) {
-      i++; while (i < text.length && identifierPart.test(text[i])) i++; emit(start, sqlWordKind(text.slice(start, i), dialect)); continue;
+      i++;
+      while (i < text.length && identifierPart.test(text[i])) i++;
+      const word = text.slice(start, i);
+      const filter = usesSqlAggregateFilter(dialect) && word.toUpperCase() === "FILTER" && /^\s*\(\s*WHERE\b/i.test(text.slice(i));
+      emit(start, filter ? "keyword" : sqlWordKind(word, dialect));
+      continue;
     }
+    if (dialect === "plsql" && text.startsWith("..", i)) { i += 2; emit(start, "operator"); continue; }
     i += /^(?:::|:=|<=|>=|<>|!=|\|\||->>|->)/.exec(text.slice(i))?.[0].length ?? 1;
     emit(start, "operator");
   }

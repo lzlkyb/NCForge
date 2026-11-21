@@ -106,6 +106,7 @@ const paths = {
   // 三个点靠 strokeLinecap="round" 的零长线段画出来（与 alert/info 的 "h.01" 同一套做法）。
   more: "M5 12h.01M12 12h.01M19 12h.01",
   collapse: "M3 8h3a2 2 0 0 0 2-2V3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M21 16h-3a2 2 0 0 0-2 2v3",
+  collapseAll: "M7 3h12a2 2 0 0 1 2 2v12M5 7h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zm2 7h6",
   // 终端状态栏的 git 分支段。刻意不用 emoji（依赖 Nerd Font，缺字体就是豆腐块），
   // 与整套图标一样走内联 SVG。
   gitBranch: "M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM15 6a9 9 0 0 0-9 9",

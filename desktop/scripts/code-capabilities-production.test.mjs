@@ -64,7 +64,7 @@ test('code capabilities: hover action, multiple targets, preview, right group an
  const browser=await chromium.launch({headless:true,channel:'msedge'}),errors=[],checks=[];
  try{for(const theme of ['light','dark']){
   const context=await browser.newContext({viewport:{width:1440,height:900},reducedMotion:'reduce'});
-  await context.addInitScript(theme=>{localStorage.setItem('theme',theme);localStorage.setItem('ncforge.ui-style','classic');},theme);
+  await context.addInitScript(theme=>{localStorage.setItem('theme',theme);localStorage.setItem('ncforge.ui-style','classic');localStorage.setItem('ncforge.tree.packageView','0');},theme);
   const page=await context.newPage();page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
   try{
    await page.goto(`http://127.0.0.1:${server.address().port}`,{waitUntil:'domcontentloaded'});

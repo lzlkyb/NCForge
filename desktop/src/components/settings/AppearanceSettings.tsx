@@ -63,8 +63,8 @@ export function AppearanceSettings() {
         valueText={appearance === "glass" ? "柔光玻璃" : "经典"}
         {...feedback.材质}
         label="界面材质"
-        sub="柔光玻璃 提供半透明层次；经典 使用实色背景"
-        info="两种材质共用窗口与面板圆角、连续工作面和轻微层次；柔光玻璃的菜单与提示使用半透明模糊，经典使用实底。代码、数据库表格与日志保持清晰的阅读底色。偏好只存本机，不随配置迁移。"
+        sub="柔光玻璃为标题栏和侧栏加入柔光，经典使用中性实色"
+        info="柔光玻璃的搜索、菜单和 SQL 助手带有局部模糊。代码、数据库表格与日志使用实底，便于阅读。开启系统高对比或减少透明效果时自动切换为实底。材质偏好保存在本机。"
         control={
           <div className="flex flex-wrap items-center gap-2"><SettingsChoice
             label="界面材质"

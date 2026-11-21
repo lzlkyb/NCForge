@@ -59,7 +59,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 840 } });
     currentPage = page;
     page.on("pageerror", error => errors.push(String(error)));
-    await page.addInitScript(({ theme }) => { localStorage.setItem("theme", theme); localStorage.setItem("ncforge.ui-style", "glass"); }, { theme });
+    await page.addInitScript(({ theme }) => { localStorage.setItem("theme", theme); localStorage.setItem("ncforge.ui-style", "glass"); localStorage.setItem("ncforge.tree.packageView", "0"); }, { theme });
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     const tree = page.getByRole("tree", { name: "文件树", exact: true });
     await tree.getByText("demo", { exact: true }).click();

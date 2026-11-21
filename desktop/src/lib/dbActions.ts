@@ -42,6 +42,7 @@ import {
 } from "./dbStore";
 import { disposeSqlModel } from "./sqlModels";
 import { isWrite, stmtKind } from "./sqlSplit";
+import { oraHint } from "./oraErrorHint";
 import { captureResultContext, connectionKey, type SqlRunTarget } from "./dbResultContext";
 import { dbTabLabel } from "./dbPendingSessions";
 import { clearEditsForTab, pendingForTab } from "./dbDirtyEdits";
@@ -341,8 +342,9 @@ export interface ScriptFailure {
 }
 
 export interface RunOutcome {
-  /** 第一条出错语句的起始行（编辑器据此定位）；null = 没出错 / 没跑。 */
+  /** 第一处可定位的错误；驱动未提供唯一标识符时退到语句行。 */
   failLine: number | null;
+  failColumn?: number;
   failures: ScriptFailure[];
   /** 实际执行的条数（含失败的）。 */
   done: number;
@@ -500,11 +502,6 @@ export async function runStatements(
       if (batch) patchTab<SqlTab>(tabId, { batch: { ...batch, activeIndex: i + 1 } });
       // 回放进度每条都推进；节流只作用于任务中心的 task.update，避免频繁改 store。
       opts.onProgress?.({ done: i, total: stmts.length, line: s.startLine, text: s.text });
-      const now = performance.now();
-      if (now - lastProgress >= 125) {
-        lastProgress = now;
-        task.update({phase:`执行第 ${i+1} / ${stmts.length} 条`,progress:{done:i,total:stmts.length}});
-      }
       if (isWrite(s.text) && !(await confirmProdWrite(tabId, connId, s.text))) {
         if (!sameRun()) break;
         appendOutput(tabId, [{ at: Date.now(), text: `第 ${i + 1} 条未执行：已取消`, tone: "info" }]);
@@ -512,6 +509,14 @@ export async function runStatements(
         break;
       }
       if(stopRequested) {outcome.stoppedByUser=true;break;}
+      const now = performance.now();
+      if (now - lastProgress >= 125) {
+        lastProgress = now;
+        task.update({
+          phase:stmts.length===1 ? "等待数据库返回" : `执行第 ${i+1} / ${stmts.length} 条`,
+          progress:stmts.length===1 ? undefined : {done:i,total:stmts.length,unit:"条"},
+        });
+      }
       let r: Awaited<ReturnType<typeof execOne>>;
       inFlight = true;
       try { r = opts.bindings?.[i]
@@ -533,10 +538,10 @@ export async function runStatements(
           kept.push(...previousResults.filter((result) => result.kind !== "error"));
         }
         const firstResult = kept.length === 0;
+        if (firstResult && !restoredPrevious) kept.push(...pinnedResults);
         kept.push(r);
         const selected = sqlTabOf(tabId)?.view;
         const pendingId = pendingResultId(task.id, i + 1);
-        if (firstResult && !restoredPrevious) kept.push(...pinnedResults);
         const watchingPin = pinnedResults.some(result => result.id === selected);
         const watchingOutput = selected === "output" && previousResults.length > 0;
         const view = selected === pendingId || firstResult && !watchingPin && !watchingOutput && !selected?.startsWith(`pending:${task.id}:`) ? r.id : selected;
@@ -552,14 +557,22 @@ export async function runStatements(
       if (r.kind === "error") {
         // PL/SQL 块的 `line N` 是相对这条语句的，加上起始行偏移才能落到编辑器真正的行
         const rel = plsqlErrorLine(r.error ?? "");
-        const line = rel ? s.startLine + rel - 1 : s.startLine;
+        const location = !rel && !r.cancelled && !connectionInterrupted ? oraHint(r.error ?? "", s.text)?.location : undefined;
+        const exact = location?.occurrences === 1 ? location : undefined;
+        const line = s.startLine + (rel ?? exact?.line ?? 1) - 1;
         outcome.failures.push({
           index: i + 1,
-          line,
+          line: s.startLine + (rel ?? 1) - 1,
           text: s.text,
           error: r.error ?? "执行失败",
         });
-        if (outcome.failLine === null) outcome.failLine = line;
+        if (outcome.failLine === null) {
+          outcome.failLine = line;
+          if (exact && s.startOffset !== undefined && s.editorSql?.slice(s.startOffset, s.startOffset + s.text.length) === s.text) {
+            const previousLine = s.editorSql.lastIndexOf("\n", s.startOffset - 1);
+            outcome.failColumn = exact.column + (exact.line === 1 ? s.startOffset - previousLine - 1 : 0);
+          }
+        }
         if (r.cancelled || connectionInterrupted || !opts.ignoreErrors) break;
       }
     }

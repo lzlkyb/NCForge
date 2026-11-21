@@ -16,6 +16,8 @@ export interface SearchHit {
   path: string;
   /** 1 起。 */
   line: number;
+  /** 1-based source column, independent of clipping in the snippet. */
+  column?: number;
   /** 已按后端上限截断的行文本。 */
   text: string;
   ranges: MatchRange[];

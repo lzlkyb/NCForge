@@ -40,7 +40,7 @@ describe("光标前的表名", () => {
 describe("表名末尾的 JOIN 片段", () => {
   it("按关联列生成 LEFT JOIN，表名列名统一小写", () => {
     expect(billJoinSpecs("po_order", available, meta)).toEqual([
-      { table: "po_order_b", sql: " LEFT JOIN po_order_b ON po_order_b.pk_order = po_order.pk_order", source: "外键 · FK_ORDER_B", group: "detail", rootColumns: ["pk_order"], otherColumns: ["pk_order"] },
+      { table: "po_order_b", sql: " LEFT JOIN po_order_b ON po_order_b.pk_order = po_order.pk_order", source: "外键 · FK_ORDER_B", group: "detail", rootColumns: ["pk_order"], otherColumns: ["pk_order"], incoming: true },
     ]);
   });
 

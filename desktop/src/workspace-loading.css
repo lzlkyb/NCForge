@@ -11,7 +11,7 @@
 .wb-loading-bar .wb-loading-action { width:64px;height:24px;margin-left:auto; }
 .wb-loading-bar .wb-loading-icon { width:24px;height:24px; }
 .wb-loading-page .wb-loading-tabs { height:36px; }
-.wb-loading-tabs .wb-loading-label { width:150px;height:24px;border-radius:var(--r-tab); }
+.wb-loading-tabs .wb-loading-label { width:150px;height:24px;border-radius:var(--r-control) var(--r-control) 0 0; }
 .wb-loading-search { padding:4px 10px;flex:none;height:36px; }
 .wb-loading-search .skeleton { height:28px;width:100%; }
 .wb-loading-sidebar { display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden;background:hsl(var(--chrome)/.3); }
@@ -24,9 +24,9 @@
 .wb-loading-query { flex:1;min-height:160px;overflow:hidden; }
 .wb-loading-grid { height:240px;flex:none;overflow:hidden; }
 .wb-loading-settings { padding:20px 24px;overflow:hidden; }
-.wb-loading-for-settings { background:hsl(var(--background)); }
+.wb-loading-for-settings { background:hsl(var(--card)); }
 .wb-loading-for-settings>.wb-loading-visual>.wb-loading-bar { height:56px;padding-inline:24px; }
-.wb-loading-setting-group { margin-top:32px;padding:20px;max-width:960px;background:hsl(var(--card));border-radius:var(--r-card); }
+.wb-loading-setting-group { margin-top:20px;max-width:960px; }
 .wb-loading-setting-preview { width:100%;height:240px;margin-top:12px; }
 .wb-loading-title { width:170px;height:20px;margin-bottom:12px; }
 .wb-loading-description { width:min(360px,72%);height:10px; }

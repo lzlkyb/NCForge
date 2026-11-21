@@ -2,6 +2,7 @@ import { useCallback, useSyncExternalStore } from "react";
 import { dbApi } from "./dbApi";
 import { dbTransferApi, type TransferFileReq, type TransferFileOut, type TransferProgress } from "./dbTransferApi";
 import { beginOperation, cancelOperation } from "./operations";
+import { createOperationEstimator } from "./operationEstimate";
 import { dbTaskSpec } from "./dbOperations";
 import { listen } from "./tauri";
 import { friendlyDbError } from "./db";
@@ -42,6 +43,7 @@ export async function startTransferJob(source: TransferSource, request: Omit<Tra
   if (["running", "cancelling"].includes(jobs.get(key)?.state ?? "")) return;
   sequence = Math.max(sequence + 1, Date.now() * 1024);
   const exportId = sequence;
+  const estimateTransfer = createOperationEstimator();
   let registered = false;
   const task = beginOperation({ ...dbTaskSpec(`transfer:${key}`, "导出查询结果", source.connId, "结果文件导出", undefined, source.tabId),
     phase: "准备导出", cancel: async () => {
@@ -61,20 +63,23 @@ export async function startTransferJob(source: TransferSource, request: Omit<Tra
       registered = true;
       const current = jobs.get(key); if (!current || current.exportId !== exportId) return;
       set(key, { ...current, progress: p });
-      task.update({ phase: p.phase === "finalizing" ? "完成文件" : p.phase === "preparing" ? "准备查询" : "读取并写入文件", progress: { done: p.rows, total: p.totalRows } });
+      task.update({
+        phase: p.phase === "finalizing" ? "正在完成文件" : p.phase === "preparing" ? "准备查询" : "读取并写入文件",
+        progress: p.phase === "finalizing" ? undefined : { done: p.rows, total: p.totalRows, unit: "行" },
+        estimate: p.phase === "writing" ? estimateTransfer(p.phase, p.rows, p.totalRows) : undefined,
+      });
     });
     const out = await dbTransferApi.file({ ...request, exportId });
     const current = jobs.get(key)!;
     if (!out) { set(key, { ...current, state: "cancelled" }); task.finish("cancelled", "未保存文件"); return; }
     const partial = out.canceled || out.truncated;
     set(key, { ...current, state: partial ? "partial" : "success", out });
-    task.finish(out.canceled ? "cancelled" : "success", `已写 ${out.rows} 行${partial ? "，部分结果" : "，文件已保存"}`);
-    toast(`已${partial ? "保存部分结果" : "导出"} ${out.rows} 行 · ${out.fileName}`, partial || out.warnings.length ? "warning" : "success");
+    task.finish(partial ? "partial" : "success",
+      `已保存 ${out.rows} 行 · ${out.fileName}${partial ? "（部分结果）" : out.warnings.length ? `（${out.warnings.length} 项提示）` : ""}`);
   } catch (error) {
     const current = jobs.get(key)!;
     set(key, { ...current, state: "failed", error: friendlyDbError(error) });
     task.finish("failed", "导出失败，返回结果页查看原因");
-    toast(`导出失败：${friendlyDbError(error)}`, "error");
   } finally {
     un?.();
     const latest=jobs.get(key);if(latest){jobs.delete(key);jobs.set(key,latest);}

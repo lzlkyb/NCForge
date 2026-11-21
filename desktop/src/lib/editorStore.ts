@@ -31,6 +31,7 @@ const closeListeners = new Set<(path: string) => void>();
  * 没有上限时这些 model 只进不出：跳十几层就悄悄攒下同等数量的常驻文档。
  */
 const PEEK_MODEL_CAP = 32;
+const PEEK_TEXT_BUDGET = 8 * 1024 * 1024;
 /** 预览身份的 model 键，按最近使用排序（末尾最新）。超上限时淘汰队首。 */
 const peekOrder: string[] = [];
 
@@ -49,15 +50,22 @@ function unqueuePeek(path: string): void {
 }
 
 /** 超上限时淘汰最旧的预览模型。正在编辑器里显示的那个刚被 touchModel 保活过，不会是最旧的。 */
-function evictPeek(): void {
-  while (peekOrder.length > PEEK_MODEL_CAP) {
-    const oldest = peekOrder.shift();
-    if (oldest === undefined) return;
-    const e = entries.get(oldest);
-    // 已经被关掉的（标签页关闭走 closeModel）：队列里只剩过期键，跳过即可
-    if (!e) continue;
-    unregister(oldest, e);
-    e.model.dispose();
+function evictPeek(protect: string, incoming = 0): void {
+  let bytes = incoming;
+  for (const path of peekOrder) if (path !== protect) bytes += (entries.get(path)?.model.getValueLength() ?? 0) * 2;
+  const countNew = peekOrder.includes(protect) ? 0 : 1;
+  if (peekOrder.length + countNew <= PEEK_MODEL_CAP && bytes <= PEEK_TEXT_BUDGET) return;
+  const displayed = new Set(monaco.editor.getEditors?.().map(editor => editor.getModel()));
+  for (const key of [...peekOrder]) {
+    if (peekOrder.length + countNew <= PEEK_MODEL_CAP && bytes <= PEEK_TEXT_BUDGET) break;
+    const entry = entries.get(key);
+    // A peek widget can hold onto a model before it becomes a formal tab.
+    if (key === protect || entry && (entry.lastDirty || displayed.has(entry.model))) continue;
+    unqueuePeek(key);
+    if (!entry) continue;
+    bytes -= entry.model.getValueLength() * 2;
+    unregister(key, entry);
+    entry.model.dispose();
   }
 }
 
@@ -130,12 +138,14 @@ export function openVirtualModel(
     if (opts?.peek) touchPeek(uri);
     else unqueuePeek(uri);
     if (opts?.replace && existing.model.getValue() !== text) {
+      if (opts.peek) evictPeek(uri, text.length * 2);
       admitModel(text, existing.model);
       existing.model.setValue(text);
       existing.savedVersion = existing.model.getAlternativeVersionId();
     }
     return existing.model;
   }
+  if (opts?.peek) evictPeek(uri, text.length * 2);
   admitModel(text);
   const model = monaco.editor.createModel(text, opts?.language ?? "java", monaco.Uri.parse(uri));
   const entry: Entry = {
@@ -147,7 +157,6 @@ export function openVirtualModel(
   register(uri, entry);
   if (opts?.peek) {
     peekOrder.push(uri);
-    evictPeek();
   }
   return model;
 }

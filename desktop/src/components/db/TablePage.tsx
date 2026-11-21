@@ -54,7 +54,10 @@ export function TablePage({ tab }: { tab: TableTab }) {
     : undefined;
   const [cols, setCols] = useState<ColumnInfo[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [dlg, setDlg] = useState<"exp" | "imp" | "diff" | "move" | null>(null);
+  const [dlg, setDlg] = useState<"exp" | "diff" | "move" | null>(null);
+  const [importView, setImportView] = useState<number | null>(null);
+  // Other table actions may run while the import is minimized without dropping its batch receipts.
+  const openImport = () => setImportView(previous => (previous ?? 0) + 1);
 
   useEffect(() => {
     setCols(null);
@@ -122,7 +125,7 @@ export function TablePage({ tab }: { tab: TableTab }) {
               table={lower}
               disabled={rt.status !== "connected"}
               onExport={() => setDlg("exp")}
-              onImport={() => setDlg("imp")}
+              onImport={openImport}
               onStructDiff={() => setDlg("diff")}
               onMove={() => setDlg("move")}
             />)}
@@ -135,13 +138,13 @@ export function TablePage({ tab }: { tab: TableTab }) {
           onClose={() => setDlg(null)}
         />
       )}
-      {dlg === "imp" && (
+      {importView !== null && (
         <ImportDialog tabId={tab.id}
           connId={tab.connId}
           table={tableRef}
           cols={cols}
-          onClose={() => setDlg(null)}
-          onDone={() => toast("已有数据写入；关闭此窗口后点击查询刷新表数据，当前编辑尚未丢弃", "info")}
+          reopen={importView}
+          onClose={() => setImportView(null)}
         />
       )}
       {dlg === "diff" && (
@@ -154,7 +157,7 @@ export function TablePage({ tab }: { tab: TableTab }) {
       {rt.status !== "connected" && <div className="dbx-empty">连接已断开，先在左侧连上</div>}
       {err && <div className="dbx-err">{err}</div>}
       {rt.status === "connected" && !isObj && tab.sub === "data" && (
-        <TableData tab={tab} cols={cols} isView={isView} zh={zh} onImport={() => setDlg("imp")} importBlocked={importBlocked} />
+        <TableData tab={tab} cols={cols} isView={isView} zh={zh} onImport={openImport} importBlocked={importBlocked} />
       )}
       {rt.status === "connected" && !isObj && tab.sub === "struct" && <StructView cols={cols} />}
       {rt.status === "connected" && isObj && tab.sub === "source" && <SourceView tab={tab} />}

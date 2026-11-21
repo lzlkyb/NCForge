@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const dist = new URL("../dist/", import.meta.url);
-const artifacts = new URL("../../docs/sql-editor-fix-20261105/", import.meta.url);
+const artifacts = new URL(process.env.NCFORGE_QA_TEMP === "1" ? "../../target/sql-editor-production/" : "../../docs/sql-editor-fix-20261105/", import.meta.url);
 const html = await readFile(new URL("index.html", dist), "utf8");
 const entry = html.match(/<script type="module"[^>]*src="([^"]+)"[^>]*><\/script>/)?.[1];
 assert.ok(entry, "Run npm run vite:build before production acceptance");
@@ -19,7 +19,7 @@ assert.ok(raw);
 const bootstrap = `window.cspViolations=[]; document.addEventListener('securitypolicyviolation',e=>window.cspViolations.push({directive:e.effectiveDirective,blocked:e.blockedURI}));\n` + raw
   .replace("/node_modules/@tauri-apps/api/mocks.js", "/__tauri_mocks.js")
   .replace("{kind:'table',id:'acceptance-table',connId:'c',table:'TEST_TABLE',sub:'data'}", "{kind:'sql',id:'acceptance-table',connId:'c',title:'SQL 1',sql:'',results:[],output:[]}")
-  .replace("if(cmd==='db_exec_bound')", "if(cmd==='db_exec' || cmd==='db_exec_bound')")
+  .replace("if(cmd==='db_exec_bound')", "if(cmd==='db_result_close') return null; if(cmd==='db_exec' || cmd==='db_exec_result' || cmd==='db_exec_bound')")
   .replace("ms:10,tx:tx()", "ms:10,output:[],tx:tx()")
   .replace("if(cmd==='db_tx')", "if(cmd==='db_slot_acquire') return {slot:'sql-1',tx:tx()}; if(cmd==='db_tx')")
   .replace("const appearance=await import('/src/lib/appearance.ts');appearance.applyAppearance('glass');", "localStorage.setItem('ncforge.ui-style','glass');localStorage.setItem('ncforge-db-result-height','300');")
@@ -101,12 +101,32 @@ test("production SQL editor renders and executes under the packaged CSP", async 
     await page.evaluate(() => window.themeFinished);
     await page.waitForFunction(() => document.documentElement.classList.contains("dark"));
     await page.screenshot({ path: fileURLToPath(new URL("production-dark-low.png", artifacts)) });
+    const runsBefore = await page.evaluate(() => window.dbCalls.filter(call => /^db_exec/.test(call.cmd)).length);
+    await page.getByText("已连接", { exact: true }).first().waitFor();
+    await input.focus();
+    await page.keyboard.press("Control+a");
+    await page.keyboard.insertText("select a.cod from test_table a;");
+    const marker = page.locator(".dbx-editor .squiggly-error");
+    await marker.first().waitFor();
+    await page.keyboard.press("Home");
+    for (let column = 0; column < 10; column++) await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Control+.");
+    const repair = page.locator(".action-widget[data-sql-preview]");
+    await repair.getByText("改为 code", { exact: true }).waitFor();
+    await repair.locator(".dbx-sql-action-preview pre [data-sql-changed]").filter({ hasText: /^code$/ }).waitFor();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await page.locator(".dbx-editor .view-lines").getByText("code", { exact: true }).waitFor();
+    await marker.first().waitFor({ state: "hidden" });
+    await page.keyboard.press("Control+z");
+    await marker.first().waitFor();
+    assert.equal(await page.evaluate(() => window.dbCalls.filter(call => /^db_exec/.test(call.cmd)).length), runsBefore);
     const violations = await page.evaluate(() => window.cspViolations);
     assert.deepEqual(violations, [], "Production CSP must permit editor styles without weakening script policy");
     assert.deepEqual(errors, []);
-    await writeFile(new URL("production.json", artifacts), JSON.stringify({ csp, style, contentLeft, violations, errors, passed: ["Production CSS", "Packaged CSP nonces", "Input and execution", "Navigation draft", "Low window layout", "Dark theme"] }, null, 2));
+    await writeFile(new URL("production.json", artifacts), JSON.stringify({ csp, style, contentLeft, violations, errors, passed: ["Production CSS", "Packaged CSP nonces", "Input and execution", "Navigation draft", "Low window layout", "Dark theme", "Live inspection preview, apply and undo"] }, null, 2));
   } catch (error) {
-    await writeFile(new URL("production-failure.json", artifacts), JSON.stringify({ errors, violations: page ? await page.evaluate(() => window.cspViolations) : [], error: String(error) }, null, 2));
+    await writeFile(new URL("production-failure.json", artifacts), JSON.stringify({ errors, violations: page ? await page.evaluate(() => window.cspViolations) : [], editor: page ? await page.locator(".dbx-editor .view-lines").allTextContents() : [], calls: page ? await page.evaluate(() => window.dbCalls.slice(-20).map(call => call.cmd)) : [], error: String(error) }, null, 2));
     throw error;
   } finally {
     await browser?.close();

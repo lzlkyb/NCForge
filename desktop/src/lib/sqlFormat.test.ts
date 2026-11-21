@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { formatSql, sqlLanguageOf, sqlLanguageOfUrl } from "./sqlFormat";
 import { DEFAULT_SQL_FORMAT, setSqlFormatPrefs } from "./sqlFormatPrefs";
+import { assertSqlFormatPreserves, mysqlDelimiterRegions, SqlFormatSafetyError } from "./sqlFormatSafety";
+import { scanSql } from "./sqlLex";
 
 // The original snapshots continue to verify the user-selectable expanded layout.
 beforeEach(() => setSqlFormatPrefs({ ...DEFAULT_SQL_FORMAT, layout: "expanded" }));
@@ -70,6 +72,55 @@ describe("formatSql（sql-formatter 语法级排版）", () => {
 
   it("显式选项生效：关键字大写不影响标识符", async () => {
     expect(await formatSql("select a from t", "sql", { keywordCase: "upper" })).toBe("SELECT\n  a\nFROM\n  t");
+  });
+
+  it.each(["reading", "expanded"] as const)("%s 保持 Oracle 循环范围、引号和斜杠终止行", async layout => {
+    const sql = "BEGIN FOR i IN 1..3 LOOP DBMS_OUTPUT.PUT_LINE(q'[literal 1..3]'); END LOOP; END;\n/";
+    const options = { layout, tabWidth: 2 };
+    const result = await formatSql(sql, "plsql", options);
+    expect(result).toContain("FOR i IN 1..3");
+    expect(result).toContain("q'[literal 1..3]'");
+    expect(result).toContain("END LOOP;");
+    expect(result).toMatch(/^\s*\/\s*$/m);
+    expect(await formatSql(result, "plsql", options)).toBe(result);
+  });
+
+  it.each(["reading", "expanded"] as const)("%s 保留 MySQL DELIMITER 段，并格式化其两侧普通 SQL", async layout => {
+    const routine = "DELIMITER $$\r\nCREATE PROCEDURE p() BEGIN SELECT 1; END$$\r\nDELIMITER ;\r\n";
+    const sql = "select a,b from t;\r\n" + routine + "select c,d from u;";
+    const result = await formatSql(sql, "mysql", { layout });
+    expect(result).toContain("\r\n" + routine);
+    const [before, after] = result.split(routine);
+    expect(before).not.toBe("select a,b from t;\r\n");
+    expect(after).not.toBe("select c,d from u;");
+  });
+
+  it("未恢复 DELIMITER 时只格式化已知的普通 SQL，过程体保持原样", async () => {
+    const tail = "DELIMITER //\nCREATE PROCEDURE p() SELECT 'DELIMITER ;'//\n";
+    const sql = "select a,b from t;\n" + tail;
+    expect(await formatSql(sql, "mariadb", { layout: "reading" })).toBe("select a, b from t;\n" + tail);
+    const literal = "select 'one\nDELIMITER $$\ntwo' note from t;";
+    const result = await formatSql(literal, "mysql", { layout: "expanded" });
+    expect(result).not.toBe(literal);
+    expect(result).toContain("'one\nDELIMITER $$\ntwo'");
+  });
+
+  it("不会把 DELIMITER 字段的别名当成脚本指令", () => {
+    expect(mysqlDelimiterRegions("select\n  delimiter as separator\nfrom settings;", "mysql")).toEqual([]);
+  });
+
+  it("带注释或引号的 DELIMITER 恢复指令结束保护区", async () => {
+    const routine = "DELIMITER '// ' # start\nCREATE PROCEDURE p() SELECT 1// \nDELIMITER ';' -- reset\n";
+    expect(await formatSql(routine + "select a,b from t;", "mysql", { layout: "reading" }))
+      .toBe(routine + "select a, b from t;");
+  });
+
+  it("校验器拒绝词法、批次标记和字符串连接行为变化", () => {
+    const assertPreserved = (input: string, changed: string, dialect: "plsql" | "tsql" | "postgresql") =>
+      assertSqlFormatPreserves(input, scanSql(input, dialect), changed, dialect, {});
+    expect(() => assertPreserved("FOR i IN 1..3", "FOR i IN 1. .3", "plsql")).toThrow(SqlFormatSafetyError);
+    expect(() => assertPreserved("SELECT 1\nGO\nSELECT 2", "SELECT 1 GO\nSELECT 2", "tsql")).toThrow(SqlFormatSafetyError);
+    expect(() => assertPreserved("SELECT 'a'\n'b'", "SELECT 'a' 'b'", "postgresql")).toThrow(SqlFormatSafetyError);
   });
 });
 

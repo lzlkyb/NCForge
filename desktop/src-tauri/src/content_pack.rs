@@ -47,7 +47,7 @@ use crate::workspace;
 /// 这类 GBK 字节恰好构成合法 UTF-8 的文件，存的是按 UTF-8 误解释出来的乱码文本
 /// （U+06FD U+05A4…）。增量复用只按 size/mtime 判定，文件没变就会把乱码块
 /// 一直复用下去——版本不 +1 的话，用户升级后仍然搜不到这些中文。
-const FORMAT_VERSION: u32 = 3;
+const FORMAT_VERSION: u32 = 4;
 /// 单个块的目标大小。1 MB 是「增量重建够便宜」与「并行切分够细」的折中。
 const CHUNK_BYTES: usize = 1 << 20;
 const DIR_NAME: &str = "search-pack";
@@ -91,6 +91,9 @@ pub struct Table {
     pub chunks: Vec<ChunkMeta>,
     /// 按相对路径排序；切块时保持这个顺序，增量才能按块对齐。
     pub files: Vec<FileMeta>,
+    /// Oversized files and transient read failures are handled by the disk search path.
+    #[serde(default)]
+    pub disk_files: Vec<String>,
     /// 被跳过的文件数（二进制 / 超大 / 读失败），仅供状态显示。
     #[serde(default)]
     pub skipped: usize,
@@ -195,10 +198,11 @@ pub fn build(root: &Path, dir: &Path, cancel: &AtomicBool) -> Result<BuildReport
     let started = std::time::Instant::now();
     // 排除包目录自身：包在 `{config_dir}` 下，但配置目录被指到工作区内时
     // 会把 pack.bin 当源码收进来（越建越大，且块划分每次都变，增量全废）。
-    let sources: Vec<crate::search::PackSource> = crate::search::pack_sources(root, cancel)
+    let (sources, large): (Vec<_>, Vec<_>) = crate::search::pack_sources(root, cancel)
         .into_iter()
         .filter(|s| !s.path.starts_with(dir))
-        .collect();
+        .partition(|s| s.size <= crate::search::PACK_FILE_BYTES);
+    let mut disk_files: Vec<_> = large.into_iter().map(|s| s.rel).collect();
     let root_key = root_key(root);
 
     // 旧包只在「同根 + 同版本」时用于复用；否则全量重建。
@@ -276,10 +280,10 @@ pub fn build(root: &Path, dir: &Path, cancel: &AtomicBool) -> Result<BuildReport
             }
             let Ok(bytes) = fs::read(&s.path) else {
                 report.skipped += 1;
+                disk_files.push(s.rel.clone());
                 continue;
             };
-            // 与搜索侧同一条二进制判据：前 8 KB 有 NUL 就不是文本
-            if bytes.iter().take(8192).any(|b| *b == 0) {
+            if !crate::search::is_searchable_text(&bytes) {
                 report.skipped += 1;
                 continue;
             }
@@ -329,6 +333,7 @@ pub fn build(root: &Path, dir: &Path, cancel: &AtomicBool) -> Result<BuildReport
         bin_len,
         chunks,
         files,
+        disk_files,
         skipped: report.skipped,
     };
 
@@ -404,6 +409,8 @@ struct State {
     /// 根键 → 已加载的包。包目录本身按根分，所以不会把别人的包读进来。
     packs: HashMap<String, Arc<Pack>>,
     stale: std::collections::HashSet<String>,
+    /// After opening a project, verify its snapshot against disk before serving queries.
+    verified: std::collections::HashSet<String>,
     /// LRU：前 = 最久没用。
     lru: std::collections::VecDeque<String>,
     /// 根键 → 原始路径（重建、排队都要用它，不能用归一化后的键）。
@@ -445,7 +452,7 @@ pub fn set_cache_dir(config_dir: &Path) {
     }
 }
 
-fn dir() -> Option<PathBuf> {
+pub(crate) fn dir() -> Option<PathBuf> {
     pack_dir().lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
@@ -563,44 +570,38 @@ pub fn current_for(root: &Path) -> Option<Arc<Pack>> {
     Some(pack)
 }
 
-/// 没有可用包时排一次后台建包；已有同根包则什么也不做。
-/// 依赖工程也走这里，多个根会被串成队列，不会并发抢磁盘。
-pub fn ensure(root: &Path, config_dir: &Path) {
-    set_cache_dir(config_dir);
-    enqueue(root);
-}
-
 /// 工作区根专用：文件监听只盯它，`mark_dirty()` 也只重建它的包。
 pub fn ensure_primary(root: &Path, config_dir: &Path) {
     set_cache_dir(config_dir);
-    {
-        let mut g = state().lock().unwrap_or_else(|e| e.into_inner());
-        g.primary = Some(root_key(root));
-    }
-    enqueue(root);
-}
-
-fn enqueue(root: &Path) {
-    if let Some(base) = dir() {
-        let path = dir_for(&base, root).join(BIN_NAME);
-        if fs::metadata(path).is_ok_and(|m| m.len() > MAX_OPEN_BYTES) {
-            return;
-        }
-    }
-    if current_for(root).is_some() || dir().is_none() {
-        return;
-    }
     let key = root_key(root);
     {
         let mut g = state().lock().unwrap_or_else(|e| e.into_inner());
+        if g.primary.as_ref() != Some(&key) {
+            g.primary = Some(key.clone());
+            g.verified.remove(&key);
+        }
         g.root_paths.insert(key.clone(), root.to_path_buf());
-        let queued =
-            g.building.as_deref() == Some(key.as_str()) || g.queue.iter().any(|(k, _)| k == &key);
-        if !queued {
-            g.queue.push_back((key.clone(), root.to_path_buf()));
+        if !g.verified.contains(&key)
+            && g.building.as_ref() != Some(&key)
+            && !g.queue.iter().any(|(k, _)| k == &key)
+        {
+            g.queue.push_back((key, root.to_path_buf()));
         }
     }
     start_worker();
+}
+
+pub fn for_search(root: &Path) -> Option<Arc<Pack>> {
+    let key = root_key(root);
+    let valid = || {
+        let g = state().lock().unwrap_or_else(|e| e.into_inner());
+        g.primary.as_ref() == Some(&key) && g.verified.contains(&key)
+    };
+    if !valid() {
+        return None;
+    }
+    let pack = current_for(root)?;
+    valid().then_some(pack)
 }
 
 /// 文件监听 flush 后调用：静默 1.5 秒再增量重建（连续保存只重建一次）。
@@ -608,7 +609,13 @@ pub fn mark_dirty() {
     if dir().is_none() {
         return;
     }
-    dirty().store(true, Ordering::Relaxed);
+    {
+        let mut g = state().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(key) = g.primary.clone() {
+            g.verified.remove(&key);
+        }
+        dirty().store(true, Ordering::Relaxed);
+    }
     start_worker();
 }
 
@@ -730,6 +737,9 @@ fn run(root: &Path, out_dir: &Path) {
                 g.packs.remove(&key);
                 g.lru.retain(|k| k != &key);
                 g.last_error = None;
+            }
+            if g.primary.as_ref() == Some(&key) && !dirty().load(Ordering::Relaxed) {
+                g.verified.insert(key.clone());
             }
         }
         Err(e) => {

@@ -20,7 +20,7 @@ use nc_forge::*;
 // 桌面通知入口在 lib 里（`nc_forge::notify_toast`，按 feature 门控 no-op）：
 // 业务侧也要能调，而 main.rs 的函数对外不可见。
 
-/// 给窗口打上平台特异的装饰（目前只有 Win11 DWM 圆角）。
+/// 在 Windows 上设置主窗口的原生圆角和外边框。
 ///
 /// **为何抽成函数**：无边框窗口的圆角要在 `show()` 之前打上，否则能看到一帧直角；
 /// 抽出来也让以后新增的窗口（如果有）能共用同一份设置。
@@ -29,18 +29,31 @@ fn apply_window_decorations(window: &tauri::WebviewWindow) {
     {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::Graphics::Dwm::{
-            DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE,
+            DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
+            DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
         };
         if let Ok(hwnd) = window.hwnd() {
-            let preference: i32 = 2; // DWMWCP_ROUND = 2（标准圆角）
+            let hwnd = HWND(hwnd.0 as isize);
+            let preference = DWMWCP_ROUND.0;
             unsafe {
                 if let Err(e) = DwmSetWindowAttribute(
-                    HWND(hwnd.0 as isize),
+                    hwnd,
                     DWMWA_WINDOW_CORNER_PREFERENCE,
                     &preference as *const i32 as *const _,
                     std::mem::size_of::<i32>() as u32,
                 ) {
                     log::warn!("DWM 圆角设置失败: {:?}", e);
+                }
+                // DWM can draw the system accent even when Tauri decorations are disabled.
+                // Suppress only the outline so native resizing and shadows still work.
+                let border_color = DWMWA_COLOR_NONE;
+                if let Err(e) = DwmSetWindowAttribute(
+                    hwnd,
+                    DWMWA_BORDER_COLOR,
+                    &border_color as *const u32 as *const _,
+                    std::mem::size_of::<u32>() as u32,
+                ) {
+                    log::debug!("DWM 隐藏窗口边框失败: {e:?}");
                 }
             }
         }

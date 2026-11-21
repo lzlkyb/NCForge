@@ -182,6 +182,7 @@ struct Pool {
     /// 当前环境（java + jar 路径/内容）的指纹；变化即换代。
     key: String,
     idle: Vec<(String, Arc<Bridge>)>,
+    workers: Vec<std::sync::Weak<Bridge>>,
     /// 累计进程数（含正在用的），跨代计数，归还时按代决定去留。
     total: usize,
     /// 最后一次借出 / 归还的时间；空闲回收据此判断是否真的没人用。
@@ -200,6 +201,7 @@ fn pool() -> &'static (Mutex<Pool>, Condvar) {
             Mutex::new(Pool {
                 key: String::new(),
                 idle: Vec::new(),
+                workers: Vec::new(),
                 total: 0,
                 last_used: Instant::now(),
             }),
@@ -302,8 +304,10 @@ fn acquire(env: BridgeEnv, cancel: Option<&AtomicBool>) -> Option<Arc<Bridge>> {
             p.total += 1;
             p.last_used = Instant::now();
             Stats::bump(&STATS.cold_starts);
-            drop(p);
-            return Some(Arc::new(Bridge::new(env)));
+            let worker = Arc::new(Bridge::new(env));
+            p.workers.retain(|worker| worker.strong_count() != 0);
+            p.workers.push(Arc::downgrade(&worker));
+            return Some(worker);
         }
         if cancelled(cancel) {
             return None;
@@ -345,6 +349,9 @@ pub fn shutdown_all() {
         w.shutdown();
     }
 }
+
+mod maintenance;
+pub(crate) use maintenance::{memory_processes, release_idle};
 
 /// 用常驻 worker 编译一份 ecj 参数文件。
 ///
@@ -671,6 +678,7 @@ mod tests {
         let env = test_env(Vec::new());
         Pool {
             key: "k".to_string(),
+            workers: Vec::new(),
             idle: (0..idle)
                 .map(|_| ("k".to_string(), Arc::new(Bridge::new(env.clone()))))
                 .collect(),

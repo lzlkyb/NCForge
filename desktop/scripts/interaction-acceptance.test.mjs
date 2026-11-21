@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { chromium } from 'playwright';
 const origin=process.env.UI_PREVIEW_URL || 'http://localhost:1420';
-const artifacts=new URL('../../docs/interaction-acceptance-20261104/',import.meta.url);
+const artifacts=new URL(process.env.NCFORGE_INTERACTION_ARTIFACTS ?? '../../docs/interaction-acceptance-20261104/',import.meta.url);
 const bootstrap=String.raw`
 import {mockIPC,mockWindows} from '/node_modules/@tauri-apps/api/mocks.js';
 mockWindows('main');window.acceptanceCommands=[];window.acceptanceReads=[];window.waitReads=false;
@@ -25,7 +25,7 @@ mockIPC(async(cmd,args)=>{
  if(cmd==='server_log')return {text:'',nextOffset:0};
  if(cmd==='nc_home_probe')return {path:null,valid:false,issues:[]};
  if(cmd==='svn_info')return null;
- if(cmd==='svn_status')return [];
+ if(cmd==='svn_status')return {changes:{groups:[],shown:0,total:0,ignored:0},scanned:1,generatedAtMs:Date.now(),hasConflict:false,reviewed:[],incremental:false,modulesScanned:1,epoch:1};
  if(cmd==='nc_manifest')return null;
  if(cmd==='db_cached_tables')return {tables:[],fetchedAt:0};
  if(cmd==='db_schema_cache')return null;
@@ -44,7 +44,8 @@ test('code reading and global tasks: real frontend, delayed IPC, themes, narrow 
  page.on('pageerror',e=>errors.push(e.message));
  await page.route(origin+'/',async route=>{const response=await route.fetch();const body=(await response.text()).replace(/<script type="module" src="\/src\/main\.tsx[^"]*"><\/script>/,'<script type="module">'+bootstrap+'</script>');assert.ok(body.includes('mockWindows'));await route.fulfill({response,body});});
  const settled=()=>page.evaluate(async()=>{await document.startViewTransition?.(()=>{}).finished;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
- const openTasks=async()=>{const trigger=page.locator('.wb-header-icon.op-status');if(await trigger.getAttribute('aria-expanded')!=='true')await trigger.click();await page.locator('.op-panel:not([data-exiting])').waitFor();await settled();};
+ const trigger=page.locator('.wb-status .op-status');
+ const openTasks=async()=>{if(await trigger.getAttribute('aria-expanded')!=='true')await trigger.click();await page.locator('.op-panel:not([data-exiting])').waitFor();await settled();};
  try {
   await page.goto(origin,{waitUntil:'domcontentloaded',timeout:60000});
   await page.getByRole('treeitem',{name:'A.java',exact:true}).click({timeout:30000});await page.locator('.wb-tab').filter({hasText:'A.java'}).waitFor();await page.locator('.monaco-editor').first().waitFor({timeout:30000});
@@ -52,7 +53,7 @@ test('code reading and global tasks: real frontend, delayed IPC, themes, narrow 
   await page.getByRole('treeitem',{name:'B.java',exact:true}).click();
   await page.locator('.wb-read-feedback').filter({hasText:'B.java'}).waitFor();
   assert.equal(await page.locator('.wb-tab[data-active]').count(),1);
-  assert.match(await page.locator('.wb-tab[data-active]').innerText(),/A.java/);
+  assert.match(await page.locator('.wb-tab[data-active]').textContent(),/A\.java/);
   const before=await page.locator('.monaco-editor').count();assert.ok(before>0,'waiting preserves mounted editor');
   await page.locator('.app-side').getByRole('button',{name:/^设置/}).click();
   await openTasks();
@@ -70,10 +71,10 @@ test('code reading and global tasks: real frontend, delayed IPC, themes, narrow 
     const m=await page.evaluate(()=>{const el=document.querySelector('.op-panel:not([data-exiting])');const r=el.getBoundingClientRect();const status=document.querySelector('.wb-status');const bounds=status.getBoundingClientRect();const clipped=[...status.children].filter(e=>{const box=e.getBoundingClientRect();return box.width>0 && (box.top<bounds.top || box.bottom>bounds.bottom || box.left<bounds.left || box.right>bounds.right);}).map(e=>e.textContent);return {width:innerWidth,overflow:document.documentElement.scrollWidth>innerWidth,left:r.left,right:r.right,panels:[...document.querySelectorAll('.op-panel')].map(e=>e.id),editors:document.querySelectorAll('.monaco-editor').length,statusClipped:clipped,statusOverflow:status.scrollWidth>status.clientWidth};});
     measurements.push({...m,dark});assert.equal(m.overflow,false);assert.ok(m.left>=0 && m.right<=width);assert.equal(new Set(m.panels).size,m.panels.length);assert.equal(m.editors,before);assert.deepEqual(m.statusClipped,[],'status entries fit on one line');assert.equal(m.statusOverflow,false,'code footer needs no horizontal scroll');
     await page.screenshot({path:new URL(`code-tasks-${width}-${dark?'dark':'light'}.png`,artifacts).pathname.replace(/^\/([A-Za-z]:)/,'$1'),fullPage:true});
-    await page.keyboard.press('Escape');assert.equal(await page.locator('.wb-header-icon.op-status').evaluate(e=>document.activeElement===e),true);
+    await page.keyboard.press('Escape');assert.equal(await trigger.evaluate(e=>document.activeElement===e),true);
   }
   await page.emulateMedia({reducedMotion:'reduce'});await openTasks();
-  const spin=await page.locator('.wb-header-icon.op-status svg').evaluate(e=>getComputedStyle(e).animationName);assert.equal(spin,'none');
+  const spin=await trigger.locator('svg').evaluate(e=>getComputedStyle(e).animationName);assert.equal(spin,'none');
   await page.evaluate(()=>{window.waitReads=false;window.acceptanceReads.splice(0).forEach(resolve=>resolve());});
   await page.locator('.wb-tab').filter({hasText:'B.java'}).waitFor();
   await page.locator('.op-row').filter({hasText:'读取 B.java'}).getByText(/已完成/).first().waitFor();

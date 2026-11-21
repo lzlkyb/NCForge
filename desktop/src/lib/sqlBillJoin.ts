@@ -53,7 +53,7 @@ export function rankBillRelations(table: string, relations: readonly BillQueryRe
   }).sort((a, b) => priority[a.group] - priority[b.group]);
 }
 
-export interface BillJoinSpec { table: string; sql: string; source: string; group: BillJoinGroup; rootColumns: readonly string[]; otherColumns: readonly string[] }
+export interface BillJoinSpec { table: string; sql: string; source: string; group: BillJoinGroup; rootColumns: readonly string[]; otherColumns: readonly string[]; incoming?: boolean }
 
 /**
  * 主表能接上的子表 JOIN 片段。
@@ -65,6 +65,6 @@ export function billJoinSpecs(table: string, available: readonly string[], meta:
   names?: Readonly<Record<string, string>>, qualifier = table): BillJoinSpec[] {
   return rankBillRelations(table, billQueryRelations(table, available, meta), names).map(({ relation: rel, group }) => {
     const on = rel.otherColumns.map((column, i) => `${rel.table}.${column} = ${qualifier}.${rel.rootColumns[i]}`).join(" AND ");
-    return { table: rel.table, sql: ` LEFT JOIN ${rel.table} ON ${on}`, source: rel.source, group, rootColumns: rel.rootColumns, otherColumns: rel.otherColumns };
+    return { table: rel.table, sql: ` LEFT JOIN ${rel.table} ON ${on}`, source: rel.source, group, rootColumns: rel.rootColumns, otherColumns: rel.otherColumns, incoming: rel.incoming };
   });
 }

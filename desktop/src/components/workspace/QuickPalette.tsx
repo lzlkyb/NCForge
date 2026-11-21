@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import "../../palette.css";
 import { Icon } from "../ui/icon";
-import { getKeymap, paletteKeyLabel, PALETTE_MODES, type PaletteMode } from "../../lib/keymap";
+import type { PaletteMode } from "../../lib/keymap";
 import { requestOpenFile } from "../../lib/openFileRequest";
+import { requestSearchOpen } from "../../lib/searchOpenRequest";
 import { closePalette, openPalette, usePalette, getPalette } from "../../lib/paletteStore";
 import type { Runner } from "../../lib/paletteSources";
 import { usePaletteSearch } from "../../hooks/usePaletteSearch";
@@ -13,11 +14,13 @@ import { useWorkspaceSelector } from "../../lib/workspaceSession";
 import { useDocumentSymbols } from "../../hooks/useDocumentSymbols";
 import { PaletteSymbolTools } from "./PaletteSymbolTools";
 import { isUnsaved } from "../../lib/tabDirty";
+import type { GroupedItem } from "../../lib/unifiedPalette";
+import { pasteSearchText } from "../../lib/searchInput";
 
 const WorkspaceSearch = lazy(() => import("./PaletteWorkspaceSearch").then(m => ({ default: m.PaletteWorkspaceSearch })));
 
 const PLACEHOLDER: Record<PaletteMode, string> = {
-  file: "输入文件名…（# 工程搜索，:行号 跳转）",
+  file: "搜索文件、正文、符号和命令…",
   search: "输入工程内容，回车搜索…",
   type: "输入类名…",
   symbol: "输入方法 / 字段名…",
@@ -78,6 +81,7 @@ function PaletteBody({ mode, initialQuery, activeTab, onNavigate, onExecute }: {
   const form = useSyncExternalStore(subscribeSearchForm, getSearchForm, getSearchForm);
   const engineering = mode === "search";
   const query = engineering ? form.query : navigationQuery;
+  const Input = query.includes("\n") ? "textarea" : "input";
   const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (engineering) return () => cancelWorkspaceSearch(); }, [engineering]);
   // 遮罩关闭要求按下与抬起都落在遮罩上：mousedown 在弹窗内、mouseup 在遮罩（或反过来）
@@ -93,32 +97,45 @@ function PaletteBody({ mode, initialQuery, activeTab, onNavigate, onExecute }: {
       requestOpenFile({ path, line, column });
       goFiles();
     },
+    projectFile: (path, line = 1, column) => {
+      requestSearchOpen({ kind: "file", path, line, column });
+      goFiles();
+    },
+    library: (hit) => {
+      requestSearchOpen({ kind: "library", hit });
+      goFiles();
+    },
     jdt: (uri, line, column) => {
       goFiles();
       void import("../../lib/lang").then(({ navigate }) => navigate({ kind: "jdt", uri, line, column }));
     },
   };
-  const { result, sel, setSel, loadState, retry, listRef } = usePaletteSearch({
+  const { result, sel, setSel, loadState, retry, listRef, canExecute } = usePaletteSearch({
     mode,
     query,
     ctx: { root: root ?? null, activePath, openPaths: tabs.map((t) => t.path), run: runner, documentSymbols: documentSymbols.symbols, methodsOnly },
   });
   const close = () => closePalette();
   const runAt = (i: number) => {
+    if (!canExecute) return;
     const item = result.items[i];
     if (!item) return;
     closePalette();
     item.run();
     if (!getPalette().open) onExecute();
   };
+  const openFullSearch = () => {
+    setSearchForm({ scope: "all", include: "", regex: false, wholeWord: false, caseSensitive: false });
+    openPalette("search", query);
+    if (query.trim()) void runWorkspaceSearch(root ?? null);
+  };
 
   const onChange = (v: string) => {
     if (engineering) { setSearchForm({ query: v }); return; }
-    if (mode === "file" && v.startsWith("#")) return openPalette("search", v.slice(1));
-    // 输入框里第一个字符敲 > / @ 直接切模式（和 VS Code 一样）；前缀后的内容要带过去，
-    // 否则输入法一次性上屏「>停止服务」切到命令模式后查询被清空、面板空白。
-    if (mode !== "cmd" && v.startsWith(">")) return openPalette("cmd", v.slice(1));
-    if (mode !== "symbol" && v.startsWith("@")) return openPalette("symbol", v.slice(1));
+    // Reserve a spaced prefix so code such as @Override and #include can be searched verbatim.
+    if (mode === "file" && v.startsWith("# ")) return openPalette("search", v.slice(2));
+    if (mode !== "cmd" && v.startsWith("> ")) return openPalette("cmd", v.slice(2));
+    if (mode !== "symbol" && v.startsWith("@ ")) return openPalette("symbol", v.slice(2));
     setQuery(v);
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -143,9 +160,6 @@ function PaletteBody({ mode, initialQuery, activeTab, onNavigate, onExecute }: {
       setSel((s) => (s - 1 + n) % n);
     } else if (e.key === "Enter" && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      // 列表里可能还是上一轮的结果（输入改了、新结果没到）：这时候回车会打开
-      // 一个已经不匹配的条目，比「按了没反应」更糟。
-      if (loadState === "loading") return;
       runAt(sel);
     } else if (e.key === "Backspace" && query === "" && mode !== "file") {
       // 在空的命令 / 符号模式里退格，回到最常用的「文件」模式
@@ -182,7 +196,7 @@ function PaletteBody({ mode, initialQuery, activeTab, onNavigate, onExecute }: {
     }
   };
 
-  const keymap = getKeymap();
+  const items: GroupedItem[] = result.items;
   return (
     <div
       className="qp-scrim"
@@ -197,14 +211,15 @@ function PaletteBody({ mode, initialQuery, activeTab, onNavigate, onExecute }: {
       <div ref={dialogRef} className={engineering ? "qp qp-workspace" : "qp"} role="dialog" aria-modal="true" aria-label="快速导航" data-palette onKeyDown={onDialogKeyDown}>
         <div className="qp-in" data-focus-container>
           <Icon name="search" size={15} />
-          <input
+          <Input
             autoFocus
             value={query}
             placeholder={PLACEHOLDER[mode]}
             spellCheck={false}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={onKeyDown}
-            list={engineering ? "ncforge-search-history" : undefined}
+            onPaste={engineering || mode === "file" ? e => pasteSearchText(e, query, onChange) : undefined}
+            {...(Input === "textarea" ? { rows: 2 } : { list: engineering ? "ncforge-search-history" : undefined })}
             role={engineering ? "searchbox" : "combobox"}
             aria-expanded={engineering ? undefined : true}
             aria-controls={engineering ? undefined : "qp-listbox"}
@@ -212,18 +227,11 @@ function PaletteBody({ mode, initialQuery, activeTab, onNavigate, onExecute }: {
             aria-activedescendant={!engineering && result.items.length > 0 ? `qp-opt-${sel}` : undefined}
             aria-label={engineering ? "搜索工程文件内容" : "快速导航输入"}
           />
+          {mode === "file" && <button type="button" className="qp-more" onClick={openFullSearch} title="按范围、文件类型和匹配规则搜索"><Icon name="sliders" size={13} />完整搜索</button>}
           {engineering && <>
             <datalist id="ncforge-search-history">{loadHistory().map(word => <option key={word} value={word} />)}</datalist>
             <button type="button" className="qp-search-submit" disabled={!query.trim() || form.replacing} onClick={() => void runWorkspaceSearch(root ?? null)}>{form.running ? "重新搜索" : "搜索"}</button>
           </>}
-        </div>
-        <div className="qp-modes">
-          {PALETTE_MODES.map((m) => (
-            <button key={m.mode} type="button" className="qp-mode" data-on={m.mode === mode || undefined} aria-pressed={m.mode === mode} onClick={() => openPalette(m.mode)}>
-              <span className="qp-mode-label">{m.label}</span>
-              <kbd>{paletteKeyLabel(m.mode, keymap)}</kbd>
-            </button>
-          ))}
         </div>
         {mode === "symbol" && <PaletteSymbolTools path={activePath} methodsOnly={methodsOnly} onMethodsOnly={() => setMethodsOnly(value => !value)} />}
         {engineering ? <Suspense fallback={<div className="qp-sec" role="status">正在准备工程搜索…</div>}>
@@ -239,18 +247,21 @@ function PaletteBody({ mode, initialQuery, activeTab, onNavigate, onExecute }: {
               {result.items.length > 0 ? "更新中…" : "查询中…"}
             </span>
           )}
-          {result.note && <span>{result.note}</span>}
+          {result.note && loadState !== "loading" && <span className="qp-note" title={result.note}>{result.note}</span>}
           {loadState === "error" && (
             <button type="button" className="qp-retry" onClick={retry}>重试</button>
           )}
         </div>
         <div className="qp-list" id="qp-listbox" ref={listRef} role="listbox" aria-label="候选" aria-busy={loadState === "loading"}>
-          {result.items.map((it, i) => (
-            <div key={it.key} id={`qp-opt-${i}`} role="option" aria-selected={i === sel} data-sel={i === sel} className="qp-li" onMouseMove={() => i !== sel && setSel(i)} onClick={() => runAt(i)}>
-              {it.kind ? <span className="qp-k" data-k={it.kind}>{it.kind}</span> : mode === "file" ? <Icon name="file" size={14} /> : null}
-              <span className="qp-title"><Marked text={it.title} ranges={it.ranges} /></span>
+          {items.map((it, i) => (
+            <div key={it.key} role="presentation">
+            {it.group && (i === 0 || items[i - 1]?.group !== it.group) && <div className="qp-group" aria-hidden="true">{it.group}</div>}
+            <div id={`qp-opt-${i}`} role="option" aria-label={it.group ? `${it.group} · ${it.title}${it.detail ? ` · ${it.detail}` : ""}` : undefined} aria-selected={i === sel} data-sel={i === sel} data-group={it.group} className="qp-li" onMouseMove={() => i !== sel && setSel(i)} onClick={() => runAt(i)}>
+              {it.kind ? <span className="qp-k" data-k={it.kind}>{it.kind}</span> : mode === "file" ? <Icon name={it.group === "正文" ? "search" : it.group === "命令" ? "terminal" : "file"} size={14} /> : null}
+              <span className="qp-title" title={it.title}><Marked text={it.title} ranges={it.ranges} /></span>
               {it.badge && <span className="qp-badge">{it.badge}</span>}
-              {it.hint ? <kbd className="qp-h">{it.hint}</kbd> : <span className="qp-h">{it.detail}</span>}
+              {it.hint ? <kbd className="qp-h">{it.hint}</kbd> : <span className="qp-h" title={it.detail}>{it.detail}</span>}
+            </div>
             </div>
           ))}
         </div>
@@ -260,7 +271,7 @@ function PaletteBody({ mode, initialQuery, activeTab, onNavigate, onExecute }: {
           <span>{engineering ? "Enter 搜索 / 打开" : "Enter 打开"}</span>
           <span>Esc 关闭</span>
           <span className="qp-sp" />
-          <span>{engineering ? "重开恢复阅读位置" : mode === "file" ? "> 命令，@ 符号，# 工程搜索，:行号" : "退格回到文件模式"}</span>
+          <span>{engineering ? "重开恢复阅读位置" : mode === "file" ? ":行号 跳转" : "退格回到全局搜索"}</span>
         </div>
       </div>
     </div>

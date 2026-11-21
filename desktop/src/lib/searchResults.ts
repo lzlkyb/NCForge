@@ -112,7 +112,7 @@ export function buildResultView(form: SearchForm): SearchResultView | null {
       filesMatched,
       filesScanned,
       elapsedMs: po.elapsedMs,
-      truncated: truncated || po.truncated,
+      truncated: truncated || po.truncated || po.errors.length > 0,
       projects: po.projects.length,
     },
     errors: po.errors,

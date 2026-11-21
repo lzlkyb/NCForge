@@ -6,6 +6,8 @@
  */
 import { rankFiles, type FileEntry, type RankedFile } from "./fuzzy";
 
+export const isLineQuery = (text: string): boolean => /^:\d*(?::\d*)?$/.test(text.trim());
+
 /** `:12` / `:12:5`（行列都 1 基）。解析不了返回 null。 */
 export function parseLineQuery(query: string): { line: number; column?: number } | null {
   const m = /^:(\d+)(?::(\d+))?$/.exec(query.trim());

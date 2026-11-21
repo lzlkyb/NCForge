@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 /// `.settings` / `.nc-compile` 这类在 NC 工程根各占一行，而根下本来就有 60 来个
 /// 模块目录（2026-11-03 实测 newar 根 71 个可见条目，其中 6 个是这类元数据）。
 /// 隐藏的是**显示**，不是可访问性：`fs_read_file` 仍能打开里面的文件。
+///
 const HIDDEN_DIRS: [&str; 5] = [
     ".svn",
     ".git",
@@ -80,6 +81,21 @@ pub enum TextEncoding {
     Utf8,
     #[serde(rename = "GBK")]
     Gbk,
+    #[serde(rename = "UTF-16LE")]
+    Utf16Le,
+    #[serde(rename = "UTF-16BE")]
+    Utf16Be,
+}
+
+impl TextEncoding {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Utf8 => "UTF-8",
+            Self::Gbk => "GBK",
+            Self::Utf16Le => "UTF-16LE",
+            Self::Utf16Be => "UTF-16BE",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -547,8 +563,28 @@ fn utf8_multibyte_shape_says_utf8(body: &[u8]) -> bool {
     lead > 0 && cont * 2 > lead * 3 // cont/lead > 1.5
 }
 
-/// 解码：返回（文本，编码，是否带 UTF-8 BOM，解码时是否遇到无法映射的字节）。
+pub(crate) fn utf16_encoding(bytes: &[u8]) -> Option<TextEncoding> {
+    if bytes.starts_with(&[0xff, 0xfe, 0, 0]) || bytes.starts_with(&[0, 0, 0xfe, 0xff]) {
+        return None;
+    }
+    match bytes.get(..2)? {
+        [0xff, 0xfe] => Some(TextEncoding::Utf16Le),
+        [0xfe, 0xff] => Some(TextEncoding::Utf16Be),
+        _ => None,
+    }
+}
+
+/// 解码：返回（文本，编码，是否带 BOM，解码时是否遇到无法映射的字节）。
 fn decode(bytes: &[u8]) -> (String, TextEncoding, bool, bool) {
+    if let Some(encoding) = utf16_encoding(bytes) {
+        let decoder = if encoding == TextEncoding::Utf16Le {
+            encoding_rs::UTF_16LE
+        } else {
+            encoding_rs::UTF_16BE
+        };
+        let (text, errors) = decoder.decode_without_bom_handling(&bytes[2..]);
+        return (text.into_owned(), encoding, true, errors);
+    }
     let (body, bom) = match bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
         Some(rest) => (rest, true),
         None => (bytes, false),
@@ -607,6 +643,21 @@ fn encode(text: &str, encoding: TextEncoding, has_bom: bool) -> Result<Vec<u8>, 
             }
             Ok(cow.into_owned())
         }
+        TextEncoding::Utf16Le | TextEncoding::Utf16Be => {
+            let little = encoding == TextEncoding::Utf16Le;
+            let mut out = Vec::with_capacity(text.len() * 2 + 2);
+            if has_bom {
+                out.extend_from_slice(if little { &[0xff, 0xfe] } else { &[0xfe, 0xff] });
+            }
+            for unit in text.encode_utf16() {
+                out.extend(if little {
+                    unit.to_le_bytes()
+                } else {
+                    unit.to_be_bytes()
+                });
+            }
+            Ok(out)
+        }
     }
 }
 
@@ -627,11 +678,12 @@ fn apply_eol(text: &str, eol: Eol) -> Result<String, String> {
 /// stat 一次，不等就是读到了半新半旧，有限重试后仍不稳定就明说（见 `read_stable`）。
 pub fn read_text_file(path: &Path) -> Result<FileContent, String> {
     let (bytes, mtime) = read_stable(path)?;
-    if bytes.contains(&0) {
+    let utf16 = utf16_encoding(&bytes).is_some();
+    if !utf16 && bytes.contains(&0) {
         return Err(BINARY_FILE_ERROR.to_string());
     }
-    let eol = detect_eol(&bytes);
     let (raw_text, encoding, has_bom, decode_err) = decode(&bytes);
+    let eol = detect_eol(if utf16 { raw_text.as_bytes() } else { &bytes });
 
     // 无损校验：用将来保存时同样的路径重建字节，必须与磁盘逐字节一致。
     let rebuilt = match eol {

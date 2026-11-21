@@ -169,8 +169,7 @@ const GridCell = memo(function GridCell({ r, i, height, col, model }: GridCellPr
       title={codec.title(v, k, width)}
       aria-label={valueKind === "null" ? "NULL，数据库空值" : valueKind === "empty" ? "空字符串，0 字符" : valueKind === "whitespace" ? `仅空白字符，${String(v).length} 字符` : undefined}
       {...selected}
-      onMouseDown={e => { e.preventDefault(); boxRef.current?.focus(); onSel({ r, c: k }, e.shiftKey); }}
-      onMouseEnter={e => { if (e.buttons === 1 && !editing) onSel({ r, c: k }, true); }}
+      onMouseDown={e => { if (e.button !== 0) return; e.preventDefault(); boxRef.current?.focus({ preventScroll: true }); onSel({ r, c: k }, e.shiftKey); }}
       onDoubleClick={() => startEdit({ r, c: k }, true)}
       onContextMenu={e => { if (onCellMenu) { e.preventDefault(); onCellMenu(r, k, e.clientX, e.clientY); } }}
     >

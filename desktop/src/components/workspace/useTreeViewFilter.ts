@@ -29,5 +29,10 @@ export function useTreeViewFilter(
     (mode !== "changes" || (isDir ? directories : files).has(pathKey(path))),
   [baseFilter, mode, directories, files]);
 
-  return { filterFn, treeList, toggleMode, changeCount: files.size };
+  const scrollToTop = useCallback(() => {
+    if (treeList.current) treeList.current.scrollTop = 0;
+    if (savedScroll.current !== null) savedScroll.current = 0;
+  }, []);
+
+  return { filterFn, treeList, toggleMode, scrollToTop, changeCount: files.size };
 }

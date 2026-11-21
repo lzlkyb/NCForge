@@ -31,7 +31,8 @@ import { billJoinSpecs, rankBillRelations, sqlJoinIcon, type BillJoinGroup, type
 import { sqlAssistColumns } from "./sqlAssistColumns";
 import { billQueryRelations, billQueryTemplates } from "./sqlBillTemplates";
 import { getSqlTemplatesEnabled } from "./sqlTemplates";
-import { sqlUsageScope } from "./sqlUsage";
+import { recordSqlUsage, rollbackSqlUsage, sqlJoinUsageKey, sqlUsageRank, sqlUsageScope, type SqlUsageReceipt } from "./sqlUsage";
+import { sqlJoinHistoryRanks } from "./sqlJoinHistory";
 import { sqlScopeAt, type SqlSource } from "./sqlScope";
 import { sqlName } from "./sqlLex";
 import { getSqlFormatPrefs } from "./sqlFormatPrefs";
@@ -41,6 +42,7 @@ interface BillTarget { table: string; start: number; end: number; mode: "replace
 export interface SqlJoinPresentation {
   group: BillJoinGroup; table: string; label: string; sql: string; mode: BillTarget["mode"];
   rootColumns: readonly string[]; icon: SqlJoinIcon;
+  usageKey?: string; usageRank?: number; relationSource?: string; mayRepeatRows?: boolean;
 }
 export type SqlActionPreview = import("./sqlAssistPreview").SqlAssistPreview;
 interface JoinOptions { actions: SqlCodeAction[]; added: SqlJoinPresentation[] }
@@ -62,6 +64,30 @@ interface BillAction { title: string; range: { start: number; end: number }; pre
 type Editor = monaco.editor.IStandaloneCodeEditor;
 type JoinInsertion = NonNullable<ReturnType<typeof sqlJoinInsertion>>;
 const continuations = new WeakMap<Editor, { model: monaco.editor.ITextModel; version: number; offset: number; origin: number; current: () => boolean }>();
+const joinEdits = new WeakMap<monaco.editor.ITextModel, Map<number, { before: number; receipts: SqlUsageReceipt[] }>>();
+
+function rememberJoinEdit(model: monaco.editor.ITextModel, before: number, scope: string, keys: readonly string[]) {
+  const receipts = [...new Set(keys)].map(key => recordSqlUsage(scope, key, "accept")).filter(receipt => receipt !== null);
+  if (!receipts.length) return;
+  const after = model.getAlternativeVersionId();
+  let edits = joinEdits.get(model);
+  if (!edits) {
+    const tracked = new Map<number, { before: number; receipts: SqlUsageReceipt[] }>();
+    let previous = after;
+    model.onDidChangeContent(event => {
+      const next = model.getAlternativeVersionId(), edit = tracked.get(previous);
+      if (event.isUndoing && edit?.before === next) {
+        edit.receipts.forEach(rollbackSqlUsage);
+        tracked.delete(previous);
+      }
+      previous = next;
+    });
+    joinEdits.set(model, edits = tracked);
+  }
+  // Monaco restores alternative versions on undo, even if other edits were undone first.
+  edits.set(after, { before, receipts });
+  if (edits.size > 128) edits.delete(edits.keys().next().value!);
+}
 
 export function sqlJoinContinuationAt(editor: Editor, offset?: number) {
   const entry = continuations.get(editor);
@@ -71,13 +97,16 @@ export function sqlJoinContinuationAt(editor: Editor, offset?: number) {
 }
 
 export function applySqlJoinAppend(editor: Editor, model: monaco.editor.ITextModel, insertion: JoinInsertion,
-  origin: number, joins: readonly string[], current: () => boolean, identityCurrent: () => boolean) {
+  origin: number, joins: readonly string[], current: () => boolean, identityCurrent: () => boolean,
+  usage: { scope: string; keys: readonly string[] }) {
   if (!joins.length || editor.getModel() !== model || !current()) return false;
   const { text, block } = sqlJoinAppendText(insertion, joins), eol = model.getEOL();
   const at = model.getPositionAt(insertion.end);
+  const before = model.getAlternativeVersionId();
   editor.pushUndoStop();
   if (!editor.executeEdits("ncforge.sql.appendJoins", [{ range: monaco.Range.fromPositions(at, at), text: text.replace(/\n/g, eol) }])) return false;
   editor.pushUndoStop();
+  rememberJoinEdit(model, before, usage.scope, usage.keys);
   // The original source declaration stays before the insert, even when continuing from a joined alias.
   const offset = insertion.end + block.replace(/\n/g, eol).length;
   continuations.set(editor, { model, version: model.getVersionId(), offset, origin, current: identityCurrent });
@@ -196,11 +225,15 @@ export function wireSqlBillAssist(editor: monaco.editor.IStandaloneCodeEditor): 
           const table = normalized(source.table), meta = await readMeta(table, valid);
           if (!valid() || !meta || meta.sharedSession || meta.schema && meta.schema.toLowerCase() !== schema.toLowerCase()) return { actions: [], added: [] };
           const specs = billJoinSpecs(table, available, meta, names);
+          const history = sqlJoinHistoryRanks(scopeKey, table);
           const actions: SqlCodeAction[] = [], added: SqlJoinPresentation[] = [];
           for (const { spec, added: exists, sql } of sqlJoinAppendChoices(analysis, scope, insertion, source, schema, specs)) {
             const { table, group, rootColumns } = spec;
             const label = names[table] || table;
-            const item: SqlJoinPresentation = { table, group, rootColumns, sql, label, mode: "append", icon: sqlJoinIcon(table, group, views.has(table)) };
+            const usageKey = sqlJoinUsageKey(source.table, table, rootColumns, spec.otherColumns);
+            const item: SqlJoinPresentation = { table, group, rootColumns, sql, label, mode: "append", icon: sqlJoinIcon(table, group, views.has(table)),
+              relationSource: spec.source, mayRepeatRows: spec.incoming,
+              usageKey, usageRank: sqlUsageRank(scopeKey, usageKey) || history.get(usageKey) || 0 };
             if (exists) added.push(item);
             else actions.push({ title: `追加 LEFT JOIN：${label}`, kind: "refactor.rewrite", ncforgeJoin: item,
               ncforgePreview: { text: preview([item]), current }, edit: { edits: [{ resource: model.uri, versionId: version,
@@ -217,7 +250,8 @@ export function wireSqlBillAssist(editor: monaco.editor.IStandaloneCodeEditor): 
           apply: (id, items) => {
             const source = sources.find(candidate => candidate.declaration === id);
             return !!source && applySqlJoinAppend(editor, model, insertion, analysis.tokens[source.declaration].start,
-              items.map(item => item.sql), current, identityCurrent);
+              items.map(item => item.sql), current, identityCurrent,
+              { scope: scopeKey, keys: items.flatMap(item => item.usageKey ? [item.usageKey] : []) });
           },
         };
         const actions = initial.actions.length ? initial.actions : [{ title: "主子表联查", kind: "refactor.rewrite" }];

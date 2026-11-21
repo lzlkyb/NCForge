@@ -1662,6 +1662,12 @@ fn encode(enc: TextEncoding, s: &str) -> Result<Vec<u8>, String> {
                 Ok(cow.into_owned())
             }
         }
+        // UTF-16 是编辑器侧 2026-11-21 新增的读写编码（`workspace.rs::utf16_encoding`）。
+        // BMF 写回没有 UTF-16 的口径（BOM 要不要、字节序按哪个），这里**明确拒绝**：
+        // 猜一个写出去的是「标称 UTF-16、实际另一样」的文件，比报错难查得多。
+        TextEncoding::Utf16Le | TextEncoding::Utf16Be => {
+            Err("BMF 写回不支持 UTF-16 编码（请用 UTF-8 或 GBK）".into())
+        }
     }
 }
 

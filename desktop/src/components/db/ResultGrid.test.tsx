@@ -175,7 +175,7 @@ it("表头提供单一 Tab 入口，键盘排序和菜单关闭后回到原表�
   key(document.activeElement!,"Home");expect(document.activeElement).toBe(headers()[0]);
   key(document.activeElement!,"ArrowDown");expect(document.activeElement).toBe(grid);
   expect(selected).toHaveBeenLastCalledWith({r:0,c:0});
-  expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+  expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
 });
 
 it("键盘跨虚拟列会显露目标，Esc 保持原绝对选区，focusActive 恢复被滚出视口的格子",()=>{

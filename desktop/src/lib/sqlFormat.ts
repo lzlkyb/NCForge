@@ -13,6 +13,8 @@
 import type { SqlLanguage } from "sql-formatter";
 import { formatOptionsOf, getSqlFormatPrefs, type SqlFormatPrefs, type SqlFormattingOptions } from "./sqlFormatPrefs";
 import { readingLayout } from "./sqlReadingLayout";
+import { scanSql } from "./sqlLex";
+import { assertSqlFormatPreserves, mysqlDelimiterRegions, preserveSqlFormatEdges } from "./sqlFormatSafety";
 
 /** JDBC 子协议 → sql-formatter 方言。只列语法明确对应的；其余（达梦/金仓/神通等）回退 sql。 */
 const JDBC_LANGUAGE: Record<string, SqlLanguage> = {
@@ -43,8 +45,45 @@ export async function formatSql(
 ): Promise<string> {
   const prefs = getSqlFormatPrefs();
   const { layout = prefs.layout, lineWidth = prefs.lineWidth, ...engineOptions } = options;
-  const { format } = await import("sql-formatter");
-  // Reading uses regular nesting rather than column alignment, retaining that preference for expanded mode.
-  const expanded = format(sql, { ...engineOptions, ...(layout === "reading" ? { indentStyle: "standard", useTabs: false, expressionWidth: lineWidth } : {}), language });
-  return layout === "reading" ? readingLayout(expanded, language, lineWidth, engineOptions.tabWidth ?? 2) : expanded;
+  const { format, formatDialect, plsql } = await import("sql-formatter");
+  const config = { ...engineOptions, ...(layout === "reading" ? { indentStyle: "standard" as const, useTabs: false, expressionWidth: lineWidth } : {}) };
+  const formatQuery = (input: string): string => {
+    const original = scanSql(input, language);
+    const ranges = language === "plsql" ? original.tokens.filter(token => token.kind === "operator" && token.text === "..") : [];
+    let expanded: string;
+    if (ranges.length) {
+      // The formatter's number rule greedily matches "1." in "1..3". Separate only the
+      // real Oracle range tokens before tokenization and render them as dense operators.
+      let prepared = "", offset = 0;
+      for (const range of ranges) {
+        prepared += input.slice(offset, range.start) + " .. ";
+        offset = range.end;
+      }
+      prepared += input.slice(offset);
+      expanded = formatDialect(prepared, { ...config, dialect: {
+        ...plsql,
+        tokenizerOptions: {
+          ...plsql.tokenizerOptions,
+          operators: [...(plsql.tokenizerOptions.operators ?? []), ".."],
+          reservedKeywordPhrases: [...(plsql.tokenizerOptions.reservedKeywordPhrases ?? []), "END LOOP", "END IF"],
+        },
+        formatOptions: { ...plsql.formatOptions, alwaysDenseOperators: [...(plsql.formatOptions?.alwaysDenseOperators ?? []), ".."] },
+      } });
+    } else expanded = format(input, { ...config, language });
+    const result = layout === "reading" ? readingLayout(expanded, language, lineWidth, engineOptions.tabWidth ?? 2) : expanded;
+    assertSqlFormatPreserves(input, original, result, language, engineOptions);
+    return result;
+  };
+  const protectedRegions = mysqlDelimiterRegions(sql, language);
+  if (!protectedRegions.length) return formatQuery(sql);
+  const formatSurrounding = (text: string) => {
+    const body = text.trim();
+    return body ? preserveSqlFormatEdges(text, formatQuery(body)) : text;
+  };
+  let output = "", offset = 0;
+  for (const region of protectedRegions) {
+    output += formatSurrounding(sql.slice(offset, region.start)) + sql.slice(region.start, region.end);
+    offset = region.end;
+  }
+  return output + formatSurrounding(sql.slice(offset));
 }

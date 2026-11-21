@@ -61,13 +61,11 @@
 .wb-panel-tool-option > .wb-icon-btn { flex:none; }
 .wb-panel-tool-option > .wb-icon-btn[aria-pressed="true"] { color:hsl(var(--primary)); background:hsl(var(--accent)); }
 .wb-svc-host { display:flex; flex-direction:column; padding:0; }
-.wb-resize-x { position:relative; cursor:col-resize; border-left:1px solid hsl(var(--border)); }
-/* 抓手命中区比视觉宽：4px 的线用鼠标都难按住，触控板上还会先被当成滚动（所以要
-   `touch-action:none`）。视觉不动，用一层透明的伪元素把可点区域四周各撑 3px——
-   直接改 height/padding 会让分隔条真的占位，底部面板位置跟着漂。 */
+.wb-resize-x { position:relative; z-index:2; cursor:col-resize; }
+/* 命中区覆盖相邻面板，侧栏分隔条不再占列宽，也就不会露出工作台底色。 */
 .wb-resize-x,.wb-resize-y { touch-action:none; }
 .wb-resize-y { position:relative; cursor:row-resize; height:4px; flex-shrink:0; border-top:1px solid hsl(var(--border)); }
-.wb-resize-x::after { content:""; position:absolute; inset:0 -3px; }
+.wb-resize-x::after { content:""; position:absolute; inset:0 -7px 0 -3px; }
 .wb-resize-y::after { content:""; position:absolute; inset:-3px 0; }
 .wb-resize-x:hover,.wb-resize-y:hover { background:hsl(var(--primary)); }
 /* 停靠包装层不能自己产生盒子：工具页、ActivityPanel、DockRegion 都是透明的一层，

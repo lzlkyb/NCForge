@@ -9,14 +9,15 @@ export interface AssistContext {
   field?: string; valueSource?: SqlSource; valueStart?: number; valueEnd?: number;
   assigned: string[]; projections: string[];
 }
-const clauses: Record<string, SqlClause> = { SELECT: "select", WHERE: "where", HAVING: "where", ON: "on", GROUP: "group", ORDER: "order", SET: "set", INSERT: "insert", INTO: "insert", FROM: "other", JOIN: "other", VALUES: "other", RETURNING: "select" };
+const clauses = new Map<string, SqlClause>(Object.entries<SqlClause>({ SELECT: "select", WHERE: "where", HAVING: "where", ON: "on", GROUP: "group", ORDER: "order", SET: "set", INSERT: "insert", INTO: "insert", FROM: "other", JOIN: "other", VALUES: "other", RETURNING: "select" }));
+export const sqlClauseKeyword = (word: string) => clauses.get(word.toUpperCase());
 
 /** Same scope and lexer as highlighting; nested query clauses cannot leak into the outer query. */
 export function completionContext(analysis: SqlAnalysis, offset: number, dialect: SqlLanguage = "sql"): AssistContext {
   const base = sqlCompletionAt(analysis, offset), scope = sqlScopeAt(analysis, offset);
   const ids = scope?.indices.filter(i => analysis.tokens[i].start < offset) ?? [];
   const tokens = ids.map(i => analysis.tokens[i]);
-  const clause = [...tokens].reverse().map(t => clauses[t.text.toUpperCase()]).find(Boolean) ?? "other";
+  const clause = [...tokens].reverse().map(t => sqlClauseKeyword(t.text)).find(Boolean) ?? "other";
   const result: AssistContext = { ...base, clause, assigned: [], projections: [] };
   const hit = analysis.tokens.find(t => t.start < offset && t.end >= offset);
   const before = analysis.tokens.filter(t => t.start < offset && !["space", "comment", "hint"].includes(t.kind));

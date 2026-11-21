@@ -386,7 +386,7 @@ function set(patch: Partial<DbState>) {
   listeners.forEach((fn) => fn());
 }
 
-const subscribeDb = (fn: () => void) => {
+export const subscribeDb = (fn: () => void) => {
   listeners.add(fn);
   return () => listeners.delete(fn);
 };

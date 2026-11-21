@@ -8,8 +8,15 @@ export function ResultTabList({ prefix, label, items, value, onSelect }: {
   prefix: string; label: string; items: ResultTabOption[]; value: string; onSelect: (id: string) => void;
 }) {
   const refs = useRef(new Map<string, HTMLButtonElement>());
-  useEffect(() => { refs.current.get(value)?.scrollIntoView?.({ block: "nearest", inline: "nearest" }); }, [value]);
-  return <div className="dbx-rtabs" role="tablist" aria-label={label}>
+  const strip = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const tab = refs.current.get(value), list = strip.current;
+    if (!tab || !list) return;
+    const target = tab.getBoundingClientRect(), box = list.getBoundingClientRect();
+    if (target.left < box.left) list.scrollLeft += target.left - box.left;
+    else if (target.right > box.right) list.scrollLeft += target.right - box.right;
+  }, [value]);
+  return <div ref={strip} className="dbx-rtabs" role="tablist" aria-label={label}>
     {items.map((item, index) => <button key={item.id} type="button" role="tab"
       id={resultTabId(prefix, item.id)} aria-controls={`${prefix}-panel`}
       aria-selected={value === item.id} tabIndex={value === item.id ? 0 : -1}
@@ -17,13 +24,13 @@ export function ResultTabList({ prefix, label, items, value, onSelect }: {
       ref={el => { if (el) refs.current.set(item.id, el); else refs.current.delete(item.id); }}
       onClick={() => onSelect(item.id)} onKeyDown={event => {
         if (event.key === "ArrowDown") {
-          event.preventDefault(); document.getElementById(`${prefix}-panel`)?.focus(); return;
+          event.preventDefault(); document.getElementById(`${prefix}-panel`)?.focus({ preventScroll: true }); return;
         }
         const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
           : event.key === "ArrowRight" ? (index + 1) % items.length
           : event.key === "ArrowLeft" ? (index + items.length - 1) % items.length : -1;
         if (next < 0) return;
-        event.preventDefault(); onSelect(items[next].id); refs.current.get(items[next].id)?.focus();
+        event.preventDefault(); onSelect(items[next].id); refs.current.get(items[next].id)?.focus({ preventScroll: true });
       }}>{item.label}</button>)}
   </div>;
 }

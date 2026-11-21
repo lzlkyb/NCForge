@@ -12,6 +12,12 @@
 .ui-task-summary {display:flex;align-items:center;gap:8px;min-height:28px;flex-wrap:wrap}
 .ui-task-message {display:inline-flex;align-items:center;gap:8px;min-width:0;overflow-wrap:anywhere;color:hsl(var(--foreground))}
 .ui-task-message>svg {flex:none}
+.op-wait-dot {display:inline-block;width:7px;height:7px;flex:none;border:1px solid hsl(var(--primary));border-radius:50%;opacity:.65}
+.op-wait-dot[data-live] {animation:op-wait-breathe calc(var(--dur-loop) * 2) var(--ease-standard) infinite}
+@keyframes op-wait-breathe {50%{opacity:.28}}
+:is(:root[data-app-hidden],[data-view-inactive],[hidden]) .op-wait-dot {animation-play-state:paused}
+:root[data-motion="reduce"] .op-wait-dot {animation:none}
+@media(prefers-reduced-motion:reduce){.op-wait-dot{animation:none}}
 .ui-task-elapsed {font-variant-numeric:tabular-nums;white-space:nowrap}
 .ui-task-summary>.ui-button {margin-left:auto}
 .ui-task-detail {display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 12px;margin-top:4px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}

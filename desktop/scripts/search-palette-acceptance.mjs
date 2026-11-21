@@ -10,7 +10,7 @@ import { serviceFixture } from "./service-console-fixture.mjs";
 import { codeFixture } from "./code-workbench-fixture.mjs";
 
 const dist = new URL("../dist/", import.meta.url);
-const artifacts = new URL("../../docs/工程搜索顶部浮层验收-2026-11-14/", import.meta.url);
+const artifacts = new URL("../../target/search-palette-acceptance/", import.meta.url);
 await mkdir(artifacts, { recursive: true });
 const html = await readFile(new URL("index.html", dist), "utf8");
 const entry = html.match(/<script type="module"[^>]*src="([^"]+)"[^>]*><\/script>/)[1];
@@ -19,7 +19,7 @@ const searchFixture = String.raw`
 window.searchRequests=[];window.searchCancels=[];window.searchRoot=serviceRoot;
 const otherRoot='D:/关联工程';
 const searchMock=(cmd,args)=>{
- if(cmd==='search_list_files')return {files:[...Object.keys(window.codeFiles),'purp/src/client/nc/ui/pp/m28/editor/card/afteredit/CardBodyAfterEditEventHandler.java','pu/src/client/nc/ui/pu/m25/editor/card/afteredit/CardBodyAfterEditEventHandler.java'],truncated:false};
+ if(cmd==='search_list_files')return args?.linked?{files:[],projects:[{name:'关联工程',root:otherRoot,files:['src/AssociatedOnly.java']}],truncated:false}:{files:[...Object.keys(window.codeFiles),'purp/src/client/nc/ui/pp/m28/editor/card/afteredit/CardBodyAfterEditEventHandler.java','pu/src/client/nc/ui/pu/m25/editor/card/afteredit/CardBodyAfterEditEventHandler.java'],truncated:false};
  if(cmd==='search_types')return {workspace:[],jars:[],jarsPending:true,indexing:true,elapsedMs:1};
  if(cmd==='search_library_files')return {items:!args.names&&window.jarSearchContent?[{source:'D:/NC/modules/pp/hyext/lib/same.jar',entry:'config/a.xml',archive:true,class:false,line:12,text:'System 配置',ranges:[{start:0,end:6}]},{source:'D:/NC/modules/pp/hyext/lib/same.jar',entry:'messages.properties',archive:true,class:false,line:24,text:'System 单据',ranges:[{start:0,end:6}]}]:[],building:false,stale:false,cancelled:false,truncated:false,scanned:20,skipped:0,error:null};
  if(cmd==='library_search_cancel')return null;
@@ -33,11 +33,13 @@ const searchMock=(cmd,args)=>{
  if(cmd==='search_jar_symbols'||cmd==='search_src_notes')return {items:window.jarSearchContent?(cmd==='search_jar_symbols'?[{term:'System',score:2,places:[{jar:'D:/依赖.jar',class:'nc.demo.System'}]}]:[{jar:'D:/依赖_src.jar',path:'nc/demo/System.java',line:4,text:'System 源码注释'}]):[],total:window.jarSearchContent?1:0,truncated:false,building:false,stale:false,elapsedMs:1};
  if(cmd==='search_cancel'){window.searchCancels.push(args.source);return null;}
  if(cmd==='search_workspace_stream'||cmd==='search_projects'){
-  const hits=args.options.text==='large'?Array.from({length:10000},(_,i)=>({path:'A.java',line:i+1,text:'large match '+(i+1),ranges:[{start:0,end:5}]})):codeSearch.hits;
+  const quick=args.source?.startsWith('palette-unified:');
+  const phrase='非ICL客户不能同步';
+  const hits=quick?(args.options.text===phrase?[{path:'A.java',line:4,column:12,text:phrase,ranges:[{start:0,end:phrase.length}]}]:[]):args.options.text==='large'?Array.from({length:10000},(_,i)=>({path:'A.java',line:i+1,text:'large match '+(i+1),ranges:[{start:0,end:5}]})):codeSearch.hits;
   const outcome={...codeSearch,hits};
-  const result=cmd==='search_projects'?{projects:[{project:'验收工程',root:window.searchRoot,outcome},{project:'关联工程',root:otherRoot,outcome:{...codeSearch,filesMatched:1,hits:[{...codeSearch.hits[0],line:4}]}}],errors:[],truncated:false,elapsedMs:300}:outcome;
+  const result=cmd==='search_projects'?{projects:[{project:'验收工程',root:window.searchRoot,outcome},...(quick?[]:[{project:'关联工程',root:otherRoot,outcome:{...codeSearch,filesMatched:1,hits:[{...codeSearch.hits[0],line:4}]}}])],errors:[],truncated:false,elapsedMs:300}:outcome;
   return new Promise(resolve=>{
-   const request={cmd,args,result,finish:()=>resolve(result)};window.searchRequests.push(request);
+   const request={cmd,args,result,finish:()=>resolve(result)};if(!quick)window.searchRequests.push(request);
    setTimeout(()=>window.__TAURI_INTERNALS__.invoke('plugin:event|emit',{event:cmd==='search_projects'?'search:projects-batch':'search:batch',payload:{stream:args.stream,hits:hits.slice(0,50),project:'验收工程',root:window.searchRoot}}),30);
    if(!window.holdSearch)setTimeout(request.finish,350);
   });
@@ -77,7 +79,7 @@ try {
   browser = await chromium.launch({ headless: true, channel: "msedge" });
   for (const theme of ["light", "dark"]) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
-    await context.addInitScript(theme => { localStorage.setItem("theme", theme); localStorage.setItem("ncforge.ui-style", "classic"); }, theme);
+    await context.addInitScript(theme => { localStorage.setItem("theme", theme); localStorage.setItem("ncforge.ui-style", "classic"); localStorage.setItem("ncforge.tree.packageView", "0"); }, theme);
     page = await context.newPage(); page.setDefaultTimeout(15000); page.on("pageerror", error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: "domcontentloaded" });
     await page.getByRole("tree", { name: "文件树", exact: true }).getByText("A.java", { exact: true }).dblclick();
@@ -85,21 +87,18 @@ try {
     await editor.click(); await page.locator(".wb-global-search").click();
     const dialog = page.getByRole("dialog", { name: "快速导航", exact: true });
     await page.getByLabel("快速导航输入", { exact: true }).waitFor();
-    assert.equal(await dialog.locator('.qp-mode[aria-pressed="true"] .qp-mode-label').innerText(), "文件");
+    assert.equal(await dialog.getByRole("button", { name: "完整搜索", exact: true }).count(), 1);
     const fullClass = 'nc.ui.pp.m28.editor.card.afteredit.CardBodyAfterEditEventHandler';
     const gotoInput = page.getByLabel("快速导航输入", { exact: true });
     await gotoInput.fill(fullClass);
-    await dialog.locator('.qp-list[aria-busy="false"] .qp-li').waitFor();
-    assert.equal(await dialog.locator('.qp-li').count(), 1);
-    assert.ok((await dialog.locator('.qp-h').innerText()).includes('purp/src/client/nc/ui/pp/m28'));
+    const fileHit = dialog.locator('.qp-li[data-group="文件"]').filter({ hasText: 'purp/src/client/nc/ui/pp/m28' });
+    await fileHit.waitFor();
     await page.screenshot({ path: fileURLToPath(new URL(`${theme}-完整类名-文件.png`, artifacts)) });
-    await dialog.locator('.qp-mode').filter({ has: page.locator('.qp-mode-label', { hasText: /^类型$/ }) }).click();
-    await gotoInput.fill(fullClass);
-    await dialog.locator('.qp-list[aria-busy="false"] .qp-li').waitFor();
-    assert.equal(await dialog.locator('.qp-li').count(), 1);
-    assert.equal(await dialog.locator('.qp-title').innerText(), 'CardBodyAfterEditEventHandler');
-    assert.ok((await dialog.locator('.qp-h').innerText()).includes('purp/src/client/nc/ui/pp/m28'));
-    await page.screenshot({ path: fileURLToPath(new URL(`${theme}-完整类名-类型.png`, artifacts)) });
+    await gotoInput.fill("AssociatedOnly.java");
+    await dialog.getByRole("option", { name: /AssociatedOnly\.java.*关联工程/ }).waitFor();
+    await gotoInput.fill("非ICL客户不能同步");
+    await dialog.getByRole("option", { name: /正文.*非ICL客户不能同步/ }).locator("mark").waitFor();
+    await page.screenshot({ path: fileURLToPath(new URL(`${theme}-全局搜索正文.png`, artifacts)) });
     await page.keyboard.press("Control+k");
     const input = page.getByLabel("搜索工程文件内容", { exact: true });
     await input.waitFor(); await page.keyboard.press("Escape");
@@ -134,7 +133,7 @@ try {
     await dialog.getByRole("button", { name: "全部展开", exact: true }).click();
     await dialog.getByRole("button", { name: "更多", exact: true }).click(); await dialog.getByLabel("文件过滤").fill("*.java");
     await page.keyboard.press("Escape"); await page.keyboard.press("Control+p");
-    await page.getByLabel("快速导航输入", { exact: true }).fill("#System"); await input.waitFor(); assert.equal(await input.inputValue(), "System");
+    await page.getByLabel("快速导航输入", { exact: true }).fill("# System"); await input.waitFor(); assert.equal(await input.inputValue(), "System");
     assert.equal(await dialog.locator('input[aria-label="搜索工程文件内容"]').count(), 1);
     await input.press("Enter"); await page.waitForFunction(() => window.searchRequests.length === 2);
     await page.waitForFunction(() => !document.querySelector(".qp-sec")?.textContent.includes("搜索中…"));
@@ -171,7 +170,7 @@ try {
     await page.keyboard.press("Escape");
     assert.equal(await page.locator(".wb-code-context").count(), 0, "duplicate code context search entry removed");
     await page.locator(".wb-global-search").click();
-    await dialog.locator(".qp-mode").filter({ hasText: "工程搜索" }).click();
+    await dialog.getByRole("button", { name: "完整搜索", exact: true }).click();
     await input.waitFor(); await page.keyboard.press("Escape");
     await page.keyboard.press("Control+Shift+p");
     await page.getByLabel("快速导航输入", { exact: true }).fill("全工程搜索");
@@ -201,6 +200,7 @@ try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
     await context.addInitScript(test => {
       localStorage.setItem("ncforge-keymap", test.keymap);
+      localStorage.setItem("ncforge.tree.packageView", "0");
       if (test.binding) localStorage.setItem("ncforge-keybindings", JSON.stringify({ "search.workspace": test.binding }));
     }, test);
     page = await context.newPage(); page.setDefaultTimeout(15000); page.on("pageerror", error => errors.push(error.message));

@@ -23,16 +23,17 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi
 it("one deadline detects missing download events and new progress clears the waiting state", async () => {
   await act(async () => root.render(<UpdateReadout />));
   expect(vi.getTimerCount()).toBe(1);
-  await act(async () => vi.advanceTimersByTime(1501));
+  await act(async () => vi.advanceTimersByTime(4001));
   expect(host.textContent).toContain("等待响应"); expect(vi.getTimerCount()).toBe(0);
   mocks.update.downloadedBytes = 64;
   await act(async () => root.render(<UpdateReadout />));
   expect(host.textContent).not.toContain("等待响应"); expect(vi.getTimerCount()).toBe(1);
 });
 
-it("hidden windows release the deadline and inactive readouts release indeterminate loops", async () => {
+it("unknown transfers use a static readout and hidden windows release the deadline", async () => {
   await act(async () => root.render(<UpdateReadout />));
-  expect(host.querySelector(".ur-sweep")).not.toBeNull();
+  expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuetext")).toBe("总大小未知");
+  expect(host.querySelector(".ur-sweep,.animate-spin")).toBeNull();
   mocks.hidden = true; await act(async () => root.render(<UpdateReadout />)); expect(vi.getTimerCount()).toBe(0);
   mocks.hidden = false; mocks.update.status = "ready";
   await act(async () => root.render(<UpdateReadout />));

@@ -4,6 +4,7 @@ import { updatePrimaryAction } from "../../lib/updatePresentation";
 import { formatBytes, formatBytesPerSec } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
+import { OperationEtaByKey } from "../ui/OperationEta";
 
 /** Reuse the updater's single operation and confirmation flow; this page only exposes its status. */
 export function AboutUpdateAction({ versionKnown, children }: { versionKnown: boolean; children?: ReactNode }) {
@@ -36,6 +37,6 @@ export function AboutUpdateAction({ versionKnown, children }: { versionKnown: bo
     <p className={`settings-about-status ${status === "error" ? "is-error" : ""}`} role="status">{update.installBlock || (update.tryingBackup && ["checking", "downloading"].includes(status) ? "正在尝试备用更新源…" : state)}</p>
     {update.installBlock && update.openInstallBlock && <Button variant="outline" size="sm" onClick={update.openInstallBlock}>前往处理</Button>}
     {status === "downloading" && <p className="settings-about-download">{formatBytes(update.downloadedBytes)}
-      {update.totalBytes ? ` / ${formatBytes(update.totalBytes)}` : ""} · {!update.progressIndeterminate && update.progress >= 100 ? "校验中" : update.bytesPerSec > 0 ? formatBytesPerSec(update.bytesPerSec) : "正在连接…"}</p>}
+      {update.totalBytes ? ` / ${formatBytes(update.totalBytes)}` : ""} · {!update.progressIndeterminate && update.progress >= 100 ? "校验中" : update.bytesPerSec > 0 ? formatBytesPerSec(update.bytesPerSec) : "正在连接…"}{" "}<OperationEtaByKey taskKey="update.download" /></p>}
   </div>;
 }

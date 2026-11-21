@@ -10,14 +10,19 @@ import { chromium } from "playwright";
 import { serviceFixture } from "./service-console-fixture.mjs";
 import { codeFixture } from "./code-workbench-fixture.mjs";
 
-const dist = new URL("../dist/", import.meta.url), artifacts = new URL("../../docs/代码工作台布局深化验收-2026-11-06/", import.meta.url);
+const dist = new URL("../dist/", import.meta.url);
+const artifacts = new URL(process.env.NCFORGE_QA_TEMP === "1" ? "../../target/code-workbench-acceptance/" : "../../docs/代码工作台布局深化验收-2026-11-06/", import.meta.url);
 const html = await readFile(new URL("index.html", dist), "utf8"), entry = html.match(/<script type="module"[^>]*src="([^"]+)"[^>]*><\/script>/)?.[1];
 assert.ok(entry);
 const base = (await readFile(new URL("db-workbench-acceptance.test.mjs", import.meta.url), "utf8")).match(/const bootstrap=`([\s\S]*?)`;/)[1];
 const mocks = await readFile(new URL("../node_modules/@tauri-apps/api/mocks.js", import.meta.url));
 const config = JSON.parse(await readFile(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
 const nonce = "code-workbench-acceptance", hashes = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => "'sha256-" + createHash("sha256").update(m[1]).digest("base64") + "'");
-const moduleFixture = codeFixture.replace("const codeMock=(cmd,args)=>{", "const codeMock=(cmd,args)=>{if(cmd==='fs_list_dir'&&args.path===serviceRoot)return [{name:'demo',isDir:true,size:0}];").replaceAll("serviceRoot+'/B.java'", "serviceRoot+'/demo/B.java'");
+const moduleFixture = codeFixture.replace("const codeMock=(cmd,args)=>{", `const codeMock=(cmd,args)=>{
+  if(cmd==='fs_list_dir'&&args.path===serviceRoot)return [{name:'demo',isDir:true,size:0}];
+  if(cmd==='fs_read_file'&&args.path.endsWith('.classpath'))return {text:'<classpath><classpathentry kind="src" path="demo"/></classpath>'};
+  if(cmd==='fs_package_dirs')return [];
+`).replaceAll("serviceRoot+'/B.java'", "serviceRoot+'/demo/B.java'");
 const csp = config.app.security.csp.replace(/script-src ([^;]+)/, (_, value) => `script-src ${value} ${hashes.join(" ")}`).replace(/style-src ([^;]+)/, (_, value) => `style-src ${value} 'nonce-${nonce}'`);
 const bootstrap = base.replace("/node_modules/@tauri-apps/api/mocks.js", "/__mocks.js")
   .replace("const tx=", `${serviceFixture}\n${moduleFixture}\nconst tx=`)
@@ -47,6 +52,36 @@ test("code workbench production: layouts, focused groups, saved file, tree filte
       const shot = name => page.screenshot({ path: fileURLToPath(new URL(`${theme}-${material}-${name}.png`, artifacts)), animations: "disabled" });
       try {
         await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: "domcontentloaded" });
+        const packages = page.getByRole("tree", { name: "包资源管理器", exact: true });
+        await packages.waitFor();
+        assert.equal(await page.getByRole("button", { name: "包视图", exact: true }).getAttribute("aria-pressed"), "true");
+        const source = packages.getByText("demo", { exact: true });
+        const readCount = () => page.evaluate(() => window.dbCalls.filter(call =>
+          (call.cmd === "fs_list_dir" || call.cmd === "fs_package_dirs") && /[\\/]demo$/.test(call.args.path)).length);
+        await page.waitForFunction(() => window.dbCalls.filter(call =>
+          (call.cmd === "fs_list_dir" || call.cmd === "fs_package_dirs") && /[\\/]demo$/.test(call.args.path)).length === 2);
+        await source.click();
+        await packages.getByText("A.java", { exact: true }).waitFor();
+        await source.click();
+        await source.click();
+        await packages.getByText("A.java", { exact: true }).waitFor();
+        assert.equal(await readCount(), 2, "prewarmed source opens and reopens without additional reads");
+        const project = packages.locator(".wb-row-project");
+        const collapse = page.getByRole("button", { name: "全部折叠", exact: true });
+        await packages.getByRole("treeitem", { name: "A.java", exact: true }).getByTitle("展开 Java 成员").click();
+        await packages.getByRole("treeitem", { name: "A", exact: true }).waitFor();
+        await collapse.press("Enter");
+        await project.and(page.locator('[aria-expanded="false"]')).waitFor();
+        assert.equal(await packages.getByRole("treeitem").count(), 1);
+        assert.equal(await collapse.isDisabled(), true);
+        assert.equal(await page.getByRole("button", { name: "自动定位", exact: true }).getAttribute("aria-pressed"), "true");
+        await project.click();
+        await source.click();
+        await packages.getByText("A.java", { exact: true }).waitFor();
+        assert.equal(await packages.getByRole("treeitem", { name: "A", exact: true }).count(), 0);
+        assert.equal(await readCount(), 2, "collapse retains the source and package index caches");
+        await source.click();
+        await page.getByRole("button", { name: "文件视图", exact: true }).click();
         const tree = page.getByRole("tree", { name: "文件树", exact: true });
         await tree.getByText("demo", { exact: true }).click();
         await tree.getByText("A.java", { exact: true }).dblclick(); await page.locator('.wb-editor-group-slot[data-group="left"] .monaco-editor').waitFor();
@@ -148,7 +183,7 @@ test("code workbench production: layouts, focused groups, saved file, tree filte
           assert.ok(Math.abs((await raw.evaluate(element => element.scrollTop))-rawTop)<30, "capped stream preserves reading position");
           await shot("build-raw");
 
-          await page.locator(".wb-global-search").click(); await page.locator(".qp-mode").filter({ hasText: "工程搜索" }).click(); await page.getByLabel("搜索工程文件内容").fill("System"); await page.getByLabel("搜索工程文件内容").press("Enter");
+          await page.locator(".wb-global-search").click(); await page.getByRole("button", { name: "完整搜索", exact: true }).click(); await page.getByLabel("搜索工程文件内容").fill("System"); await page.getByLabel("搜索工程文件内容").press("Enter");
           await page.getByRole("button", { name: "预览 A.java 第 6 行上下文", exact: true }).click();
           await page.getByRole("region", { name: "源码上下文预览" }).getByText('System.out.println("A");', { exact: true }).waitFor();
           assert.equal(await page.getByRole("button", { name: "展开结果", exact: true }).count(), 0);
@@ -172,6 +207,11 @@ test("code workbench production: layouts, focused groups, saved file, tree filte
           assert.equal(await page.getByText(/无法打开 [AB].java/).count(), 0);
         }
         assert.deepEqual(await page.evaluate(() => window.cspViolations), []);
+        if (theme === "light" && material === "classic") {
+          await page.reload({ waitUntil: "domcontentloaded" });
+          await tree.waitFor();
+          assert.equal(await page.getByRole("button", { name: "文件视图", exact: true }).getAttribute("aria-pressed"), "true");
+        }
       } catch (error) { await shot("failure"); await writeFile(new URL("失败记录.json", artifacts), JSON.stringify({ errors, text: await page.locator("body").innerText(), debug:await page.evaluate(()=>({writes:window.codeWrites,calls:window.dbCalls.slice(-30),focus:document.activeElement?.outerHTML})) }, null, 2)); throw error; }
       finally { await context.close(); }
     }

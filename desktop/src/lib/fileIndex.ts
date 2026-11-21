@@ -22,8 +22,27 @@ interface FileList {
   truncated: boolean;
 }
 
-let cache: { root: string; at: number; entries: FileEntry[]; truncated: boolean } | null = null;
-let inflight: Promise<void> | null = null;
+type LinkedFileList = FileList & { projects?: { root: string; name: string; files: string[] }[]; errors?: string[] };
+let linkedListing: { root: string; time: number; request: Promise<LinkedFileList> } | undefined;
+
+export function getLinkedFileIndex(root: string): Promise<LinkedFileList> {
+  if (linkedListing?.root === root && Date.now() - linkedListing.time < 30_000) return linkedListing.request;
+  const request = invoke<LinkedFileList>("search_list_files", { linked: true }).catch(error => {
+    if (linkedListing?.request === request) linkedListing = undefined;
+    throw error;
+  });
+  linkedListing = { root, time: Date.now(), request };
+  return request;
+}
+
+interface FileIndexSnapshot {
+  root: string;
+  at: number;
+  entries: FileEntry[];
+  truncated: boolean;
+}
+let cache: FileIndexSnapshot | null = null;
+let inflight: { root: string; request: Promise<FileIndexSnapshot> } | null = null;
 /** 被主动失效过：即便还在 TTL 内也值得后台刷一次。 */
 let stale = false;
 
@@ -38,21 +57,23 @@ export function toEntry(root: string, rel: string): FileEntry {
   };
 }
 
-async function refresh(root: string): Promise<void> {
+async function refresh(root: string): Promise<FileIndexSnapshot> {
   const base = root.replace(/[\\/]+$/, "");
   const r = await invoke<FileList>("search_list_files");
-  cache = { root, at: Date.now(), entries: r.files.map((f) => toEntry(base, f)), truncated: r.truncated };
-  stale = false;
+  return { root, at: Date.now(), entries: r.files.map((f) => toEntry(base, f)), truncated: r.truncated };
 }
 
-/** 同一个 root 的刷新合并成一次；不同 root 各自排队。 */
-function start(root: string): Promise<void> {
-  inflight ??= refresh(root)
-    .catch(() => {})
-    .finally(() => {
-      inflight = null;
-    });
-  return inflight;
+/** Only the latest root can replace the cache when workspace changes race a read. */
+function start(root: string) {
+  if (inflight?.root === root) return inflight.request;
+  const request = refresh(root).then(result => {
+    if (inflight?.request === request) { cache = result; stale = false; }
+    return result;
+  }).finally(() => {
+    if (inflight?.request === request) inflight = null;
+  });
+  inflight = { root, request };
+  return request;
 }
 
 /**
@@ -63,10 +84,11 @@ function start(root: string): Promise<void> {
  */
 export function invalidateFileIndex(): void {
   stale = true;
+  linkedListing = undefined;
   void invoke("search_invalidate_files").catch(() => {});
   const root = cache?.root;
   if (root) {
-    void start(root);
+    void start(root).catch(() => {});
   } else {
     // 没有任何数据可复用：让下一次取清单走一次完整加载
     inflight = null;
@@ -87,13 +109,13 @@ export function peekFileIndex(root: string): FileEntry[] | null {
  * 取文件条目。有同工程的缓存就直接返回（过期或已失效就顺手后台刷新），
  * 没有才等一次加载。刷新失败（工作区刚换、目录没了）返回空表，不抛——面板照常可用。
  */
-export async function getFileIndex(root: string): Promise<FileEntry[]> {
+export async function getFileIndex(root: string, reportFailure = false): Promise<FileEntry[]> {
   const hit = cache && cache.root === root ? cache : null;
   if (hit && !stale && Date.now() - hit.at < TTL_MS) return hit.entries;
   if (hit) {
-    void start(root);
+    void start(root).catch(() => {});
     return hit.entries;
   }
-  await start(root);
-  return cache && cache.root === root ? cache.entries : [];
+  try { return (await start(root)).entries; }
+  catch (error) { if (reportFailure) throw error; return []; }
 }

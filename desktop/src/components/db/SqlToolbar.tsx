@@ -1,4 +1,3 @@
-import { QueryElapsed } from "./SqlExecutionFeedback";
 import { useEffect, useId, useState } from "react";
 import { Icon } from "../ui/icon";
 import { ConnPicker } from "./ConnPicker";
@@ -15,9 +14,10 @@ import type { SqlExecutionScope, SqlFormatScope, SqlRunMode } from "./SqlEditor"
 import type { SqlConsoleFocus } from "../../hooks/useSqlConsoleSplit";
 
 /** 连接上下文与执行工具条共用事务切换锁，切换模式时不能换库。 */
-export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onExport, onValueSearch, onScriptReplay, historyOpen, onHistory, snipsOpen, onSnips, memoryOpen, onMemory, sessionsOpen, onSessions, focusMode = "split", onFocusChange }: {
+export function SqlToolbar({ tab, scope, scriptCount, onRun, onStop, onExplain, onFormat, onExport, onValueSearch, onScriptReplay, historyOpen, onHistory, snipsOpen, onSnips, memoryOpen, onMemory, sessionsOpen, onSessions, focusMode = "split", onFocusChange }: {
   tab: SqlTab;
   scope: SqlExecutionScope | null;
+  scriptCount?: number;
   focusMode?: SqlConsoleFocus;
   onFocusChange?: (mode: SqlConsoleFocus) => void;
   onRun: (mode: SqlRunMode, collectStats?: boolean) => void;
@@ -72,6 +72,9 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
   const statements = currentScope?.statements ?? [];
   const runLabel = currentScope?.selected ? "执行选中 SQL" : "执行当前语句";
   const first = statements[0], last = statements[statements.length - 1];
+  const cursorTarget = currentScope?.current ?? (currentScope?.selected ? undefined : first);
+  const cursorRange = cursorTarget ? cursorTarget.endLine && cursorTarget.endLine !== cursorTarget.startLine
+    ? `第 ${cursorTarget.startLine}–${cursorTarget.endLine} 行` : `第 ${cursorTarget.startLine} 行` : undefined;
   const range = first && last?.endLine !== undefined
     ? `${first.startLine === last.endLine ? `第 ${first.startLine} 行` : `第 ${first.startLine}–${last.endLine} 行`}`
     : statements.length ? `第 ${first.startLine} 行`
@@ -124,9 +127,9 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
             </button>
             <button type="button" className="dbx-btn pri dbx-run-menu" disabled={executionBlocked} aria-label="更多执行方式" title="更多执行方式" aria-haspopup="menu"
               onClick={event => popup(event.currentTarget, [
-                { label: "执行当前语句", icon: "play", hint: `${modifier}+Shift+Enter`, disabled: !statements.length, onSelect: () => onRun("current") },
-                { label: "执行整个脚本", icon: "terminal", hint: "Alt+X", onSelect: () => onRun("script") },
-                { label: "执行当前语句并采集统计", icon: "activity", disabled: !statements.length, onSelect: () => onRun("current", true) },
+                { label: "执行当前语句", icon: "play", hint: [cursorRange, `${modifier}+Shift+Enter`].filter(Boolean).join(" · "), disabled: !cursorTarget, onSelect: () => onRun("current") },
+                { label: "执行整个脚本", icon: "terminal", hint: scriptCount ? `${scriptCount} 条语句 · Alt+X` : "Alt+X", disabled: scriptCount === 0, onSelect: () => onRun("script") },
+                { label: "执行当前语句并采集统计", icon: "activity", hint: cursorRange, disabled: !cursorTarget, onSelect: () => onRun("current", true) },
               ])}><Icon name="chevronDown" size={12} /></button>
           </div>
           <span className="dbx-stop-slot">{running && <button type="button" className="dbx-btn ghost dbx-stop-action" data-running
@@ -135,7 +138,6 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
             title={stopping ? "正在等待数据库停止确认" : rt.caps && !rt.caps.cancel ? "当前连接不支持中断语句" : "停止当前执行，等待数据库确认"}>
             <Icon name={stopping ? "spinner" : "stop"} size={15} />
           </button>}</span>
-          <span className="dbx-query-clock">{operation && <QueryElapsed startedAt={operation.startedAt} />}</span>
         </div>
         <span id={scopeId} className="dbx-scope" aria-live="polite">{range}{disabledReason && <span className="dbx-run-reason"> · {disabledReason}</span>}</span>
       </div>

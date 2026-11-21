@@ -5,7 +5,7 @@ import { SavedHint } from "../components/ui/SavedHint";
 import { LoadingState } from "../components/ui/LoadingState";
 import { applyMotionPreference, getMotionPreference, subscribeMotionPreference } from "../lib/motionPreference";
 
-type Scenario = "fast" | "normal" | "long" | "error" | "partial";
+type Scenario = "fast" | "normal" | "long" | "slow" | "error" | "partial";
 type Run = { id: number; startedAt: number; scenario: Scenario; done: number;
   state: "running" | "cancelling" | "success" | "cancelled" | "error" | "partial" };
 
@@ -30,7 +30,7 @@ export function MotionTaskPreview() {
         setRun(current => current?.id === id && current.state === "running" ? { ...current, done } : current);
       }, delay));
     }
-    const delay = scenario === "fast" ? 50 : scenario === "long" ? 12_000 : 900;
+    const delay = scenario === "fast" ? 50 : scenario === "long" || scenario === "slow" ? 12_000 : 900;
     timers.current.push(setTimeout(() => setRun(current => current?.id === id && current.state === "running"
       ? { ...current, done: scenario === "partial" ? 2 : 3,
         state: scenario === "error" ? "error" : scenario === "partial" ? "partial" : "success" } : current), delay));
@@ -58,6 +58,7 @@ export function MotionTaskPreview() {
         <option value="fast">50 毫秒 · 快速完成</option><option value="normal">900 毫秒 · 正常完成</option>
         <option value="long">12 秒 · 分段进度</option><option value="error">900 毫秒 · 失败</option>
         <option value="partial">900 毫秒 · 部分完成</option>
+        <option value="slow">12 秒 · 总量未知</option>
       </select>
       <Button data-testid="task-start" isLoading={working} loadingText="处理中…" onClick={start}>开始示例任务</Button>
       <button type="button" className="dbx-btn rounded border px-3 py-1 text-xs" data-testid="native-feedback"

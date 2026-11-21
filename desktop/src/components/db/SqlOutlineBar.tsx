@@ -1,4 +1,5 @@
 import { Icon } from "../ui/icon";
+import { memo } from "react";
 import { statementTitle } from "../../lib/sqlStatementTitle";
 import type { RunStmt } from "./SqlEditor";
 
@@ -28,7 +29,7 @@ export function statementBrief(sql: string, max = 18): string {
  * 刻意不做成左侧竖栏：SQL 控制台的横向空间已经给了结果区，竖栏会把编辑器压窄；
  * 横条只在多语句脚本（≥3 条）时出现，单条查询时完全不占位。
  */
-export function SqlOutlineBar({ statements, onPick }: { statements: RunStmt[]; onPick: (line: number) => void }) {
+export const SqlOutlineBar = memo(function SqlOutlineBar({ statements, onPick }: { statements: RunStmt[]; onPick: (line: number) => void }) {
   if (statements.length < MIN) return null;
   const shown = statements.slice(0, MAX);
   return (
@@ -47,4 +48,4 @@ export function SqlOutlineBar({ statements, onPick }: { statements: RunStmt[]; o
       {statements.length > MAX && <span className="dbx-outline-more">还有 {statements.length - MAX} 条</span>}
     </div>
   );
-}
+});

@@ -162,6 +162,10 @@ pub(crate) fn encode(text: &str, enc: TextEncoding, crlf: bool) -> Result<Vec<u8
                 Ok(cow.into_owned())
             }
         }
+        // 同 `bmf_write::encode`：BMF 导出没有 UTF-16 的口径，明确拒绝而不是猜一个。
+        TextEncoding::Utf16Le | TextEncoding::Utf16Be => {
+            Err("BMF 导出不支持 UTF-16 编码（请用 UTF-8 或 GBK）".to_string())
+        }
     }
 }
 

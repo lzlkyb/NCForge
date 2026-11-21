@@ -18,6 +18,8 @@ import { NcEnvSettings } from "../settings/NcEnvSettings";
 import { AppearanceSettings } from "../settings/AppearanceSettings";
 import { UpdateSettings } from "../settings/UpdateSettings";
 import { AboutSettings } from "../settings/AboutSettings";
+import { StorageSettings } from "../settings/StorageSettings";
+import { STORAGE_SECTION } from "../../lib/storageMaintenance";
 import { consumePendingChangelog, onOpenChangelogRequest } from "../../lib/changelogRequest";
 
 export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
@@ -87,6 +89,12 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
       {
         label: "配置迁移", group: "维护", scope: "仅迁移支持的应用配置", description: "导出可迁移配置，导入前核对本机值与路径。",
         keywords: ["导入", "导出", "备份", "JSON", "迁移", "config"], content: <ConfigTransferSettings onChanged={onChanged} />,
+      },
+      {
+        label: STORAGE_SECTION, group: "维护", scope: "本机 · 所有工程",
+        description: "查看磁盘占用与运行内存，按需清理闲置文件。",
+        keywords: ["清理", "缓存", "磁盘", "内存", "进程", "临时文件", "storage", "memory"],
+        content: active => <StorageSettings active={active} />,
       },
       {
         label: "诊断日志", aliases: ["错误记录", "崩溃日志"], group: "维护", scope: "只保存在本机，不上传", description: "查看界面出错时自动记录的现场，或打开日志文件位置。",

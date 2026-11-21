@@ -1,4 +1,5 @@
 import { showSqlPreviewCode } from "./sqlPreviewCode";
+import type { SqlLanguage } from "sql-formatter";
 
 export type SqlPreviewIcon = `ncforge-join-${string}` | "symbol-field" | "new-file" | "file-code" | "filter" | "history" | "bookmark" | "list-flat" | "git-compare" | "checklist" | "graph" | "references";
 export interface SqlPreviewContent {
@@ -8,10 +9,10 @@ export interface SqlPreviewContent {
   status?: "loading" | "error" | "empty";
   highlights?: readonly { start: number; end: number }[];
 }
-export type SqlAssistPreview = { title?: string; icon?: SqlPreviewIcon; current?: () => boolean } &
+export type SqlAssistPreview = { title?: string; icon?: SqlPreviewIcon; current?: () => boolean; dialect?: SqlLanguage } &
   (SqlPreviewContent | { read: (current: () => boolean) => Promise<SqlPreviewContent>; note?: string });
 
-export function createSqlAssistPreview(doc: Document) {
+export function createSqlAssistPreview(doc: Document, dialect?: () => SqlLanguage) {
   const top = doc.createElement("div"), title = doc.createElement("div"), name = doc.createElement("strong"), mode = doc.createElement("span");
   const heading = doc.createElement("div"), panel = doc.createElement("section"), label = doc.createElement("div"), code = doc.createElement("pre");
   const glyph = doc.createElement("span"), labelText = doc.createElement("span");
@@ -47,11 +48,12 @@ export function createSqlAssistPreview(doc: Document) {
       panel.dataset.state = state;
       label.hidden = !content.note;
       labelText.textContent = content.note ?? "";
+      labelText.title = content.note ?? "";
       glyph.hidden = !preview?.icon;
       glyph.className = preview?.icon ? `codicon codicon-${preview.icon}` : "";
       heading.textContent = content.description && state === "ready" ? "操作说明" : "SQL 预览";
       if (content.description || state !== "ready") code.textContent = content.text;
-      else showSqlPreviewCode(code, content.text, content.highlights);
+      else showSqlPreviewCode(code, content.text, content.highlights, preview?.dialect ?? dialect?.());
     }
     if (!preview) { show({ text: "选择一项即可预览" }, "empty"); return; }
     if (preview.current && !preview.current()) { show({ text: "编辑上下文已变化，请重新打开" }, "error"); return; }

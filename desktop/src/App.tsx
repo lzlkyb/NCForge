@@ -22,6 +22,8 @@ import { ReqNameDialogHost } from "./components/svn/ReqNameDialog";
 import { showObjectFinder } from "./lib/dbStore";
 import { isDbObjectKey } from "./lib/keymap";
 import { registerCommands } from "./lib/commandRegistry";
+import { requestSettingsSection } from "./lib/settingsJump";
+import { STORAGE_SECTION, wireStorageMaintenance } from "./lib/storageMaintenance";
 import { setSession } from "./lib/workspaceSession";
 import { initReviewSession } from "./lib/reviewSession";
 import { initRequirements } from "./lib/requirements";
@@ -125,6 +127,7 @@ function AppContent() {
   // （不是全部：一次性入场动画被暂停会冻在第一帧，见 index.css 的说明）。
   // WebView2 不会自己为隐藏窗口节流动画，实测不做这事会白烧约 0.6 个 CPU 核。
   useAppHiddenFlag();
+  useEffect(() => wireStorageMaintenance(), []);
   // 退出守卫：点 X 后先查一遍未提交的事务，再决定退不退（见 lib/quitGuard）。
   // 全局只挂一次，卸载时解绑。
   // 审查事件采集必须早于用户第一次打开「改动」页签：否则 AI 改完文件后
@@ -233,6 +236,10 @@ function AppContent() {
     }));
     return registerCommands([
       ...pageCommands,
+      { id: "go.storage", title: "转到：存储与性能", run: () => {
+        requestSettingsSection(STORAGE_SECTION);
+        navRef.current("settings");
+      } },
       { id: "view.search", title: "全工程搜索", hint: WORKSPACE_SEARCH_KEY, run: openSearch },
       {
         id: "go.patch",

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { formatSql, sqlLanguageOf } from "../../lib/sqlFormat";
+import { SqlFormatSafetyError } from "../../lib/sqlFormatSafety";
 import { formatOptionsOf, SQL_DIALECTS, type SqlFormatPrefs } from "../../lib/sqlFormatPrefs";
 import { useDbSelector } from "../../lib/dbStore";
 import { SQL_FORMAT_SAMPLES } from "../../lib/sqlFormatSamples";
@@ -29,7 +30,7 @@ export function SqlFormatPreview({ prefs }: { prefs: SqlFormatPrefs }) {
       if (!input.trim()) { setResult({ text: "" }); return; }
       formatSql(input, language, formatOptionsOf(prefs)).then(
         text => { if (alive) setResult({ text }); },
-        () => { if (alive) setResult({ error: "排版失败，原文已保留。请检查 SQL 是否完整，或调整方言后重试。" }); },
+        error => { if (alive) setResult({ error: error instanceof SqlFormatSafetyError ? error.message : "排版失败，原文已保留。请检查 SQL 是否完整，或调整方言后重试。" }); },
       );
     }, sampleId === "custom" ? 200 : 0);
     return () => { alive = false; clearTimeout(timer); };

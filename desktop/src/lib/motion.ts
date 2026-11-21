@@ -2,6 +2,7 @@
 export const MOTION = {
   feedback: 100,
   standard: 160,
+  page: 140,
   enter: 180,
   exit: 140,
   ease: "cubic-bezier(0.16, 1, 0.3, 1)",

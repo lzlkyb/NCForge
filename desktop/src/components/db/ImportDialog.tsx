@@ -23,16 +23,16 @@ const PREVIEW = 5;
  * 2026-11-17 拆解：读文件与列映射进 `useImportSource`，分批执行与取消进 `useImportRun`。
  * 这个文件曾用满 8 个 useState+useEffect 的体量门禁额度，再往组件里塞逻辑就过不了门禁。
  */
-export function ImportDialog({ connId, table, cols, onClose, onDone, tabId }: {
+export function ImportDialog({ connId, table, cols, onClose, tabId, reopen = 0 }: {
   connId: string;
   table: string; tabId?: string;
   /** 目标表的列；`null` 时自己读一次（表页是懒加载的，进页面时可能还没读完）。 */
   cols: ColumnInfo[] | null;
   onClose: () => void;
-  /** 导入结束后刷新数据页。 */
-  onDone: () => void;
+  reopen?: number;
 }) {
   const [err, setErr] = useState<string | null>(null);
+  const [minimizedAt, setMinimizedAt] = useState<number | null>(null);
   const source = useImportSource({ connId, table, tabId, cols, setErr });
   const { target, src, map, setMap, skip, setSkip, parsed, picked, dupTarget, readFile, fmt, setFmt, dateInfo } = source;
   /** 生效的日期格式：用户选的优先，其次唯一推断（见 `useImportSource::dateInfo`）。 */
@@ -47,7 +47,7 @@ export function ImportDialog({ connId, table, cols, onClose, onDone, tabId }: {
     skip,
     fmtOf,
     setErr,
-    onDone,
+    reveal: () => setMinimizedAt(null),
   });
   const { busy, out, run, cancel } = runner;
   /** 歧义未确认的日期列数：不选一个就不许导，否则静默错日期。 */
@@ -56,14 +56,13 @@ export function ImportDialog({ connId, table, cols, onClose, onDone, tabId }: {
   // 导入结束（out 有值）后不允许再点：同一份文件再导一遍就是整批重复数据，
   // 而表上往往没有唯一约束兜底。要再导必须先重新选文件（readFile 会清掉 out）。
   const canRun = !!parsed && !!target && picked.length > 0 && !dupTarget && !busy && !out && pendingDate === 0;
-  // 导入中途关窗会让分批循环失去界面：已写入的批次无法撤回，失败也没人看见。
-  // 关不掉比「悄悄写了一半」诚实——按钮、Esc、遮罩三条路统一由 busy 拦下。
+  // 只收起弹窗，继续接收批次回执，重新打开时仍能看到这一轮结果。
   const requestClose = () => {
     if (!busy) onClose();
   };
 
   return (
-    <Modal keepMountedWhenInactive open onClose={requestClose} closeOnOverlay={!busy} className="modal-surface dbx-dlg wide" ariaLabel={`导入数据到 ${table}`}>
+    <Modal keepMountedWhenInactive open={minimizedAt !== reopen} onClose={requestClose} closeOnOverlay={!busy} className="modal-surface dbx-dlg wide" ariaLabel={`导入数据到 ${table}`}>
       <div className="hd">
         <Icon name="upload" size={16} />
         导入数据
@@ -139,7 +138,6 @@ export function ImportDialog({ connId, table, cols, onClose, onDone, tabId }: {
         )}
 
         <ImportProgress
-          busy={busy}
           err={err}
           out={out}
           onExportFailed={
@@ -151,18 +149,21 @@ export function ImportDialog({ connId, table, cols, onClose, onDone, tabId }: {
       </div>
       <div className="ft">
         <span className="dbx-muted">
-          {parsed ? `将写入 ${picked.length} 列` : "先选一个文件"}
-          {!target && " · 读取表结构…"}
-          {pendingDate > 0 && ` · ${pendingDate} 个日期列格式待确认`}
+          {busy ? <>
+            <span role="status">{busy.canceling ? "等待当前批确认" : "正在导入"}</span>
+            {" · 已提交 "}{busy.inserted.toLocaleString()} / {busy.total.toLocaleString()} 行
+          </> : <>
+            {parsed ? `将写入 ${picked.length} 列` : "先选一个文件"}
+            {!target && " · 读取表结构…"}
+            {pendingDate > 0 && ` · ${pendingDate} 个日期列格式待确认`}
+          </>}
         </span>
         <span className="dbx-sp" />
         {busy ? (
-          // 写入中不能关窗（已写的批次撤不回），但必须留一条停下来的路：
-          // 只置标志、当前批写完再停，进度与结果仍然可见。
-          // 点完要立刻有反馈：大表上一批可能跑几十秒，按钮不变用户会以为没点上。
+          <><button type="button" className="dbx-btn ghost" onClick={() => setMinimizedAt(reopen)}>转到后台</button>
           <button type="button" className="dbx-btn ghost" disabled={busy.canceling} onClick={cancel}>
             {busy.canceling ? "取消中…" : "取消导入"}
-          </button>
+          </button></>
         ) : (
           <button type="button" className="dbx-btn ghost" onClick={requestClose}>
             {out ? "关闭" : "取消"}

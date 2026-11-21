@@ -3,7 +3,6 @@ import { useDelayedBusy } from "../../hooks/useDelayedBusy";
 import { useTaskElapsed } from "../../hooks/useTaskElapsed";
 import { WAIT_FEEDBACK } from "../../lib/motion";
 import { Button } from "./button";
-import { Icon } from "./icon";
 
 export interface TaskFeedbackProps {
   active: boolean;
@@ -35,7 +34,7 @@ export function TaskFeedback({ active, label, detail, startedAt, operationKey, p
     data-compact={compact || undefined} data-waiting-long={seconds >= WAIT_FEEDBACK.long / 1000 || undefined}>
     <div className="ui-task-summary">
       <span className="ui-task-message" role="status" aria-atomic="true">
-        <Icon name="spinner" size={14} className="animate-spin" aria-hidden="true" />
+        <span className="op-wait-dot" data-live={visible && !cancelling && !determinate || undefined} aria-hidden="true" />
         <span>{cancelling ? "正在取消，等待任务确认…" : label}</span>
       </span>
       {seconds >= 1 && <span className="ui-task-elapsed" aria-live="off">已用 {seconds} 秒</span>}
@@ -48,7 +47,7 @@ export function TaskFeedback({ active, label, detail, startedAt, operationKey, p
       {detail && <span>{detail}</span>}
       {done !== undefined && <span>{done}{determinate ? ` / ${total}` : ""}{progress?.unit ? ` ${progress.unit}` : ""}</span>}
     </div>}
-    {seconds >= WAIT_FEEDBACK.long / 1000 && <p className="ui-task-wait-note">
+    {!compact && seconds >= WAIT_FEEDBACK.long / 1000 && <p className="ui-task-wait-note">
       {cancelling ? "仍在等待任务确认取消。" : "任务仍在进行，完成后将显示结果。"}
     </p>}
     {!compact && <div className="ui-task-track" role="progressbar" aria-label={label}

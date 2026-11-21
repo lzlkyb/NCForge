@@ -1,10 +1,11 @@
 import { useSyncExternalStore } from "react";
+import type { OperationEstimate } from "./operationEstimate";
 
-export type OperationState = "running" | "cancelling" | "success" | "failed" | "cancelled";
+export type OperationState = "running" | "cancelling" | "success" | "failed" | "cancelled" | "partial";
 export interface Operation {
   id:number; key:string; label:string; scope?:string; page?:string; path?:string; panel?:string; root?:string|null;
   state:OperationState; phase:string; startedAt:number; endedAt?:number; visible:boolean;
-  detail?:string; progress?:{done:number;total?:number};
+  detail?:string; progress?:{done:number;total?:number;unit?:string}; estimate?:OperationEstimate;
 }
 export interface OperationSpec {
   key:string; label:string; scope?:string; page?:string; path?:string; panel?:string; root?:string|null; phase?:string;
@@ -14,7 +15,7 @@ export interface OperationSpec {
 }
 export interface OperationHandle {
   id:number;
-  update:(patch:Partial<Pick<Operation,"phase"|"detail"|"progress">>)=>void;
+  update:(patch:Partial<Pick<Operation,"phase"|"detail"|"progress"|"estimate">>)=>void;
   finish:(state?:Exclude<OperationState,"running"|"cancelling">,detail?:string)=>void;
 }
 let items:Operation[]=[];let nextId=0;
@@ -26,6 +27,14 @@ const patch=(id:number,v:Partial<Operation>)=>{items=items.map(o=>o.id===id?{...
 export const getOperations=()=>items;
 export const subscribeOperations=(f:()=>void)=>{listeners.add(f);return()=>{listeners.delete(f);};};
 export const useOperations=()=>useSyncExternalStore(subscribeOperations,getOperations,getOperations);
+export const operationNeedsReview = (o: Operation) => o.state === "failed" || o.state === "partial";
+function operationStatusLabel() {
+  const running = items.filter(o => o.endedAt === undefined && o.visible).length;
+  const review = items.filter(operationNeedsReview).length;
+  return ["任务", running && `${running} 进行中`, review && `${review} 待查看`].filter(Boolean).join(" · ");
+}
+/** Only actual count changes repaint the closed footer. Progress events stay in their own views. */
+export const useOperationStatusLabel = () => useSyncExternalStore(subscribeOperations, operationStatusLabel, () => "任务");
 /**
  * 只订阅一个任务键：别的后台任务每 125ms 更新进度时，这个组件的快照引用不变，
  * React 直接跳过重渲染。全量 `useOperations()` 只留给确实要列所有任务的面板。
@@ -53,7 +62,7 @@ export function beginOperation(spec:OperationSpec):OperationHandle|null {
   let finished=false;
   return {id,update:v=>{if(!finished) patch(id,v);},finish:(state="success",detail)=>{
     if(finished) return;finished=true;clearTimeout(timer);
-    patch(id,{state,endedAt:Date.now(),detail});
+    patch(id,{state,endedAt:Date.now(),detail,estimate:undefined});
     const complete=items.filter(o=>o.endedAt!==undefined).slice(-30);
     const keep=new Set(complete.map(o=>o.id));
     items=items.filter(o=>o.endedAt===undefined || keep.has(o.id));

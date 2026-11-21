@@ -1,14 +1,14 @@
 import {
   useCallback,
   useContext,
-  useImperativeHandle,
+  useEffect,
   useMemo,
   useState,
-  forwardRef,
   lazy,
   Suspense,
 } from "react";
 import { ContextMenu } from "./ContextMenu";
+import { TreeHeader } from "./TreeHeader";
 import { TreeDeleteConfirm, TreeViewFilters } from "./TreeChrome";
 import { TreeRows, type TreeRowsCtx } from "./TreeRows";
 import { TreeSvnContext } from "./TreeSvnContext";
@@ -29,6 +29,8 @@ import { useNcComponents } from "../../hooks/useNcComponents";
 import { useTreeMenu } from "../../hooks/useTreeMenu";
 import { useProblemMarks, useProblemTreeFilter } from "../../hooks/useProblemMarks";
 import { useTreeLocate } from "../../hooks/useTreeLocate";
+import { registerCommands } from "../../lib/commandRegistry";
+import { useViewActive } from "../../lib/viewActivity";
 import type { NewEntryKind } from "../../lib/workspace";
 import { useTreeNewJava } from "../../hooks/useTreeNewJava";
 import { flattenTree, treeRowId as rowId } from "../../lib/treeNav";
@@ -65,19 +67,12 @@ interface Props {
   onRebuildModule?: (path: string, module: string) => void;
 }
 
-export interface FileTreeHandle {
-  /** 在当前选中项下开始新建（没选中就用根目录）。 */
-  startCreate: (kind: NewEntryKind) => void;
-}
-
 /**
  * 目录和 Java 成员按展开加载，避免首次打开大工程时预读全部源码。
  * 文件夹展开态和缓存放在 workspaceSession，切换侧栏后仍可复用。
  */
-export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
-  { root, projects, activePath, onOpen, onPin, onCreated, onRenamed, onDeleted, openPaths, onCompileModule, onCleanModule, onRebuildModule },
-  ref,
-) {
+export function FileTree({ root, projects, activePath, onOpen, onPin, onCreated, onRenamed, onDeleted, openPaths, onCompileModule, onCleanModule, onRebuildModule }: Props) {
+  const viewActive = useViewActive();
   const [selected, setSelected] = useState<{ path: string; isDir: boolean } | null>(null);
   const [filter, setFilter, filterOpen, closeFilter] = useTreeFilterState(root);
   const problemMarks = useProblemMarks();
@@ -102,18 +97,19 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   // manifest.xml 只用来给模块行打「业务组件」徽章、并决定 NC 结构视图摊不摊 `src`，
   // 不参与树的取数（见 lib/ncManifest / hooks/useNcComponents）
   const { bcNames, isBcModule, hoist } = useNcComponents(roots, ncStructure && !packageView);
-  const { dirs, expanded, marks, mode, setMode, load, expand, toggle, toggleRow, depthOf, reveal, packageRoots, packageIndexes, invalidatePackages } = useTreeLoad(
+  const { dirs, expanded, marks, mode, setMode, load, expand, toggle, toggleRow, depthOf, reveal,
+    packageRoots, packageIndexes, invalidatePackages, canCollapse, collapseBranches } = useTreeLoad(
     root,
     compact,
     roots,
-    hoist, packageView,
+    hoist, packageView, activePath,
   );
   const toggleVisibleRow = (path: string, parent: string | null) => {
     if (packageView && packageIndexes.get(path) === null && !expanded.has(path)) void invalidatePackages([path], false, false);
     if (packageCompact(packageRoots, path, packageIndexes)) toggleRow(path, parent);
     else toggle(path);
   };
-  const { members, toggle: toggleMembers } = useTreeMembers(packageView, dirs);
+  const { members, toggle: toggleMembers, closeAll: closeMembers } = useTreeMembers(packageView, dirs);
   const toggleFileMembers = (path: string) => {
     setSelected({ path, isDir: false });
     toggleMembers(path);
@@ -141,10 +137,13 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     openPaths,
     setSelected,
   });
+  // 关联工程只读，选中关联工程时从当前工作区根新建。
+  const startCreate = (kind: NewEntryKind) =>
+    beginCreate(selected && isEditable(selected.path) ? selected : { path: root, isDir: true }, kind);
 
   // 清筛选的引用要稳定：它进了 locate 的依赖，每帧换新会让自动定位反复触发
   const clearFilter = useCallback(() => setFilter(""), [setFilter]);
-  useTreeLocate(reveal, activePath, revealOnOpen, clearFilter);
+  const pauseLocate = useTreeLocate(reveal, activePath, revealOnOpen, clearFilter);
 
   const { openNewJava, newJavaDialog } = useTreeNewJava({
     root, load, expand, setSelected, onCreated,
@@ -166,19 +165,10 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     setSelected,
   });
 
-  useImperativeHandle(ref, () => ({
-    startCreate: (kind) => {
-      // 选中的是关联工程的目录时，新建会落到当前工作区根：后端只允许写当前工程
-      const target =
-        selected && isEditable(selected.path) ? selected : { path: root, isDir: true };
-      beginCreate(target, kind);
-    },
-  }));
-
   // ---- 键盘与筛选 ----
 
   const textAndProblemFilter = useProblemTreeFilter(filter, mode === "problems", problemMarks);
-  const { filterFn, treeList, toggleMode, changeCount } = useTreeViewFilter(mode, setMode, textAndProblemFilter);
+  const { filterFn, treeList, toggleMode, scrollToTop, changeCount } = useTreeViewFilter(mode, setMode, textAndProblemFilter);
   const flat = useMemo(
     () =>
       flattenTree(dirs, expanded, multi ? rootRows : root, {
@@ -189,6 +179,25 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
       }),
     [dirs, expanded, root, rootRows, multi, filterFn, compact, hoist, packageRoots, packageIndexes, packageView, members],
   );
+  const collapseEnabled = !editing && (canCollapse || members.size > 0);
+  const collapseAll = useCallback(() => {
+    if (!collapseEnabled) return;
+    pauseLocate();
+    collapseBranches();
+    closeMembers();
+    setSelected(selected => {
+      if (!selected) return null;
+      let index = flat.findIndex(row => row.path === selected.path);
+      // 展平顺序中，选中项上方第一个顶层行就是折叠后仍可见的祖先。
+      while (index >= 0 && flat[index].parent !== null) index--;
+      const ancestor = flat[index];
+      return ancestor ? { path: ancestor.path, isDir: ancestor.isDir } : null;
+    });
+    scrollToTop();
+  }, [collapseEnabled, pauseLocate, collapseBranches, closeMembers, flat, scrollToTop]);
+  useEffect(() => registerCommands([{
+    id: "view.collapseTree", title: "全部折叠资源树", run: collapseAll, enabled: () => viewActive && collapseEnabled,
+  }]), [viewActive, collapseEnabled, collapseAll]);
 
   // 焦点留在容器，方向键按视觉树移动。规则与经验见 useTreeKeyboard
   // （编辑态只让 Esc 走、移动后滚到可见、导航可被筛选框复用）。
@@ -226,6 +235,8 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
 
   return (
     <>
+      <TreeHeader root={root} projectCount={projects?.length} canCollapse={collapseEnabled} onCollapseAll={collapseAll}
+        onCreateFile={() => startCreate("file")} onCreateDir={() => startCreate("dir")} />
       <TreeViewFilters mode={mode} onToggle={toggleMode} />
       <TreeQuickFilter root={root} onNavigate={keys.navigate} />
       <TreeActivePath path={activePath}><div
@@ -266,4 +277,4 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
       {newJavaDialog}
     </>
   );
-});
+}

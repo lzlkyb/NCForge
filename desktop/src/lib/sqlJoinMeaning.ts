@@ -1,4 +1,4 @@
-import { analyzeSql, resolveSqlQualifier, type SqlSource } from "./sqlScope";
+import { analyzeSql, resolveSqlQualifier, type SqlAnalysis, type SqlSource } from "./sqlScope";
 import { isSqlName, sqlName, type SqlToken } from "./sqlLex";
 import type { SqlLanguage } from "sql-formatter";
 
@@ -40,7 +40,11 @@ function operand(tokens: SqlToken[]): SqlToken[] {
 
 /** Only proven null-rejecting AND operands get a notice; OR/NOT/functions are not guessed. */
 export function sqlJoinMeanings(sql: string, dialect: SqlLanguage = "plsql"): JoinMeaning[] {
-  const analysis = analyzeSql(sql, dialect), out: JoinMeaning[] = [], tokens = analysis.tokens;
+  return sqlJoinMeaningsOf(sql, analyzeSql(sql, dialect));
+}
+
+export function sqlJoinMeaningsOf(sql: string, analysis: SqlAnalysis): JoinMeaning[] {
+  const out: JoinMeaning[] = [], tokens = analysis.tokens;
   for (const scope of analysis.scopes) {
     if (word(tokens[scope.select]) !== "SELECT") continue;
     const ids = scope.indices, ts = ids.map(i => tokens[i]), where = ts.findIndex(t => word(t) === "WHERE");

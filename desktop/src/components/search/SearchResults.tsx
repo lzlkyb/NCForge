@@ -115,7 +115,7 @@ export function SearchResults({
           </span>
           {view.summary.truncated && (
             <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] text-warning-ink">
-              到上限提前停了，结果可能不全
+              搜索范围未查全
             </span>
           )}
           <span className="flex-1" />
@@ -190,10 +190,8 @@ export function SearchResults({
         {view && noHits && view.summary.truncated && (
           // 超时才是真问题：这时「没有找到」是假话，后面的文件根本没读。
           <Empty
-            title="没搜完就到时间上限了"
-            hint={`扫了 ${view.summary.filesScanned} 个文件、${(view.summary.elapsedMs / 1000).toFixed(1)}s 后停下，后面的${all ? "工程和文件" : "文件"}还没看。${
-              all ? "切到「当前工程」或" : ""
-            }加个文件过滤（如 *.java）能少读很多；或者直接再搜一次——文件进系统缓存后会快得多。`}
+            title="已扫描的文件中没有找到匹配"
+            hint={`搜索范围未查全。已扫描 ${view.summary.filesScanned} 个文件，可${all ? "切到「当前工程」或" : ""}增加文件过滤（如 *.java）后重试。`}
           />
         )}
 

@@ -112,11 +112,11 @@ describe("维护设置入口", () => {
     expect(mocks.resources.ensure).toHaveBeenLastCalledWith(false, ["jdtls"]);
   });
 
-  it("设置页显示百分比与网速，安装期间禁止重复下载", async () => {
+  it("设置页显示百分比，详细速率由用户主动打开，安装期间禁止重复下载", async () => {
     Object.assign(mocks.resources, { phase: "downloading", currentId: "jdtls", requestedIds: ["jdtls"], downloadedBytes: 512, totalBytesCurrent: 1024, bytesPerSec: 256 });
     await mount(<ResourceSettings />);
     expect(container.textContent).toContain("50%");
-    expect(container.textContent).toContain("256 B/s");
+    expect(container.textContent).toContain("查看下载详情");
     Object.assign(mocks.resources, { phase: "installing" });
     await mount(<ResourceSettings />);
     expect(container.textContent).toContain("安装中");

@@ -456,8 +456,9 @@ describe("组件置备任务", () => {
     expect(h.invoke.mock.calls.filter(c => c[0] === "resources_ensure")).toHaveLength(1);
     const task = getOperations().find(o => o.key === "resources.ensure")!;
     expect(task.state).toBe("running");
+    await emit("resource:downloading", { id: "ecj" });
     await emit("resource:progress", { id: "ecj", downloaded: 40, total: null, bytesPerSec: 10 });
-    expect(getOperations().find(o => o.id === task.id)?.progress).toEqual({ done: 40, total: undefined });
+    expect(getOperations().find(o => o.id === task.id)?.progress).toEqual({ done: 40, total: undefined, unit: "字节" });
     await emit("resource:ready", { installed: [{ id: "ecj", version: "1" }], adoptedLegacy: false });
     expect(getOperations().find(o => o.id === task.id)?.state).toBe("success");
   });
@@ -478,7 +479,7 @@ describe("按需下载与可恢复面板", () => {
     await act(async () => { await Promise.all([state().ensure(false, ["ecj", "ecj"]), state().ensure(false, ["ecj"])]); });
     expect(h.invoke.mock.calls.filter(c => c[0] === "resources_ensure")).toEqual([["resources_ensure", { force: false, ids: ["ecj"] }]]);
     expect(state().requestedIds).toEqual(["ecj"]);
-    expect(state().panelOpen).toBe(true);
+    expect(state().panelOpen).toBe(false);
     expect(state().busy).toBe(true);
   });
 
@@ -567,7 +568,7 @@ describe("按需下载与可恢复面板", () => {
     await emit("resource:ready", { installed: [{ id: "ecj", version: "v3" }], adoptedLegacy: false });
     expect(state().lastInstalled).toEqual([{ id: "jdtls", version: "v2" }, { id: "ecj", version: "v3" }]);
     expect(state().batch.map(p => p.id)).toEqual(["jdtls", "ecj"]);
-    expect(state().panelOpen).toBe(true);
+    expect(state().panelOpen).toBe(false);
   });
 
   it("force 重下失败重试仍强制修复原包，不扩展到其他组件", async () => {

@@ -3,6 +3,8 @@
 import type { SqlLanguage } from "sql-formatter";
 import { monaco } from "./monacoSetup";
 import { formatSql } from "./sqlFormat";
+import { scanSql } from "./sqlLex";
+import { cutsSqlToken, mysqlDelimiterRegions } from "./sqlFormatSafety";
 import { pickStatement, splitStatements } from "./sqlSplit";
 import { statementsOf } from "./sqlStmtCache";
 
@@ -55,7 +57,14 @@ export async function fallbackFormatEdits(
   const edits: FormatEdit[] = [];
   let skipped = 0;
   let error: string | null = null;
-  for (const stmt of splitStatements(text)) {
+  const statements = splitStatements(text);
+  // The execution splitter understands Oracle scripts but may cut other dialects inside a
+  // backtick, dollar-quoted body or client-delimited routine. Fall back only at verified boundaries.
+  if (mysqlDelimiterRegions(text, language).length || cutsSqlToken(scanSql(text, language).tokens,
+    statements.flatMap(statement => [statement.start, statement.start + statement.text.length]))) {
+    return { edits, skipped: 0, error: "脚本包含需要保留的语句边界，已保留原文" };
+  }
+  for (const stmt of statements) {
     try {
       const out = await formatSql(stmt.text, language);
       const start = model.getPositionAt(stmt.start);

@@ -9,11 +9,14 @@ import { setPackageView, setRevealOnOpen } from "../../lib/treeViewPrefs";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement, root: Root;
 const createFile = vi.fn(), createDir = vi.fn();
+const collapse = vi.fn();
 beforeEach(() => {
   localStorage.clear(); createFile.mockClear(); createDir.mockClear();
   treeFilterFor("C:/w").set({ text: "", open: false }); setPackageView(false); setRevealOnOpen(false);
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-  act(() => root.render(<TreeHeader root="C:/w" projectCount={2} onCreateFile={createFile} onCreateDir={createDir} />));
+  collapse.mockClear();
+  act(() => root.render(<TreeHeader root="C:/w" projectCount={2} canCollapse onCollapseAll={collapse}
+    onCreateFile={createFile} onCreateDir={createDir} />));
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); document.body.innerHTML = ""; });
 it("名称过滤和文件/包视图可用，全文搜索与切换工程归顶栏", async () => {
@@ -34,4 +37,11 @@ it("新建文件与文件夹保持独立动作", async () => {
     await act(async () => item.click());
   }
   expect(createFile).toHaveBeenCalledTimes(1); expect(createDir).toHaveBeenCalledTimes(1);
+});
+it("全部折叠为自动定位左侧的独立按钮", () => {
+  const button = host.querySelector<HTMLButtonElement>('[aria-label="全部折叠"]')!;
+  expect(button.nextElementSibling?.getAttribute("aria-label")).toBe("自动定位");
+  act(() => button.click());
+  expect(collapse).toHaveBeenCalledOnce();
+  expect(host.querySelector('[aria-label="自动定位"]')?.getAttribute("aria-pressed")).toBe("false");
 });

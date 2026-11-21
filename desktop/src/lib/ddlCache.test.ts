@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { ddlCacheSize, ddlKey, dropDdl, readDdl, writeDdl } from "./ddlCache";
+import { ddlCacheMetrics, ddlCacheSize, ddlKey, dropDdl, readDdl, writeDdl } from "./ddlCache";
 
 describe("ddlCache", () => {
   beforeEach(() => dropDdl());
@@ -33,5 +33,19 @@ describe("ddlCache", () => {
     expect(readDdl(ddlKey("c", "T1"))).toBeUndefined();
     expect(readDdl(ddlKey("c", "T0"))).toBe("0");
     expect(readDdl(ddlKey("c", "EXTRA"))).toBe("x");
+  });
+
+  it("按字节淘汰过大的对象定义，替换和定向清理也会回收预算", () => {
+    const keys = ["first", "second", "third"].map(name => ddlKey("c", name));
+    const big = "a".repeat(2 * 1024 * 1024);
+    writeDdl(keys[0], big);
+    writeDdl(keys[1], big);
+    expect(readDdl(keys[0])).toBeUndefined();
+    writeDdl(keys[1], "short");
+    writeDdl(keys[2], big.repeat(3));
+    expect(readDdl(keys[2])).toBeUndefined();
+    expect(ddlCacheMetrics().bytes).toBe((keys[1].length + 5) * 2);
+    dropDdl("c");
+    expect(ddlCacheMetrics().bytes).toBe(0);
   });
 });

@@ -21,7 +21,13 @@ export function useTreeLocate(
   clearFilter: () => void,
 ) {
   const pending = useRef<AbortController>();
+  const pausedFor = useRef<string | null>(null);
   const [scrollRequest, setScrollRequest] = useState<{ path: string; signal: AbortSignal }>();
+
+  const pauseUntilFileChanges = useCallback(() => {
+    pending.current?.abort();
+    pausedFor.current = activePath;
+  }, [activePath]);
 
   const locate = useCallback(
     (path: string, explicit: boolean) => {
@@ -46,6 +52,9 @@ export function useTreeLocate(
   );
 
   useEffect(() => {
+    // 索引就绪也会更新 reveal 的引用。收起后，只有换文件或重新打开自动定位才恢复自动展开。
+    if (pausedFor.current !== activePath || !enabled) pausedFor.current = null;
+    if (pausedFor.current === activePath) return;
     if (!activePath || !enabled) return;
     return locate(activePath, false);
   }, [activePath, enabled, locate]);
@@ -71,4 +80,6 @@ export function useTreeLocate(
       return clear;
     }
   }, [scrollRequest]);
+
+  return pauseUntilFileChanges;
 }

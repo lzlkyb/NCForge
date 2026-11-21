@@ -57,7 +57,7 @@ export async function runWorkspaceSearch(root: string | null): Promise<void> {
         schedule();
       }, source, current);
       if (!current()) return;
-      setSearchForm({ outcome, outcomeOptions: outcome.cancelled || outcome.truncated ? null : options,
+      setSearchForm({ outcome, outcomeOptions: outcome.cancelled || outcome.truncated || options.text.includes("\n") ? null : options,
         outcomeQuery: outcome.cancelled ? null : form.query.trim() });
     }
     pushHistory(form.query);

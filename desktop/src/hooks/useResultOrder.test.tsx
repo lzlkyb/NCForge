@@ -62,3 +62,16 @@ it("clearing or replacing the data discards the old order and worker",()=>{
   expect(latest.pending).toBe(true);
   expect(latest.order).toEqual([]);
 });
+it("only retains one idle duplicate across result panes", () => {
+  const second = createRoot(document.createElement("div"));
+  try {
+    act(() => root.render(<Test filter="1" />));
+    act(() => second.render(<Test filter="2" />));
+    act(() => vi.advanceTimersByTime(120));
+    expect(workers).toHaveLength(2);
+    act(() => workers[0].onmessage?.({ data: { order: [1] } } as MessageEvent));
+    act(() => workers[1].onmessage?.({ data: { order: [2] } } as MessageEvent));
+    expect(workers[0].terminate).toHaveBeenCalledOnce();
+    expect(workers[1].terminate).not.toHaveBeenCalled();
+  } finally { act(() => second.unmount()); }
+});

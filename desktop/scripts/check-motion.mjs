@@ -358,7 +358,7 @@ test("system and app reduced motion keep both common and native buttons still", 
 
 test("a hidden window pauses task visuals and resumes with actual elapsed time", async () => {
   await page.clock.install();
-  await page.getByTestId("motion-scenario").selectOption("long");
+  await page.getByTestId("motion-scenario").selectOption("slow");
   await page.getByTestId("task-start").click();
   await page.clock.runFor(300);
   await page.evaluate(() => {
@@ -367,7 +367,9 @@ test("a hidden window pauses task visuals and resumes with actual elapsed time",
   });
   await page.clock.runFor(5100);
   const result = page.getByTestId("task-result");
-  assert.equal(await result.locator(".animate-spin").evaluate(node => getComputedStyle(node).animationPlayState), "paused");
+  const signal = result.locator(".op-wait-dot");
+  assert.equal(await signal.evaluate(node => getComputedStyle(node).animationName), "op-wait-breathe");
+  assert.equal(await signal.evaluate(node => getComputedStyle(node).animationPlayState), "paused");
   await page.evaluate(() => {
     Object.defineProperty(document, "hidden", { configurable: true, value: false });
     document.dispatchEvent(new Event("visibilitychange"));

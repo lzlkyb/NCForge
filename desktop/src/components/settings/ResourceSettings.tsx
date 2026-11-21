@@ -56,8 +56,10 @@ export function ResourceSettings() {
     {readError && <InlineNotice variant="error"><div className="flex flex-col items-start gap-2"><span>{readError}</span>
       <Button variant="outline" size="sm" isLoading={reading} loadingText="读取中…" disabled={reading} onClick={() => void readStatus()}>重新读取</Button>
     </div></InlineNotice>}
-    <ResourceDownloadReadout {...resources} title={packs.find(p => p.id === currentId)?.title} />
-    {busy && <Button variant="link" size="sm" onClick={showDownloads}>查看下载详情</Button>}
+    <div className="resource-download-inline">
+      <ResourceDownloadReadout {...resources} compact title={packs.find(p => p.id === currentId)?.title} />
+      {busy && <Button variant="link" size="sm" onClick={showDownloads}>查看下载详情</Button>}
+    </div>
     {!busy && missingIds.length > 0 && <SettingsRow id="resource-download-missing" label="下载缺失组件" keywords={["按需下载", "批量下载"]}
       sub={`还有 ${missingIds.length} 个组件未下载，也可在上方分别下载。`} last
       control={<Button size="sm" onClick={() => void ensure(false, missingIds)}>下载缺失组件（{missingIds.length}）</Button>} />}

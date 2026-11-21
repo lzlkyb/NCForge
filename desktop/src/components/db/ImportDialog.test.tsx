@@ -19,6 +19,7 @@ vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke }));
 
 import { ImportDialog } from "./ImportDialog";
 import type { ColumnInfo } from "../../lib/dbApi";
+import { getOperations, revealOperation } from "../../lib/operations";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -53,7 +54,7 @@ const btn = (text: string) =>
 async function mountWith(name: string, content: string, cols: ColumnInfo[] = COLS) {
   await act(async () => {
     root.render(
-      <ImportDialog connId="c1" table="bd_material" cols={cols} onClose={() => {}} onDone={() => {}} />,
+      <ImportDialog connId="c1" table="bd_material" cols={cols} onClose={() => {}} />,
     );
   });
   await flush();
@@ -98,7 +99,7 @@ describe("ImportDialog 取消语义", () => {
       btn("开始导入")?.click();
     });
     await flush();
-    expect(document.body.textContent ?? "").toContain("正在导入数据");
+    expect(document.body.textContent ?? "").toContain("已提交 0 / 450 行");
     const importCalls = mocks.invoke.mock.calls.filter((c) => c[0] === "db_import_rows").length;
     expect(importCalls).toBe(1); // 第一批在飞
 
@@ -109,7 +110,7 @@ describe("ImportDialog 取消语义", () => {
     // ① 立刻有反馈：按钮变「取消中…」且禁用，状态明确等待后台确认。
     expect(btn("取消中…")).toBeTruthy();
     expect((btn("取消中…") as HTMLButtonElement).disabled).toBe(true);
-    expect(document.body.textContent ?? "").toContain("等待任务确认");
+    expect(document.body.textContent ?? "").toContain("等待当前批确认");
 
     // ② 第一批 resolve 后循环就该停：cancelRef 在批间被检查
     await act(async () => {
@@ -119,6 +120,20 @@ describe("ImportDialog 取消语义", () => {
     expect(document.body.textContent ?? "").toContain("已取消");
     expect(document.body.textContent ?? "").toContain("200");
     expect(mocks.invoke.mock.calls.filter((c) => c[0] === "db_import_rows").length).toBe(1);
+  });
+
+  it("转到后台后保留本轮写入，返回任务可看到已经提交的结果", async () => {
+    const batch = deferred<ReturnType<typeof ok>>();
+    mocks.invoke.mockImplementationOnce(() => batch.promise);
+    await mountWith("small.csv", "ID,NAME\n1,甲");
+    await act(async () => btn("开始导入")?.click());
+    const task = getOperations().find(o => o.key === "db.import:c1:bd_material" && o.endedAt === undefined)!;
+    await act(async () => btn("转到后台")?.click());
+    expect(document.querySelector('[role="dialog"]')?.closest('[aria-hidden="true"]') || !document.querySelector('[role="dialog"]')).toBeTruthy();
+    await act(async () => batch.resolve(ok(1)));
+    expect(getOperations().find(o => o.id === task.id)?.state).toBe("success");
+    await act(async () => revealOperation(task.id));
+    expect(document.body.textContent).toContain("写进 1 行");
   });
 
   it("中途抛错也报出已写入的行数", async () => {

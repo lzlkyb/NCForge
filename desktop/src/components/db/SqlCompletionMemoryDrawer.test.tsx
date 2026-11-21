@@ -51,3 +51,16 @@ it("显示实际使用时间，撤销清除时保留清除后新增的记录", a
   act(() => vi.mocked(toast.info).mock.lastCall![1]!.action!.onClick());
   expect(Object.keys(u.usageSnapshot(scope))).toEqual(expect.arrayContaining([oldKey, newKey]));
 });
+
+it("补全记忆按字段对应关系显示和忘记同表的不同关联", async () => {
+  const { SqlCompletionMemoryDrawer } = await import("./SqlCompletionMemoryDrawer"), u = await import("../../lib/sqlUsage");
+  const { connectionKey } = await import("../../lib/dbResultContext");
+  const scope = u.sqlUsageScope(connectionKey({ id: "c", url: "test", user: "NC" } as never), "A");
+  const origin = u.sqlJoinUsageKey("orders", "countries", ["origin_id"], ["id"]);
+  const tax = u.sqlJoinUsageKey("orders", "countries", ["tax_id"], ["id"]);
+  u.recordSqlUsage(scope, origin, "accept"); u.recordSqlUsage(scope, tax, "accept");
+  act(() => root.render(<SqlCompletionMemoryDrawer connId="c" onClose={() => {}} />));
+  expect(host.textContent).toContain("orders → countries · origin_id = id");
+  act(() => button("忘记 orders → countries · tax_id = id").click());
+  expect(Object.keys(u.usageSnapshot(scope))).toEqual([origin]);
+});

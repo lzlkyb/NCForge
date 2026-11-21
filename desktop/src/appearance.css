@@ -1,4 +1,4 @@
-/* Shared component materials; tokens and the continuous backdrop live in glass-material.css. */
+/* Component surfaces inherit the workbench material. */
 
 /* 玻璃材质专属文字色（component 层，2026-11-16 从 9 处裸色值上收）。
    为什么不能直接用语义色：这些徽章的底是彩色半透明渐变（青/粉/靛），
@@ -28,23 +28,8 @@ html.dark[data-ui-style="glass"] {
 .app-shell .app-side[data-collapsed] .app-side-head { padding-inline: 0; }
 .app-shell .app-side-foot { padding-bottom: 12px; }
 
-/* ── 工作台（文件树 / 编辑器 / 标签 / 底部面板）─────────────────────────────
-   workbench-layout.css 里这些面都是实色；只做壳的话，文件页主体永远看不到玻璃。
-   按现有分级处理：树面板 = panel，代码/文档/底部面板 = reading，标签条与主区
-   透出壳的柔光底。classic 不受影响（全部挂在 data-ui-style 下）。 */
-html[data-ui-style="glass"] .app-shell .wb-root { background: transparent; }
-html[data-ui-style="glass"] .app-shell .wb-tree { background: var(--glass-panel); }
-/* 抽屉覆盖编辑器时用不透明表面，避免代码与目录文字重叠。 */
-@media (max-width:650px) {
-  html[data-ui-style="glass"] .app-shell .wb-tree:has(.wb-code-tree-title) { background:hsl(var(--card)); }
-}
 html[data-ui-style="glass"] .app-shell :is(.wb-code-surface, .wb-document-surface) { background: var(--glass-reading); }
-html[data-ui-style="glass"] .app-shell :is(.wb-tabbar, .wb-tabs) { background: transparent; }
-html[data-ui-style="glass"] .app-shell .wb-tabbar { border-bottom-color: var(--glass-chrome-edge); }
 html[data-ui-style="glass"] .app-shell .wb-tab[data-active] { background: var(--glass-reading); }
-html[data-ui-style="glass"] .app-shell :is(.wb-resize-x, .wb-resize-y) { border-color: var(--glass-chrome-edge); }
-html[data-ui-style="glass"] .app-shell .wb-toolbar { border-bottom-color: var(--glass-chrome-edge); }
-html[data-ui-style="glass"] .app-shell .wb-bottom { background: transparent; }
 html[data-ui-style="glass"] .app-shell .wb-panel { background: var(--glass-reading); border-top-color: var(--glass-chrome-edge); }
 
 /* 全工程搜索停靠在玻璃侧栏里：整块与工具条不能是实色，输入框走 L2 inset。 */
@@ -156,14 +141,14 @@ html[data-ui-style="glass"] .sw:not(.on) {
 }
 
 /* Portal content inherits html variables too, so popups don't fall back to classic. */
-html[data-ui-style="glass"] :is(.modal-surface, .ui-surface, [role="listbox"], [role="dialog"].bg-card, .toast) {
+html[data-ui-style="glass"] :is(.modal-surface, .ui-surface, [role="dialog"].bg-card, .toast) {
   background: var(--glass-floating);
   border-color: var(--glass-edge);
   box-shadow: var(--glass-depth), var(--sh-pop);
 }
 @supports (backdrop-filter: blur(1px)) {
   /* Dialog bodies may contain fixed popovers: avoid changing their containing block. */
-  html[data-ui-style="glass"] :is(.ui-surface[role="menu"], [role="listbox"], [role="dialog"].bg-card, .toast) {
+  html[data-ui-style="glass"] :is(.ui-surface[role="menu"], .ui-surface[role="listbox"], [role="dialog"].bg-card, .toast) {
     backdrop-filter: blur(14px) saturate(1.08);
   }
 }
@@ -326,7 +311,7 @@ html[data-ui-style="glass"] [data-cc-panel] [class*="text-warning-ink"] {
     /* 工作台树面板也用 panel，不补会在该模式下仍半透。 */
     --glass-panel: hsl(var(--card));
   }
-  html[data-ui-style="glass"] :is(.app-shell, .app-side, .app-topbar, .ui-card, .bento-card, .metric-card, .terminal-tabs-header, .terminal-pane-head, .modal-surface, .ui-surface, [role="listbox"], [role="dialog"].bg-card, .toast),
+  html[data-ui-style="glass"] :is(.app-shell, .app-side, .app-topbar, .ui-card, .bento-card, .metric-card, .terminal-tabs-header, .terminal-pane-head, .modal-surface, .ui-surface, [role="dialog"].bg-card, .toast),
   html[data-ui-style="glass"] .terminal-workspace .terminal-pane-frame[data-focused] > .terminal-pane-head {
     background: hsl(var(--card));
     backdrop-filter: none;
@@ -359,7 +344,7 @@ html[data-ui-style="glass"] [data-cc-panel] [class*="text-warning-ink"] {
     box-shadow: none;
   }
   html[data-ui-style="glass"] .sw:not(.on) { background: ButtonFace; box-shadow: none; outline: 1px solid ButtonText; }
-  html[data-ui-style="glass"] :is(.app-shell, .app-side, .app-topbar, .ui-card, .bento-card, .metric-card, .status-card, .terminal-tabs-header, .terminal-pane-head, .modal-surface, .ui-surface, [role="listbox"], [role="dialog"].bg-card, .toast),
+  html[data-ui-style="glass"] :is(.app-shell, .app-side, .app-topbar, .ui-card, .bento-card, .metric-card, .status-card, .terminal-tabs-header, .terminal-pane-head, .modal-surface, .ui-surface, [role="dialog"].bg-card, .toast),
   html[data-ui-style="glass"] .terminal-workspace .terminal-pane-frame[data-focused] > .terminal-pane-head {
     background: Canvas;
     border-color: CanvasText;

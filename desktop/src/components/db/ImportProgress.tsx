@@ -1,5 +1,4 @@
-import type { ImportBusy, ImportResult } from "../../hooks/useImportRun";
-import { TaskFeedback } from "../ui/TaskFeedback";
+import type { ImportResult } from "../../hooks/useImportRun";
 
 /**
  * 导入对话框下方的「进度 / 错误 / 结果」三块。
@@ -10,8 +9,7 @@ import { TaskFeedback } from "../ui/TaskFeedback";
  * 列表只显示前 20 条，但导出给的是**后端回传的全部明细**——所以按钮上带条数，
  * 且截断时要明说，不能让用户以为坏行就这些。
  */
-export function ImportProgress({ busy, err, out, onExportFailed }: {
-  busy: ImportBusy | null;
+export function ImportProgress({ err, out, onExportFailed }: {
   err: string | null;
   out: ImportResult | null;
   /** 有失败明细时提供；不传就不显示导出按钮（纯展示场景）。 */
@@ -20,9 +18,6 @@ export function ImportProgress({ busy, err, out, onExportFailed }: {
   const fails = out?.failed ?? [];
   return (
     <>
-      <TaskFeedback active={!!busy} label="正在导入数据…" cancelling={busy?.canceling}
-        progress={busy ? { done: busy.done, total: busy.total, unit: "行" } : undefined}
-        detail={busy?.canceling ? "当前批确认完成后停止，已写入的数据会保留。" : "可使用下方「取消导入」，等待当前批处理确认。"} />
       {err && <div className="dbx-err" role="alert" style={{ marginTop: 8 }}>{err}</div>}
       {out && (
         <div className="dbx-hint" role="status" style={{ marginTop: 8 }}>
@@ -33,6 +28,7 @@ export function ImportProgress({ busy, err, out, onExportFailed }: {
               <b style={{ color: "hsl(var(--destructive-ink))" }}> · 失败 {fails.length} 行</b>
             )}
           </div>
+          {out.inserted > 0 && <span className="dbx-muted">返回数据页后可重新查询查看本次写入。</span>}
           {fails.length > 0 && (
             <div className="dbx-mono" style={{ maxHeight: 120, overflow: "auto", marginTop: 4 }}>
               {fails.slice(0, 20).map((f) => (

@@ -19,8 +19,14 @@ const material=await readFile(new URL('material-workbench-acceptance.mjs',import
 const memory=material.match(/\.replace\('mockIPC\(\(cmd,args\)=>\{', \x60([\s\S]*?)\x60\)/)?.[1];
 assert.ok(entry && raw && memory);
 const bootstrap=raw.replace('/node_modules/@tauri-apps/api/mocks.js','/mocks.js')
-  .replace("mockWindows('main');",`mockWindows('main');window.switchTransitions=[];window.switchViolations=[];
+  .replace("mockWindows('main');",`mockWindows('main');window.switchTransitions=[];window.switchViolations=[];window.pageMotion=[];window.tabMotion=[];
     document.addEventListener('securitypolicyviolation',e=>window.switchViolations.push(e.effectiveDirective));
+    const animate=Element.prototype.animate;
+    Element.prototype.animate=function(frames, options){
+      if(frames?.[0]?.opacity===.86)window.pageMotion.push({page:document.querySelector('.wb-root')?.dataset.tool,target:this.className,duration:options.duration,onlyOpacity:frames.every(frame=>Object.keys(frame).every(key=>key==='opacity'))});
+      if(this.classList.contains('ui-selection-tab'))window.tabMotion.push({page:document.querySelector('.wb-root')?.dataset.tool,duration:options.duration});
+      return animate.call(this,frames,options);
+    };
     const native=document.startViewTransition?.bind(document);
     if(native)document.startViewTransition=update=>{const item={started:performance.now()};window.switchTransitions.push(item);const t=native(update);t.ready.then(()=>item.ready=performance.now(),()=>{});t.finished.then(()=>item.finished=performance.now(),()=>{});return t;};
     localStorage.setItem('theme','light');localStorage.setItem('ncforge.ui-style','classic');localStorage.setItem('ncforge.ui-density','standard');localStorage.setItem('ncforge-rail-expanded','0');`)
@@ -36,11 +42,12 @@ assert.ok(!bootstrap.includes('/src/'));
 const mocks=await readFile(new URL('../node_modules/@tauri-apps/api/mocks.js',import.meta.url));
 const config=JSON.parse(await readFile(new URL('../src-tauri/tauri.conf.json',import.meta.url),'utf8'));
 const hashes=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>"'sha256-"+createHash('sha256').update(m[1]).digest('base64')+"'");
-const csp=config.app.security.csp.replace(/script-src ([^;]+)/,(_,v)=>'script-src '+v+' '+hashes.join(' '));
+const nonce='workbench-page-switch';
+const csp=config.app.security.csp.replace(/script-src ([^;]+)/,(_,v)=>'script-src '+v+' '+hashes.join(' ')).replace(/style-src ([^;]+)/,(_,v)=>`style-src ${v} 'nonce-${nonce}'`);
 const server=createServer(async(req,res)=>{
   try {
     const path=new URL(req.url,'http://localhost').pathname;
-    if(path==='/') {res.setHeader('Content-Type','text/html');res.setHeader('Content-Security-Policy',csp);res.end(html.replace(/<script type="module"[^>]*src="[^"]+"[^>]*><\/script>/,'<script type="module" src="/fixture.js"></script>'));}
+    if(path==='/') {res.setHeader('Content-Type','text/html');res.setHeader('Content-Security-Policy',csp);res.end(html.replace(/<style>/g,`<style nonce="${nonce}">`).replace(/<script type="module"[^>]*src="[^"]+"[^>]*><\/script>/,'<script type="module" src="/fixture.js"></script>'));}
     else if(path==='/fixture.js'||path==='/mocks.js'){res.setHeader('Content-Type','text/javascript');res.end(path==='/fixture.js'?bootstrap:mocks);}
     else if(/^\/(assets|fonts)\/[\w/.-]+$/.test(path)||path==='/icon.png'){
       res.setHeader('Content-Type',path.endsWith('.js')?'text/javascript':path.endsWith('.css')?'text/css':'application/octet-stream');
@@ -54,6 +61,7 @@ let browser,page;const errors=[],cold=[],warm=[],retention=[];
 try{
   browser=await chromium.launch({headless:true,channel:'msedge'});
   page=await browser.newPage({viewport:{width:1440,height:900},reducedMotion:'no-preference'});
+  await page.addInitScript(() => window.localStorage.setItem('ncforge.tree.packageView', '0'));
   page.setDefaultTimeout(20000);page.on('pageerror',e=>errors.push(e.message));
   // A delayed first chunk makes each lazy fallback inspectable without slowing normal warm navigation.
   await page.route(/\/(FilesTab|DbTab|SvnTab|MetaTab|LogTab|SettingsTab)-[^/]+\.js$/,async route=>{await new Promise(resolve=>setTimeout(resolve,2500));await route.continue();});
@@ -80,7 +88,9 @@ try{
   for(const [key,label,selector] of definitions.slice(1)){
     await page.locator('.app-side').getByRole('button',{name:new RegExp('^'+label)}).click();
     await page.locator('.wb-root[data-tool="'+key+'"]').waitFor();await snapshot(key);
+    if(phase==='after')assert.equal(await page.evaluate(key=>window.pageMotion.filter(event=>event.page===key).length,key),0,`${key} cold skeleton stays visible until its real content arrives`);
     await page.locator(selector).waitFor();await actual(key);
+    if(phase==='after')await page.waitForFunction(key=>window.pageMotion.some(event=>event.page===key),key);
   }
   await page.unroute(/\/(FilesTab|DbTab|SvnTab|MetaTab|LogTab|SettingsTab)-[^/]+\.js$/);
   const session=tracing?await page.context().newCDPSession(page):null,events=[];
@@ -98,6 +108,12 @@ try{
   }
   assert.deepEqual(errors,[]);assert.deepEqual(await page.evaluate(()=>window.switchViolations),[]);
   const transitions=await page.evaluate(()=>window.switchTransitions);
+  const pageMotion=await page.evaluate(()=>window.pageMotion);
+  if(phase==='after') {
+    assert.equal(transitions.length,0,'page navigation does not take full-window snapshots');
+    for(const [key] of definitions)assert.ok(pageMotion.some(event=>event.page===key),`${key} plays an actual region transition`);
+    assert.ok(pageMotion.every(event=>event.onlyOpacity&&event.duration===140&&!/monaco-editor|dbx-grid|wb-root|wb-status/.test(event.target)), 'transitions leave the app shell and editing canvases stable');
+  }
   if(session){const done=new Promise(resolve=>session.once('Tracing.tracingComplete',resolve));await session.send('Tracing.end');await done;await writeFile(new URL('trace.json',artifacts),JSON.stringify({traceEvents:events}));}
   if(phase==='after'&&!tracing){
     const navigate=label=>page.locator('.app-side').getByRole('button',{name:new RegExp('^'+label)}).click();
@@ -112,15 +128,39 @@ try{
     const end=await tree.evaluate(el=>{const row=document.getElementById(el.getAttribute('aria-activedescendant'));return {selected:row?.getAttribute('aria-selected'),visible:!!row&&row.getBoundingClientRect().top>=el.getBoundingClientRect().top&&row.getBoundingClientRect().bottom<=el.getBoundingClientRect().bottom,top:el.scrollTop};});
     assert.equal(end.selected,'true');assert.ok(end.visible,'keyboard End reveals an offscreen row');
     retention.push({treeBefore,treeAfter,end});
+    await page.keyboard.press('Enter');
+    const fileTabs=page.locator('.wb-code-surface .wb-tabs [role="tab"]');
+    await fileTabs.nth(1).waitFor();
+    await page.evaluate(()=>{window.tabMotion.length=0;});
+    await fileTabs.first().click();
+    await page.waitForFunction(()=>window.tabMotion.some(event=>event.page==='files'&&event.duration===100));
     await navigate('数据库');const sql=page.getByRole('textbox',{name:'SQL 查询编辑器',exact:true});
     await sql.focus();await page.keyboard.press('Control+A');await page.keyboard.type('select 42 as preserved_draft');
+    await page.getByRole('button',{name:'新建 SQL 控制台',exact:true}).click();
+    const sqlTabs=page.locator('.dbx-doctabs [role="tab"]');
+    await sqlTabs.nth(1).waitFor();
+    await page.evaluate(()=>{window.tabMotion.length=0;});
+    await sqlTabs.first().click();
+    await page.waitForFunction(()=>window.tabMotion.some(event=>event.page==='db'&&event.duration===100));
+    assert.equal(await sql.inputValue(),'select 42 as preserved_draft');
     await navigate('设置');await navigate('数据库');assert.equal(await sql.inputValue(),'select 42 as preserved_draft');
     const quick=[];for(const label of ['元数据','日志排查','代码','设置'])quick.push(await page.locator('.app-side').getByRole('button',{name:new RegExp('^'+label)}).elementHandle());
-    await page.evaluate(buttons=>buttons.forEach(button=>button.click()),quick);
+    const frames=await page.evaluate(async buttons=>{
+      const samples=[];
+      for(const button of buttons){
+        button.click();await new Promise(requestAnimationFrame);
+        const active=[...document.querySelectorAll('.wb-surface-stack > [role="tabpanel"]:not([hidden])')];
+        samples.push(active.length===1&&active[0].getBoundingClientRect().height>0&&getComputedStyle(active[0]).opacity==='1');
+      }
+      return samples;
+    },quick);
+    assert.ok(frames.every(Boolean),'each rapid switch retains one fully visible reading surface');
     await page.locator('.wb-root[data-tool="settings"]').waitFor();
-    await page.emulateMedia({reducedMotion:'reduce'});await navigate('元数据');
-    assert.equal(await page.locator('.wb-main-with-inspector').evaluate(el=>el.getAnimations().length),0);
-    retention.push({sqlDraft:true,latestClick:'settings',reducedMotion:true});
+    await page.emulateMedia({reducedMotion:'reduce'});
+    const beforeReduced = await page.evaluate(()=>window.pageMotion.length);
+    await navigate('元数据'); await page.locator('.meta-workbench').waitFor();
+    assert.equal(await page.evaluate(()=>window.pageMotion.length),beforeReduced);
+    retention.push({sqlDraft:true,fileTabMotion:true,sqlTabMotion:true,latestClick:'settings',reducedMotion:true});
     const narrow=await browser.newPage({viewport:{width:1024,height:768},reducedMotion:'reduce'});
     try{
       await narrow.route(/\/(MetaTab|LogTab)-[^/]+\.js$/,async route=>{await new Promise(resolve=>setTimeout(resolve,2500));await route.continue();});
@@ -137,7 +177,7 @@ try{
       retention.push({narrowMetadata:true,narrowLogs:true});
     }finally{await narrow.close();}
   }
-  await writeFile(new URL((tracing?'trace-sample':phase)+'.json',artifacts),JSON.stringify({phase,entry,cold,warm,transitions,retention,errors},null,2)+'\n');
+  await writeFile(new URL((tracing?'trace-sample':phase)+'.json',artifacts),JSON.stringify({phase,entry,cold,warm,transitions,pageMotion,retention,errors},null,2)+'\n');
   console.log(JSON.stringify({phase,cold,warm,transitions:transitions.length,errors}));
 }catch(error){if(page)console.log(JSON.stringify({errors,body:(await page.locator('body').innerText()).slice(0,1400)}));throw error;}
 finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}

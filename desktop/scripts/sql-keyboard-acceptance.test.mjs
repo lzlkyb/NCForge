@@ -682,6 +682,42 @@ test("Saved SQL templates restore parameter types and explicit result column lay
   } finally { await browser.close(); }
 });
 
+test("SQL field completion prioritizes fields from a successful manual query", async () => {
+  const browser = await chromium.launch({headless:true,channel:"msedge"});
+  const page = await browser.newPage({viewport:{width:1180,height:800}});
+  try {
+    await openEditor(page);
+    const edit = (sql, before = sql) => page.evaluate(({sql, before}) => {
+      const editor = window.billMonaco.editor.getEditors()[0], model = editor.getModel();
+      editor.setValue(sql);
+      editor.setPosition(model.getPositionAt(before.length));
+      editor.focus();
+    }, {sql, before});
+    const run = "SELECT d.item_field_252 FROM po_order_b d WHERE d.nnum > 0;";
+    await edit(run);
+    await page.getByRole("button", {name:"执行当前语句",exact:true}).click();
+    await page.waitForFunction(() => Object.values(JSON.parse(window.localStorage.getItem("ncforge-sql-usage") ?? "{}").scopes ?? {}).some(
+      entries => entries[JSON.stringify(["po_order_b", "item_field_252", "select"])]?.execute === 1));
+    const suggest = page.locator(".dbx-sql-overflow .suggest-widget.visible");
+    const focused = suggest.locator(".monaco-list-row.focused");
+    for (const [prefix, expected] of [["item_field_", /^item_field_252\b/], ["item_field_1", /^item_field_1\b/]]) {
+      const before = `SELECT d.${prefix}`;
+      await edit(`${before} FROM po_order_b d;`, before);
+      await page.keyboard.press("Control+Space");
+      await focused.waitFor();
+      assert.match(await focused.innerText(), expected);
+      await page.keyboard.press("Escape");
+    }
+  } catch (error) {
+    console.log("SQL learning", await page.evaluate(commands => ({
+      calls: window.dbCalls?.filter(call => commands.includes(call.cmd) || call.cmd === "db_slot_acquire").map(call => call.cmd),
+      storage: window.localStorage.getItem("ncforge-sql-usage"),
+      result: window.document.querySelector(".dbx-output")?.textContent,
+    }), execCommands));
+    throw error;
+  } finally { await browser.close(); }
+});
+
 test("SQL batch JOIN previews, appends, continues from a joined source and undoes in one step", async () => {
   await mkdir(artifacts, {recursive:true});
   const browser = await chromium.launch({headless:true,channel:"msedge"});
@@ -698,7 +734,14 @@ test("SQL batch JOIN previews, appends, continues from a joined source and undoe
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {steps:2});
     await locator.click();
   }
-  const original = "SELECT o.* FROM join_order o WHERE o.dr = 0;\nSELECT 1 FROM dual;";
+  const second = "SELECT * FROM join_order;";
+  const original = `SELECT o.* FROM join_order o WHERE o.dr = 0;\nSELECT 1 FROM dual;\n${second}`;
+  const focusTable = last => page.evaluate(last => {
+    const editor = window.billMonaco.editor.getEditors()[0], model = editor.getModel(), sql = model.getValue();
+    const offset = last ? sql.lastIndexOf("join_order") : sql.indexOf("join_order");
+    editor.setPosition(model.getPositionAt(offset + 2));
+    editor.focus();
+  }, last);
   try {
     await openEditor(page);
     await page.evaluate(sql => {
@@ -707,6 +750,7 @@ test("SQL batch JOIN previews, appends, continues from a joined source and undoe
       editor.setPosition(editor.getModel().getPositionAt(sql.indexOf("join_order") + 2));
       editor.focus();
     }, original);
+    await page.evaluate(() => new Promise(resolve => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve))));
     await page.keyboard.press("Alt+Enter");
     const origin = menu.getByRole("checkbox", {name:/corigcountryid/});
     const tax = menu.getByRole("checkbox", {name:/ctaxcountryid/});
@@ -726,15 +770,28 @@ test("SQL batch JOIN previews, appends, continues from a joined source and undoe
     await more.waitFor();
     const first = await read();
     assert.ok(first.includes(planned) && first.indexOf(planned) < first.indexOf("WHERE"));
-    assert.ok(first.endsWith("SELECT 1 FROM dual;"));
+    assert.ok(first.endsWith(`SELECT 1 FROM dual;\n${second}`));
     await page.keyboard.press("Alt+Enter");
     await click(menu.getByRole("button", {name:"已添加（2）"}));
     await menu.locator(".option-disabled").filter({hasText:/ctaxcountryid/}).waitFor();
     assert.equal(await tax.count(), 0);
     await page.keyboard.press("Escape");
     assert.equal(await read(), first);
+    await focusTable(true);
+    await page.keyboard.press("Alt+Enter");
+    const frequent = menu.getByText("常用关联", {exact:true});
+    await frequent.waitFor();
+    assert.equal(await origin.count(), 1);
+    assert.equal(await tax.count(), 1);
+    assert.match(await preview.textContent(), /(?:corig|ctax)countryid/);
+    await page.keyboard.press("Escape");
     await page.keyboard.press("Control+z");
     assert.equal(await read(), original);
+    await focusTable(true);
+    await page.keyboard.press("Alt+Enter");
+    await tax.waitFor();
+    assert.equal(await frequent.count(), 0);
+    await page.keyboard.press("Escape");
 
     await page.setViewportSize({width:560,height:650});
     const close = page.getByRole("button", {name:"关闭资源侧栏"});
@@ -761,6 +818,10 @@ test("SQL batch JOIN previews, appends, continues from a joined source and undoe
     await page.screenshot({path:fileURLToPath(new URL("batch-join-continuation.png", artifacts))});
     assert.deepEqual(errors, []);
   } catch (error) {
+    console.log("JOIN menu", await menu.allInnerTexts(), "layout", await menu.evaluateAll(nodes => nodes.map(node => {
+      const list = node.querySelector(".monaco-list");
+      return { height: list?.clientHeight, rows: [...(list?.querySelectorAll(".monaco-list-row") ?? [])].map(row => row.textContent) };
+    })), "page errors", errors);
     await page.screenshot({path:fileURLToPath(new URL("batch-join-failure.png", artifacts))});
     throw error;
   } finally { await browser.close(); }

@@ -87,7 +87,8 @@
 .dbx-sql-empty-hint kbd { padding: 0 4px; border: 1px solid hsl(var(--border)); border-radius: 3px; font-family: var(--font-mono); font-size: 10px; }
 .dbx-editor { flex: 1; min-height: 140px; min-width: 0; position: relative; }
 .dbx-editor .wb-editor-host { position: absolute; inset: 0; }
-.monaco-editor.dbx-sql-overflow { position:fixed; inset:0; pointer-events:none; z-index:50; background:transparent; }
+/* The viewport-sized overflow host delegates focus to its menus and previews. */
+.monaco-editor.dbx-sql-overflow { position:fixed; inset:0; pointer-events:none; z-index:50; background:transparent; outline:none; }
 .dbx-sql-overflow > :is(.overflowingContentWidgets, .overflowingOverlayWidgets) > * { pointer-events:auto; }
 .dbx-sql-overflow > .dbx-sql-action-view { padding:var(--gap-control); width:max-content!important; pointer-events:auto; }
 .dbx-sql-action-view .action-widget {
@@ -98,8 +99,9 @@
   --vscode-editorActionList-focusForeground:var(--color-accent-foreground);
 }
 .monaco-editor.dbx-sql-overflow .dbx-sql-action-view .action-widget {
-  min-width:0; border-radius:var(--r-card); border-color:var(--color-border)!important;
-  background:var(--color-popover)!important; color:var(--color-foreground); backdrop-filter:none; box-shadow:var(--shadow-pop);
+  min-width:0; border-radius:var(--r-card); border-color:var(--material-edge, var(--color-border))!important;
+  background:var(--material-floating, var(--color-popover))!important; color:var(--color-foreground);
+  backdrop-filter:var(--material-blur, none); box-shadow:var(--shadow-pop);
 }
 .dbx-sql-action-view .action-widget .monaco-list .monaco-scrollable-element { overflow:hidden; }
 .dbx-sql-action-view .action-widget .monaco-list-row.group-header {

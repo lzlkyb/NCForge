@@ -3,7 +3,7 @@ import { recentCommandIds, recordCommandUse } from "./commandUsage";
 import { getFileIndex } from "./fileIndex";
 import { fuzzyMatch, rankFiles, type FileEntry, type Range } from "./fuzzy";
 import { matchText } from "./pinyin";
-import { parseLineQuery, rankFilesRecent } from "./gotoAnything";
+import { isLineQuery, parseLineQuery, rankFilesRecent } from "./gotoAnything";
 import { uriToPath } from "./langConvert";
 import { failureText } from "./friendlyError";
 import type { PaletteMode } from "./keymap";
@@ -33,6 +33,8 @@ export interface PaletteItem {
 /** 「怎么打开一个目标」由浮层注入（文件页才知道怎么开标签）。行列都是 1 基。 */
 export interface Runner {
   file: (path: string, line?: number, column?: number) => void;
+  projectFile?: Runner["file"];
+  library?: (hit: LibraryHit) => void;
   jdt: (uri: string, line: number, column: number) => void;
 }
 
@@ -43,6 +45,8 @@ export interface PaletteCtx {
   openPaths: string[];
   documentSymbols?: FlatSymbol[];
   methodsOnly?: boolean;
+  /** Unified search runs library lookups as independent sources. */
+  skipLibraryNames?: boolean;
   run: Runner;
 }
 
@@ -50,6 +54,7 @@ export interface PaletteResult {
   items: PaletteItem[];
   /** 列表上方的一句说明（分组标题 / 为什么空）。 */
   note: string;
+  retryable?: boolean;
 }
 
 const LIMIT = 50;
@@ -75,8 +80,8 @@ function fileItem(e: FileEntry, ctx: PaletteCtx, extra: Partial<PaletteItem>): P
 async function filesMode(query: string, ctx: PaletteCtx): Promise<PaletteResult> {
   if (!ctx.root) return { items: [], note: "尚未打开工程" };
   const q = query.trim();
-  if (q.startsWith(":")) return lineMode(q, ctx);
-  const entries = await getFileIndex(ctx.root);
+  if (isLineQuery(q)) return lineMode(q, ctx);
+  const entries = await getFileIndex(ctx.root, ctx.skipLibraryNames);
   if (!q) {
     const byPath = new Map(entries.map((e) => [lower(e.path), e]));
     const recent = getRecent(ctx.root)
@@ -87,7 +92,7 @@ async function filesMode(query: string, ctx: PaletteCtx): Promise<PaletteResult>
     return { items: recent.map((e) => fileItem(e, ctx, { badge: undefined })), note: recent.length ? "最近打开" : `输入文件名（工程内共 ${entries.length} 个文件）` };
   }
   const ranked = rankFilesRecent(entries, q, LIMIT, getRecent(ctx.root));
-  const library = await libraryNames(q);
+  const library = ctx.skipLibraryNames ? null : await libraryNames(q);
   const extra = library?.items.map(hit => libraryItem(hit, ctx)) ?? [];
   return {
     items: ranked.map((r) =>
@@ -101,7 +106,7 @@ async function libraryNames(query: string, include = ""): Promise<LibraryOutcome
   try { return await searchLibraryFiles({ text: query, caseSensitive: false, wholeWord: false, regex: false, include, dirs: [] }, true, `library-names:${query.trim()}`); }
   catch { return null; }
 }
-function libraryItem(hit: LibraryHit, ctx: PaletteCtx): PaletteItem {
+export function libraryItem(hit: LibraryHit, ctx: PaletteCtx): PaletteItem {
   return { key: libraryUri(hit), title: hit.entry.split("/").pop() ?? hit.entry,
     detail: `${hit.source}${hit.archive ? " ! " : "/"}${hit.entry}`, badge: hit.class ? "已编译" : "库文件", kind: hit.class ? "C" : undefined,
     run: () => ctx.run.jdt(libraryUri(hit), hit.line, 1) };
@@ -312,7 +317,7 @@ async function typesMode(query: string, ctx: PaletteCtx): Promise<PaletteResult>
   } catch {
     // 后端不可用（未打开工程 / 命令失败）：继续走语言服务
   }
-  const library = await libraryNames(q, "*.class");
+  const library = ctx.skipLibraryNames ? null : await libraryNames(q, "*.class");
   const loose = library?.items.filter(h => h.class && !h.archive).map(hit => libraryItem(hit, ctx)) ?? [];
   const extraJars = library?.items.filter(h => h.class && h.archive && !local?.jars.some(j => j.jar === h.source && j.name.replace(/\./g, "/") + ".class" === h.entry))
     .map(hit => libraryItem(hit, ctx)) ?? [];

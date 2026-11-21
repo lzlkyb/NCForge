@@ -49,7 +49,7 @@ export function ResultGridHeader({columns,sort,zh,order,visible,viewport,bounds,
       >
         <button type="button" className="dbx-header-action" data-column={k}
           ref={node=>{if(node) headerRefs.current.set(k,node);else headerRefs.current.delete(k);}}
-          tabIndex={headerTabStop===k ? 0 : -1} onFocus={e=>{setHeaderCol(k);e.currentTarget.scrollIntoView?.({block:"nearest",inline:"nearest"});}}
+          tabIndex={headerTabStop===k ? 0 : -1} onFocus={()=>setHeaderCol(k)}
           aria-label={`${c.name}${zh?.[c.name.toLowerCase()] ? ` · ${zh[c.name.toLowerCase()]}` : ""}，本地排序，仅已加载行`}
           aria-keyshortcuts={onHeaderMenu ? "Enter Space Shift+F10" : "Enter Space"}
           title={`Enter 排序已加载行；左右键换列；${onHeaderMenu ? "Shift+F10 打开列菜单；" : ""}下箭头返回数据`}

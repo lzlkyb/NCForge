@@ -41,6 +41,17 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 
 describe("目录刷新与工程切换", () => {
+  it("首次读目录期间收到改名事件，会在旧读取结束后再取列表", async () => {
+    const pending = deferred<{ name: string; isDir: boolean }[]>();
+    h.listDir.mockReturnValueOnce(pending.promise).mockResolvedValueOnce([{ name: "new.txt", isDir: false }]);
+    await render(A);
+    act(() => { h.changed?.({ dirs: [A] }); });
+    expect(h.listDir).toHaveBeenCalledTimes(1);
+    await act(async () => { pending.resolve([{ name: "old.txt", isDir: false }]); });
+    expect(h.listDir).toHaveBeenCalledTimes(2);
+    expect(getSession().tree.dirs[A]).toEqual({ status: "ok", items: [{ name: "new.txt", isDir: false }] });
+  });
+
   it("旧目录刷新晚到不能写入新工程或启动编码扫描", async () => {
     await render(A);
     const old = deferred<typeof java>();

@@ -162,6 +162,10 @@ impl Drop for PendingGuard {
 }
 
 impl Bridge {
+    pub(crate) fn memory_pid(&self) -> Option<u32> {
+        self.shared.child.try_lock().ok()?.as_ref().map(Child::id)
+    }
+
     pub fn new(env: BridgeEnv) -> Self {
         Self {
             env,

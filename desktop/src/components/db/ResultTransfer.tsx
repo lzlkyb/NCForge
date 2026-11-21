@@ -10,6 +10,7 @@ import { clearTransferJob, transferJobKey, useTransferJob } from "../../lib/resu
 import type { Cell } from "../../lib/dbApi";
 import { ResultTransferDialog } from "./ResultTransferDialog";
 import type { TransferDialogSeed } from "../../hooks/useResultTransferDialog";
+import { OperationEtaById } from "../ui/OperationEta";
 type Mode="copy"|"file";
 interface DialogState {frame:TransferFrame;open:boolean;revision:number;seed?:TransferDialogSeed}
 
@@ -43,8 +44,20 @@ export function ResultTransfer({ frame, edits }: { frame: TransferFrame; edits?:
     { label: "高级复制…", icon: "sliders", separator: true, onSelect: () => open("copy") },
   ] } }));
   return <><div className="dbx-transfer-split"><button type="button" className="dbx-btn ghost" disabled={!enabled || ui.busy} title={`${copyLabel} ${copySize} · ${selected ? "单格复制原始值" : "TSV"}`} aria-label={`${copyLabel} ${copySize}`} onClick={() => void quick("tsv")}><Icon name={ui.busy ? "spinner" : "copy"} size={14} /><span className="dbx-transfer-action-label">{ui.busy ? "正在生成" : copyLabel} <span className="dbx-transfer-action-count">{rows} × {columns}</span></span></button><button type="button" className="dbx-ibtn" aria-label="复制为" aria-expanded={!!ui.menu} disabled={ui.busy} onClick={e => { const r = e.currentTarget.getBoundingClientRect(); menu(r.left, r.bottom + 4); }}><Icon name="chevronDown" size={12} /></button></div><button type="button" className="dbx-btn ghost" title="选择格式、范围与原生保存位置" aria-label="导出" onClick={() => open("file")}><Icon name="download" size={14} /><span className="dbx-transfer-action-label">导出…</span></button>
-    {job && <button type="button" className="dbx-transfer-job-link" aria-label="查看导出任务" onClick={() => open("file")} title={job.summary}><Icon name={["running", "cancelling"].includes(job.state) ? "spinner" : job.state === "success" ? "check" : "alertTriangle"} size={13} /><span>{job.state === "running" ? "正在导出" : job.state === "cancelling" ? "正在停止" : job.state === "partial" ? "部分结果" : job.state === "failed" ? "导出失败" : job.state === "cancelled" ? "已取消" : "已保存"}</span></button>}
+    {job && <button type="button" className="dbx-transfer-job-link" aria-label="查看导出任务" onClick={() => open("file")} title={job.summary}>
+      <Icon name={job.state === "running" ? "download" : job.state === "cancelling" ? "stop" : job.state === "success" ? "check" : "alertTriangle"} size={13} />
+      <span>{transferLabel(job)}</span>
+      {job.state === "running" && <OperationEtaById id={job.operationId}/>}
+    </button>}
     {ui.menu && <ContextMenu {...ui.menu} onClose={() => setUi(s => ({ ...s, menu: null }))} />}
     {(["copy","file"] as const).map(mode=>{const dialog=ui.dialogs[mode];return dialog && <ResultTransferDialog key={`${mode}:${dialog.revision}`} {...dialog} mode={mode} onClose={()=>setUi(s=>({...s,dialogs:{...s.dialogs,[mode]:s.dialogs[mode] ? {...s.dialogs[mode]!,open:false} : undefined}}))} onFile={fileFromCopy} />;})}
   </>;
+}
+
+function transferLabel(job: NonNullable<ReturnType<typeof useTransferJob>>) {
+  if (job.state !== "running") return { cancelling: "正在停止", partial: "部分结果", failed: "导出失败", cancelled: "已取消", success: "已保存" }[job.state];
+  const p = job.progress;
+  if (p.phase === "finalizing") return "正在完成文件";
+  if (p.phase === "preparing") return "准备导出";
+  return p.totalRows && p.totalRows > 0 ? `导出 ${Math.min(100, Math.floor(p.rows / p.totalRows * 100))}%` : `已处理 ${p.rows.toLocaleString()} 行`;
 }

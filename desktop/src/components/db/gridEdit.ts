@@ -51,4 +51,4 @@ export interface GridEdit {
 }
 
 /** 网格对外暴露的命令式入口（目前只有「焦点回到活动单元格」）。 */
-export interface ResultGridApi { focusActive: () => void }
+export interface ResultGridApi { focusActive: () => void; goTo?: (rowIndex: number, columnIndex: number) => void }

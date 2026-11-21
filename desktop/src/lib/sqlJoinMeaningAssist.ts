@@ -1,7 +1,7 @@
 import { monaco } from "./monacoSetup";
-import { dialectOfSqlModel, SQL_LANGUAGE_IDS } from "./monacoSql";
+import { sqlAnalysisOf, SQL_LANGUAGE_IDS } from "./monacoSql";
 import { getSqlTemplatesEnabled, subscribeSqlTemplates } from "./sqlTemplates";
-import { sqlJoinMeanings, type MeaningEdit } from "./sqlJoinMeaning";
+import { sqlJoinMeaningsOf, type MeaningEdit } from "./sqlJoinMeaning";
 import type { SqlCodeAction } from "./sqlBillAssist";
 import { splitStatements } from "./sqlSplit";
 import { sqlPreviewEdits } from "./sqlPreviewCode";
@@ -14,7 +14,7 @@ export function wireSqlJoinMeaningAssist(editor: monaco.editor.IStandaloneCodeEd
   const update = () => {
     if (disposed || !model || model.isDisposed() || !getSqlTemplatesEnabled()) return;
     const current = model;
-    const meanings = sqlJoinMeanings(current.getValue(), dialectOfSqlModel(current));
+    const meanings = sqlJoinMeaningsOf(current.getValue(), sqlAnalysisOf(current));
     monaco.editor.setModelMarkers(current, owner, meanings.map(m => {
       const a = current.getPositionAt(m.start), b = current.getPositionAt(m.end);
       return { severity: monaco.MarkerSeverity.Info, code: "left-join-where", source: "查询条件含义", message: m.message,
@@ -37,7 +37,7 @@ export function wireSqlJoinMeaningAssist(editor: monaco.editor.IStandaloneCodeEd
         return { title, kind: "quickfix", ncforgePreview: { ...preview, title: "关联修正", icon: edits.length > 1 ? "filter" : "git-compare" }, edit: { edits: edits.map(e => ({ resource: current.uri, versionId: version,
           textEdit: { range: monaco.Range.fromPositions(current.getPositionAt(e.start), current.getPositionAt(e.end)), text: e.text } })) } };
       };
-      for (const meaning of sqlJoinMeanings(sql, dialectOfSqlModel(current))) {
+      for (const meaning of sqlJoinMeaningsOf(sql, sqlAnalysisOf(current))) {
         if (meaning.start > end || meaning.end < start) continue;
         if (meaning.move) actions.push(action("将此条件移入 ON（调整筛选范围）", meaning.move));
         if (meaning.inner) actions.push(action("仅保留匹配记录：明确使用 INNER JOIN", [meaning.inner]));

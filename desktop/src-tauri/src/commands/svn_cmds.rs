@@ -725,11 +725,7 @@ pub async fn svn_diff(
             return Ok(DiffResult {
                 base_text: workspace::decode_lossy(&base_bytes).replace("\r\n", "\n"),
                 working_text: String::new(),
-                encoding: match workspace::detect_encoding(&base_bytes) {
-                    workspace::TextEncoding::Utf8 => "UTF-8",
-                    workspace::TextEncoding::Gbk => "GBK",
-                }
-                .to_string(),
+                encoding: workspace::detect_encoding(&base_bytes).label().to_string(),
                 eol: "LF".to_string(),
                 base_empty,
                 base_size: base_bytes.len() as u64,
@@ -747,11 +743,7 @@ pub async fn svn_diff(
         Ok(DiffResult {
             base_text,
             working_text: working.text.clone(),
-            encoding: match working.encoding {
-                workspace::TextEncoding::Utf8 => "UTF-8",
-                workspace::TextEncoding::Gbk => "GBK",
-            }
-            .to_string(),
+            encoding: working.encoding.label().to_string(),
             eol: match working.eol {
                 workspace::Eol::Lf => "LF",
                 workspace::Eol::Crlf => "CRLF",
@@ -777,6 +769,17 @@ fn decode_as(bytes: &[u8], enc: workspace::TextEncoding) -> String {
         workspace::TextEncoding::Gbk => {
             let (cow, _, _) = encoding_rs::GBK.decode(bytes);
             cow.replace("\r\n", "\n")
+        }
+        workspace::TextEncoding::Utf16Le | workspace::TextEncoding::Utf16Be => {
+            let decoder = if enc == workspace::TextEncoding::Utf16Le {
+                encoding_rs::UTF_16LE
+            } else {
+                encoding_rs::UTF_16BE
+            };
+            decoder
+                .decode_with_bom_removal(bytes)
+                .0
+                .replace("\r\n", "\n")
         }
     }
 }

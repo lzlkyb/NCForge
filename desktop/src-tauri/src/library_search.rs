@@ -13,6 +13,7 @@ pub struct LibraryHit {
     pub archive: bool,
     pub class: bool,
     pub line: u32,
+    pub column: u32,
     pub text: String,
     pub ranges: Vec<MatchRange>,
 }
@@ -121,6 +122,7 @@ pub(crate) fn search(
                 vec![crate::search::SearchHit {
                     path: entry.name.clone(),
                     line: 1,
+                    column: 1,
                     text: String::new(),
                     ranges: vec![],
                 }]
@@ -145,6 +147,7 @@ pub(crate) fn search(
                     archive: cached.source.archive,
                     class: entry.class,
                     line: hit.line,
+                    column: hit.column,
                     text: hit.text,
                     ranges: hit.ranges,
                 });

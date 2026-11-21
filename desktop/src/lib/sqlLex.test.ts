@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { scanSql } from "./sqlLex";
 describe("SQL词法识别", () => {
+  it("Oracle 范围运算符和小数使用不同的词法边界", () => {
+    const tokens = scanSql("1..3 .25 1.5 1.e2", "plsql").tokens.filter(token => token.kind !== "space");
+    expect(tokens.map(token => [token.text, token.kind])).toEqual([
+      ["1", "number"], ["..", "operator"], ["3", "number"], [".25", "number"], ["1.5", "number"], ["1.e2", "number"],
+    ]);
+  });
+
+  it.each(["postgresql", "sqlite"] as const)("%s 仅在聚合语法中把 FILTER 标为关键字", dialect => {
+    const tokens = scanSql("SELECT filter, filter(value), COUNT(*) FILTER (WHERE flag) FROM t", dialect).tokens;
+    expect(tokens.filter(token => /^filter$/i.test(token.text)).map(token => token.kind)).toEqual(["identifier", "identifier", "keyword"]);
+  });
+
+  it.each(["mysql", "mariadb"] as const)("%s 的 DISTINCTROW 是关键字，引用后仍是标识符", dialect => {
+    const tokens = scanSql("SELECT DISTINCTROW `DISTINCTROW` FROM t", dialect).tokens;
+    expect(tokens.filter(token => token.text.includes("DISTINCTROW")).map(token => token.kind)).toEqual(["keyword", "quoted"]);
+  });
   it.each(["q'[it's from fake x]'", "nq'{it's select}'", "q'!it's where!'", "q'<it's and>'"])("Oracle特殊字符串 %s", text => {
     expect(scanSql(text + " select", "plsql").tokens.filter(t => t.kind !== "space").map(t => [t.text, t.kind])).toEqual([[text, "string"], ["select", "keyword"]]);
   });

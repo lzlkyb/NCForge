@@ -12,7 +12,7 @@ export const BATCH = 200;
 
 /** 导入进行到哪一步。`canceling` 并进来是因为它本来就是「这一轮的状态」的一部分。 */
 export interface ImportBusy {
-  done: number;
+  inserted: number;
   total: number;
   canceling: boolean;
 }
@@ -55,10 +55,9 @@ export function useImportRun(opts: {
   /** 目标列下标 → 日期格式预设键；没有就按 ISO 口径。 */
   fmtOf?: (to: number) => string | undefined;
   setErr: (v: string | null) => void;
-  /** 有行写进库时回调（用于刷新表数据）。 */
-  onDone: () => void;
+  reveal: () => void;
 }) {
-  const { connId, table, tabId, parsed, target, picked, skip, fmtOf, setErr, onDone } = opts;
+  const { connId, table, tabId, parsed, target, picked, skip, fmtOf, setErr, reveal } = opts;
   const [busy, setBusy] = useState<ImportBusy | null>(null);
   const [out, setOut] = useState<ImportResult | null>(null);
   /** 取消只置标志：正在飞的那一批必须写完，否则请求发出去了却不知道结果。 */
@@ -70,8 +69,10 @@ export function useImportRun(opts: {
     // 生产库写入必须二次确认，且带着目标表与行数；导入按批独立提交，落库后只剩人工收拾。
     const prodText = `-- 导入 ${parsed.rows.length} 行到 ${table}（${picked.length} 列）`;
     if (!(await confirmProdWrite(tabId ?? connId, connId, prodText))) return;
+    const spec = dbTaskSpec(`import:${connId}:${table}`, "导入表数据", connId, `${table} · 独立导入会话`, undefined, tabId);
     const task = beginOperation({
-      ...dbTaskSpec(`import:${connId}:${table}`, "导入表数据", connId, `${table} · 独立导入会话`, undefined, tabId),
+      ...spec,
+      reveal: () => { spec.reveal?.(); reveal(); },
       cancel: async () => {
         cancelRef.current = true;
         setBusy((v) => (v ? { ...v, canceling: true } : v));
@@ -90,7 +91,7 @@ export function useImportRun(opts: {
     let stopped = false;
     let rolledBack = false;
     cancelRef.current = false;
-    setBusy({ done: 0, total: parsed.rows.length, canceling: false });
+    setBusy({ inserted: 0, total: parsed.rows.length, canceling: false });
     try {
       for (const ch of plan.chunks) {
         if (cancelRef.current) {
@@ -109,13 +110,13 @@ export function useImportRun(opts: {
         failed.push(...res.failed);
         truncated ||= res.truncated;
         setBusy({
-          done: Math.min(inserted + failed.length, parsed.rows.length),
+          inserted,
           total: parsed.rows.length,
           canceling: cancelRef.current,
         });
         task.update({
-          phase: "分批写入（每批独立提交）",
-          progress: { done: Math.min(inserted + failed.length, parsed.rows.length), total: parsed.rows.length },
+          phase: "每批独立提交",
+          progress: { done: inserted, total: parsed.rows.length, unit: "行已提交" },
         });
         if (!res.committed) {
           rolledBack = true;
@@ -123,17 +124,15 @@ export function useImportRun(opts: {
         }
       }
       task.finish(
-        stopped ? "cancelled" : failed.length || rolledBack ? "failed" : "success",
+        stopped ? (inserted ? "partial" : "cancelled") : failed.length || rolledBack ? (inserted ? "partial" : "failed") : "success",
         `已写入 ${inserted} 行，失败 ${failed.length} 行${stopped ? "；已在批次边界停止" : rolledBack ? "；当前批已回滚" : ""}`,
       );
       setOut({ inserted, failed, truncated, ms: Date.now() - t0, canceled: stopped });
-      if (inserted > 0) onDone();
     } catch (e) {
       task.finish("failed", `导入中断；前 ${inserted} 行已写入，返回导入窗口核对`);
       // 已经写进去的批不会因为异常消失：进度摘要照给，错误另显示。
       // 少这一行的话，用户点过取消后又遇错，界面只剩一条错误，「到底写了多少」没人知道。
-      setOut({ inserted, failed, truncated, ms: Date.now() - t0, canceled: cancelRef.current });
-      if (inserted > 0) onDone();
+      setOut({ inserted, failed, truncated, ms: Date.now() - t0, canceled: false });
       setErr(friendlyDbError(e));
     } finally {
       taskRef.current = null;

@@ -4,7 +4,7 @@ import { toast } from "../ui/toast";
 import { useConnOf, useConnRt } from "../../lib/dbStore";
 import { connectionKey } from "../../lib/dbResultContext";
 import { clearSqlJoinHistory, snapshotSqlJoinHistory, sqlJoinHistoryGeneration } from "../../lib/sqlJoinHistory";
-import { clearSqlUsage, forgetSqlUsage, getSqlUsageEnabled, restoreSqlUsage, setSqlUsageEnabled, setSqlUsagePinned, sqlUsageScope, subscribeSqlUsage, usageSnapshot } from "../../lib/sqlUsage";
+import { clearSqlUsage, forgetSqlUsage, getSqlUsageEnabled, restoreSqlUsage, setSqlUsageEnabled, setSqlUsagePinned, sqlJoinUsageLabel, sqlUsageScope, subscribeSqlUsage, usageSnapshot } from "../../lib/sqlUsage";
 
 export function SqlCompletionMemoryDrawer({ connId, onClose }: { connId: string; onClose: () => void }) {
   const conn = useConnOf(connId), rt = useConnRt(connId);
@@ -21,9 +21,9 @@ export function SqlCompletionMemoryDrawer({ connId, onClose }: { connId: string;
       if (Array.isArray(parsed) && parsed.every(part => typeof part === "string")) parts = parsed;
     } catch { /* Malformed old identities remain removable. */ }
     const [table, field, clause] = parts;
-    const title = field ? `${table}.${field}` : table || key;
+    const title = clause === "join" ? sqlJoinUsageLabel(table, field) : field ? `${table}.${field}` : table || key;
     const zh = rt.ncNames?.[table?.toLowerCase()] ?? "";
-    return { key, entry, title, zh, clause };
+    return { key, entry, title, zh, clause: clause === "join" ? "关联" : clause };
   }).filter(item => `${item.title} ${item.zh}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => Number(b.entry.pinned) - Number(a.entry.pinned) || b.entry.lastUsed - a.entry.lastUsed || a.title.localeCompare(b.title));
   const save = (ok: boolean) => setFailed(!ok);
   const clear = () => {
@@ -47,14 +47,14 @@ export function SqlCompletionMemoryDrawer({ connId, onClose }: { connId: string;
       <button type="button" className="dbx-ibtn" aria-label="清除当前 schema 补全记忆" onClick={() => setConfirm(scope)}><Icon name="trash" size={13} /></button>
       <button type="button" className="dbx-ibtn" aria-label="关闭补全记忆" onClick={onClose}><Icon name="close" size={13} /></button>
     </div>
-    <div className="flt"><input className="dbx-inp sm" aria-label="搜索补全记忆" placeholder="表名、字段或中文说明" value={query} onChange={e => setQuery(e.target.value)} />
+    <div className="flt"><input className="dbx-inp sm" aria-label="搜索补全记忆" placeholder="表名、字段、关联或中文说明" value={query} onChange={e => setQuery(e.target.value)} />
       <div className="dbx-flags"><label><input type="checkbox" checked={enabled} onChange={e => save(setSqlUsageEnabled(e.target.checked))} />根据使用习惯排序</label></div>
     </div>
     <p className="dbx-tree-note">{conn?.name} · {rt.currentSchema || "当前 schema"}。固定项优先，忘记后仍可正常搜索。</p>
     {failed && <p className="dbx-tree-note" role="status">本次会话已生效，但无法保存到本机。</p>}
     {confirm === scope && <div className="dbx-history-clear" role="group" aria-label="确认清除补全记忆"><p>清除当前连接和 schema 的使用记录、固定项及 JOIN 历史？</p>
       <button type="button" className="dbx-btn" onClick={() => setConfirm(null)}>取消</button><button type="button" className="dbx-btn" onClick={clear}>确认清除</button></div>}
-    <div className="list">{entries.length === 0 && <p className="dbx-tree-note">{query ? "没有匹配的记忆" : "接受补全或输入完整表名后，常用对象会出现在这里。"}</p>}
+    <div className="list">{entries.length === 0 && <p className="dbx-tree-note">{query ? "没有匹配的记忆" : "使用过的表、字段和关联会出现在这里。"}</p>}
       {entries.map(({ key, entry, title, zh, clause }) => <div key={key} className="dbx-hitem"><code>{title}</code><span className="m">{zh}{clause ? ` · ${clause.toUpperCase()}` : ""} · {entry.count} 次{entry.pinned && " · 已固定"} · {entry.lastUsed ? <time dateTime={new Date(entry.lastUsed).toISOString()}>{new Date(entry.lastUsed).toLocaleString("zh-CN")}</time> : "尚未使用"}</span>
         <div className="dbx-assist-memory-actions"><button type="button" className="dbx-btn ghost" aria-label={`${entry.pinned ? "取消固定" : "固定"} ${title}`} onClick={() => save(setSqlUsagePinned(scope, key, !entry.pinned))}>{entry.pinned ? "取消固定" : "固定优先"}</button>
           <button type="button" className="dbx-btn ghost" aria-label={`忘记 ${title}`} onClick={() => save(forgetSqlUsage(scope, key))}>忘记</button></div></div>)}

@@ -143,7 +143,7 @@ html[data-ui-density="comfortable"] :is(.vc-chip,.vc-group-head .vc-grp) { min-h
 .vc-rq-chips .vc-chip { gap:4px; }
 .vc-rq-chips .vc-chip[data-done] { color:hsl(var(--success-ink)); }
 .vc-rq-stack { display:flex;flex-direction:column;gap:10px;padding:8px 12px 24px; }
-.vc-rq-file { border:1px solid hsl(var(--border));border-radius:var(--r-card, 8px);overflow:hidden; }
+.vc-rq-file { border-block-start:1px solid hsl(var(--border));overflow:hidden; }
 .vc-rq-fhead { display:flex;align-items:center;gap:6px;min-height:34px;padding:0 8px;background:hsl(var(--secondary) / .45);font-size:12px; }
 .vc-rq-file[data-done] .vc-rq-fhead { opacity:.8; }
 .vc-rq-fhead b { flex-shrink:0;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }

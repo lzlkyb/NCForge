@@ -80,13 +80,10 @@ pub struct ConflictSnapshot {
 pub fn decode_content(value: &serde_json::Value) -> Result<(String, String), String> {
     let encoded = value.as_str().ok_or("正文数据缺失")?;
     let bytes = svn_cred::b64_decode(encoded).ok_or("正文编码数据无效")?;
-    if bytes.contains(&0) {
+    if bytes.contains(&0) && workspace::utf16_encoding(&bytes).is_none() {
         return Err("二进制内容不能作为文本展示".to_string());
     }
-    let encoding = match workspace::detect_encoding(&bytes) {
-        workspace::TextEncoding::Utf8 => "UTF-8",
-        workspace::TextEncoding::Gbk => "GBK",
-    };
+    let encoding = workspace::detect_encoding(&bytes).label();
     Ok((
         workspace::decode_lossy(&bytes)
             .trim_start_matches('\u{feff}')

@@ -3,7 +3,7 @@ import { columnViewport, retainColumnViewport, selectionBounds } from "../../lib
 import { gridCodec } from "../../lib/cellCodec";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import { isNumericType } from "../../lib/resultExport";
-import { fitWidth, initialWidths, rowNumberWidth, type SortState } from "../../lib/resultView";
+import { initialWidths, rowNumberWidth, type SortState } from "../../lib/resultView";
 import { copyText, isImeComposing } from "../../lib/utils";
 import { toast } from "../ui/toast";
 import { ResultGridHeader } from "./ResultGridHeader";
@@ -19,6 +19,8 @@ import { shouldLoadMore } from "../../lib/gridLoadMore";
 import { DENSITY_HEAD_H, DENSITY_ROW_H, getUiDensity, subscribeUiDensity } from "../../lib/uiDensity";
 import { getFontRevision, subscribeFonts } from "../../lib/fonts";
 import { useScrollFrame } from "../../hooks/useScrollFrame";
+import { useGridSelectionDrag } from "../../hooks/useGridSelectionDrag";
+import { useGridColumnResize } from "../../hooks/useGridColumnResize";
 import { retainViewport } from "../../lib/scrollViewport";
 import { selectionText, type Selection } from "../../lib/dbResultTools";
 import "../../db-grid-inspector.css";
@@ -75,15 +77,14 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   const boxRef = useRef<HTMLDivElement>(null);
   const helpId = useId();
   const preciseTop = useRef(0);
-  /** 拖拽中的清理函数：组件卸载（切标签、结果清空）时也要摘掉 window 上的监听。 */
-  const dragCleanup = useRef<(() => void) | null>(null);
-  useEffect(() => () => dragCleanup.current?.(), []);
-  const widthRef=useRef<number[]>([]);
   /** 续取过的行数：滚到底触发一次后要等新行真的到达才会再触发。 */
   const loadedAt = useRef(rows.length);
   const [widths, setWidths] = useState<number[]>(() => initialWidths(columns, rows));
   const [scroll, setScroll] = useState({ top: 0, height: 400, left: 0, width: 800 });
-  const [resizing, setResizing] = useState(false);
+  // 新结果的第一帧里 effect 还没重算列宽：先按新列现算一份，避免宽度对不上
+  const ws = useMemo(() => widths.length === columns.length ? widths : initialWidths(columns, rows), [widths, columns, rows]);
+  // 列宽拖拽 / 双击自适应：窗口监听与拖拽态收在 hook 里（widths 状态与「换列回顶」的逻辑还在这儿）。
+  const { resizing, resize, fit } = useGridColumnResize({ columns, rows, ws, widths, setWidths, onWidths });
 
   const colKey = columns.map((c) => c.name).join("|");
   const colKeyRef = useRef(colKey);
@@ -98,8 +99,6 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  // 新结果的第一帧里 effect 还没重算列宽：先按新列现算一份，避免宽度对不上
-  const ws = useMemo(() => widths.length === columns.length ? widths : initialWidths(columns, rows), [widths, columns, rows]);
   // 换行时行高不固定：行高按 rows 下标测、偏移按 order 累加；拖列宽期间冻结测量，pointerup 后再重算一次。
   const layout = useGridRowLayout({ rows, columns, widths: ws, order, wrap, rowH: ROW_H, frozen: resizing });
   // 切密度保留当前首行：按总高比例换算 scrollTop（依赖数组在渲染时求值，必须放在 layout 之后）。
@@ -110,9 +109,11 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   const rnW = rowNumberWidth(rows.length);
   const total = rnW + visible.reduce((n,c)=>n+ws[c],0);
   const bounds = useMemo(() => selectionBounds(order,visible,selection), [order,visible,selection]);
+  const frozenColumns = useMemo(() => new Set(visible.filter(c => frozen.includes(columns[c].name))), [visible, columns, frozen]);
+  const fullColumns = useMemo(() => columnViewport(visible, ws, frozenColumns, 0, Infinity, rnW), [visible, ws, frozenColumns, rnW]);
   const columnCache = useRef<ReturnType<typeof columnViewport>>([]);
   const viewport = useMemo(() => columnCache.current = retainColumnViewport(columnCache.current,
-    columnViewport(visible,ws,new Set(visible.filter(c=>frozen.includes(columns[c].name))),scroll.left,scroll.width,rnW)), [visible, ws, frozen, columns, scroll.left, scroll.width, rnW]);
+    columnViewport(visible,ws,frozenColumns,scroll.left,scroll.width,rnW)), [visible, ws, frozenColumns, scroll.left, scroll.width, rnW]);
   const viewportByColumn = new Map(viewport.map(col => [col.column, col]));
   const cellStyle = (c:number) => { const col=viewportByColumn.get(c)!; return {width:col.width,position:col.frozen ? "sticky" as const : "absolute" as const,left:col.frozen ? col.sticky : col.left,...(col.frozen ? {zIndex:2} : {})}; };
   const { first, last } = layout.range(scroll.top, scroll.height, OVERSCAN);
@@ -132,6 +133,8 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
       onLoadMore();
     }
   });
+  // 鼠标框选 + 边缘自动滚动：拖拽监听与「当前 order/layout」的 ref 刷新收在 hook 里。
+  const startSelectionDrag = useGridSelectionDrag({ rnW, headH: HEAD_H, fullColumns, order, layout, onSel, visible, sort });
   const reveal = (c: number, rowIndex?: number) => {
     const el = boxRef.current, ci = visible.indexOf(c);
     if (!el || ci < 0) return;
@@ -155,32 +158,6 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     // Programmatic focus can cross a virtual row/column boundary before the scroll event arrives.
     scrollFrame.flush();
   };
-  const resize = (k: number, startX: number) => {
-    const start = widths[k];
-    dragCleanup.current?.();
-    setResizing(true);
-    const finish = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", finish);
-      dragCleanup.current = null;
-      setResizing(false);
-      // 宽度没变（误点、双击 fit 的第一下）就别写布局，否则自动宽度会被固化成手调值。
-      if (widthRef.current.length && widthRef.current[k] !== start) onWidths(k, widthRef.current[k]);
-    };
-    const move = (e: PointerEvent) => {
-      // 指针被系统取消（Alt+Tab、触控笔离开、拖出窗口）时 pointerup 不触发；
-      // buttons 归零是最后一道兜底，否则「手早松了，鼠标再动列宽还在变」。
-      if (e.buttons === 0) return finish();
-      setWidths(w=> {const next=w.map((x,i)=>i===k?Math.max(40,Math.min(900,start+e.clientX-startX)):x);widthRef.current=next;return next;});
-    };
-    dragCleanup.current = finish;
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", finish, { once: true });
-    window.addEventListener("pointercancel", finish, { once: true });
-  };
-  /** 双击列分隔线 = 本列贴到内容（列名优先），顺手记成手调宽度。 */
-  const fit = (k: number) => { if (!columns[k]) return; const next = ws.map((w, i) => (i === k ? fitWidth(columns[k], rows, k) : w)); setWidths(next); onWidths(k, next[k]); };
 
   // 编辑态（进入 / 提交并移动 / 取消）抽到 hook：表页与 SQL 结果页共用同一套键盘语义。
   const { editing, valueAt, startEdit: beginEdit, setValue, commit: commitEdit, cancel: cancelEdit } =
@@ -257,6 +234,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
       // WebView 菜单或系统复制命令可能只发 copy 事件，不发 Ctrl+C 的 keydown。
       onCopy={e=>{if (!editing && sel && e.target===e.currentTarget && !window.getSelection()?.toString()) {e.preventDefault();copySelection();}}}
       onPaste={onPaste}
+      onPointerDown={startSelectionDrag}
       onScroll={event => { preciseTop.current = event.currentTarget.scrollTop; scrollFrame.schedule(); }}
     >
       <span id={helpId} className="dbx-grid-instructions">方向键移动，Shift 扩选，Ctrl+A 全选已加载数据，Ctrl+C 复制，F4 查看完整值；Enter 或 Tab 进入编辑，Shift+Enter 打开大文本编辑框。Alt+上箭头进入表头；表头左右键换列，Enter 排序，{onHeaderMenu && "Shift+F10 或菜单键打开菜单，"}下箭头返回数据，Esc 返回原活动格。</span>

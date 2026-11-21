@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { installSearchOverlay } from "../../lib/searchOverlay";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import "../../workspace.css";
 import "../../workspace-consolidation.css";
 import { WorkspaceSkeleton } from "../workspace/WorkspaceSkeleton";
@@ -8,7 +8,6 @@ import { BottomPanel } from "../workspace/BottomPanel";
 import { EmptyProjectSlots, FilePaneSlots } from "../workspace/FilePaneSlots";
 import { ServicesTab } from "./ServicesTab";
 import { FilesTabDialogs } from "./FilesTabDialogs";
-import type { FileTreeHandle } from "../workspace/FileTree";
 import { getWorkspace } from "../../lib/workspace";
 import { useTreeProjects } from "../../hooks/useTreeProjects";
 import { useProjectSwitch } from "../../hooks/useProjectSwitch";
@@ -81,7 +80,6 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
   const setPanelTab = (v: Updater<typeof panelTab>) => setSession({ panelTab: v });
 
   // 标题栏的「新建文件 / 新建文件夹」按钮：交给文件树，由它决定建在哪个目录下
-  const treeRef = useRef<FileTreeHandle>(null);
   // 关联工程：多工程树、跨工程打开的确认框与「全部工程搜索」共用这一份列表
   const { projects } = useTreeProjects(root ?? null);
 
@@ -242,7 +240,6 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
           compiling,
           canBack: nav.canBack,
           canForward: nav.canForward,
-          treeRef,
         }}
         actions={{
           setPanels,

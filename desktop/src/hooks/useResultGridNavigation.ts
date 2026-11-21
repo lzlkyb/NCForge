@@ -33,14 +33,17 @@ export function useResultGridNavigation({boxRef,sel,visible,order,reveal,onSel,o
     if(c===undefined || !visible.includes(c)) return;
     reveal(c);setHeaderCol(c);setPendingFocus({kind:"header",c,menu});
   };
-  useImperativeHandle(apiRef,()=>({focusActive}));
+  useImperativeHandle(apiRef,()=>({focusActive, goTo: (rowIndex, columnIndex) => {
+    const r = order[rowIndex], c = visible[columnIndex];
+    if (r === undefined || c === undefined) return;
+    const pos = { r, c }; onSel(pos); focusCell(pos);
+  }}));
   useLayoutEffect(()=>{
     if(!pendingFocus) return;
     const target=pendingFocus.kind==="header" ? headerRefs.current.get(pendingFocus.c)
       : boxRef.current?.querySelector<HTMLElement>(`[id$="-${pendingFocus.pos.r}-${pendingFocus.pos.c}"]`);
     setPendingFocus(null);
     if(!target) return;
-    target.scrollIntoView?.({block:"nearest",inline:"nearest"});
     if(pendingFocus.kind==="header") {
       target.focus({preventScroll:true});
       if(pendingFocus.menu) {const rect=target.getBoundingClientRect();onHeaderMenu?.(pendingFocus.c,rect.left,rect.bottom);}

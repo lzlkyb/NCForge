@@ -7,11 +7,12 @@ import { revealSetting, searchSettings } from "../../lib/settingsSearch";
 import { useSettingsIndex } from "../../hooks/useSettingsIndex";
 import { BP_SM } from "../../lib/layoutBreakpoints";
 import { setSideOpen } from "../../lib/layoutStore";
+import { useViewActive } from "../../lib/viewActivity";
 import "../../settings-center.css";
 
 export interface SettingsSection {
   label: string;
-  content: ReactNode;
+  content: ReactNode | ((active: boolean) => ReactNode);
   keywords?: string[];
   group?: string;
   description?: string;
@@ -21,6 +22,7 @@ export interface SettingsSection {
 }
 
 export function SettingsLayout({ sections }: { sections: SettingsSection[] }) {
+  const active = useViewActive();
   const [selected, setSelected] = useState(sections[0]?.label);
   const [query, setQuery] = useState("");
   const [flash, setFlash] = useState<{ section: string; id?: string; nonce: number; highlight?: boolean } | null>(null);
@@ -180,7 +182,8 @@ export function SettingsLayout({ sections }: { sections: SettingsSection[] }) {
         {sections.map((section) => <section key={section.label} data-settings-section={section.label} data-settings-group={section.group} data-settings-description={section.description} data-settings-keywords={section.keywords?.join(" ")}
           hidden={searching || selected !== section.label} className={flash?.section === section.label && !flash.id && flash.highlight !== false ? "wb-settings-flash" : undefined}>
           <header className="wb-settings-page-header"><div className="settings-page-title"><h1 tabIndex={-1}>{section.label}</h1>{section.scope && <span className="settings-scope">{section.scope}</span>}</div>{section.description && <p>{section.description}</p>}</header>
-          <div className="wb-settings-section-content">{section.content}</div>
+          <div className="wb-settings-section-content">{typeof section.content === "function"
+            ? section.content(active && !searching && selected === section.label) : section.content}</div>
         </section>)}
       </div>
     </div>

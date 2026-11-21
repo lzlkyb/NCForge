@@ -34,6 +34,7 @@ pub struct AppState {
     config_write: tokio::sync::Mutex<()>,
     /// 配置目录（`{config_dir}`，与 data_dir 相同）。
     pub config_dir: std::path::PathBuf,
+    pub(crate) maintenance: crate::commands::Maintenance,
     pub(crate) language_cache: std::sync::RwLock<()>,
     /// NC 中间件的运行态（起/停/日志都以它为准）。
     ///
@@ -160,6 +161,7 @@ impl AppState {
             config: RwLock::new(config),
             config_write: tokio::sync::Mutex::new(()),
             config_dir,
+            maintenance: Default::default(),
             language_cache: std::sync::RwLock::new(()),
             server: std::sync::Mutex::new(ServerRun::default()),
             client: std::sync::Mutex::new(ServerRun::default()),

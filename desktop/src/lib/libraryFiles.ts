@@ -9,6 +9,7 @@ export interface LibraryHit {
   archive: boolean;
   class: boolean;
   line: number;
+  column?: number;
   text: string;
   ranges: MatchRange[];
 }

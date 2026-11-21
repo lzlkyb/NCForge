@@ -44,6 +44,22 @@ export function sqlUsageKey(table: string, field?: string, clause?: string): str
   return JSON.stringify([table, field ?? "", clause ?? ""]);
 }
 
+export function sqlJoinUsageKey(source: string, target: string, from: readonly string[], to: readonly string[]): string {
+  const pairs = from.map((column, index) => [column.toLowerCase(), to[index].toLowerCase()]);
+  pairs.sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
+  return sqlUsageKey(source.toLowerCase(), JSON.stringify([target.toLowerCase(), pairs]), "join");
+}
+
+export function sqlJoinUsageLabel(source: string, field: string): string {
+  try {
+    const [target, pairs] = JSON.parse(field) as [string, [string, string][]];
+    if (typeof target === "string" && Array.isArray(pairs)) {
+      return `${source} → ${target} · ${pairs.map(([left, right]) => `${left} = ${right}`).join(" + ")}`;
+    }
+  } catch { /* Old or malformed preferences can still be removed. */ }
+  return source;
+}
+
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }

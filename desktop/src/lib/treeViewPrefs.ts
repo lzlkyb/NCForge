@@ -1,8 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * 文件树的显示偏好。都是本机界面习惯，存 localStorage，不随配置迁移走；默认都开，
- * 升级后保持原来的行为。
+ * 文件树的显示偏好保存在本机。已有选择优先，未保存视图偏好时使用包视图。
  *
  * - `compactPackages`：`com → aier → erp` 这种「只有一个子目录」的链条压成一行
  *   （对标 IDEA Compact Middle Packages / Eclipse Flat）；
@@ -68,7 +67,7 @@ export function useNcStructure(): boolean {
   return useSyncExternalStore(ncStructurePref.subscribe, ncStructurePref.get);
 }
 
-const packagePref = createPref("ncforge.tree.packageView", false);
+const packagePref = createPref("ncforge.tree.packageView");
 export const setPackageView = packagePref.set;
 export const togglePackageView = () => packagePref.set(!packagePref.get());
 export function usePackageView(): boolean {

@@ -3,26 +3,51 @@ import { useAppHidden } from "../../lib/appVisibility";
 import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
 import { MOTION } from "../../lib/motion";
 
-/** Navigation acknowledges the selected label; code and result canvases stay fully readable. */
+const targets: Record<string, string> = {
+  files: '.wb-code-surface :is(.wb-tabs, .wb-crumb-row, .wb-empty-box)',
+  db: '.wb-document-surface :is(.dbx-doctabs, .dbx-execution-bar, .dbx-result-head)',
+  svn: '.wb-toolbar, .wb-document-surface :is(.vc-review-head, .vc-file-head, .vc-review-document .vc-empty)',
+  meta: '.wb-document-surface .meta-workbench',
+  logs: '.wb-document-surface .lg-page',
+  settings: '.wb-document-surface .wb-settings-page',
+};
+
+/** Fade the incoming region while keeping editor and grid canvases fully readable. */
 export function WorkspacePageMotion({ page, target }: { page: string; target: RefObject<HTMLDivElement> }) {
   const hidden = useAppHidden(), reduced = usePrefersReducedMotion();
   const previous = useRef(page);
   useLayoutEffect(() => {
-    const changed = previous.current !== page; previous.current = page;
-    const surface = target.current?.querySelector('.wb-code-surface:not([hidden]), .wb-document-surface:not([hidden])');
-    const element = surface?.querySelector<HTMLElement>('.wb-tab[data-active], .dbx-doctab[data-active]');
-    if (!changed || !element?.animate || hidden || reduced || document.hidden) return;
-    const style = getComputedStyle(document.documentElement);
-    const timing = style.getPropertyValue("--dur-fast").trim();
-    const value = Number.parseFloat(timing);
-    if (!Number.isFinite(value)) return;
-    const animation = element.animate([{ opacity: .85 }, { opacity: 1 }], {
-      duration: timing.endsWith("ms") ? value : value * 1000,
-      easing: style.getPropertyValue("--ease").trim() || MOTION.ease,
-    });
-    void animation.finished.catch(() => {});
-    return () => animation.cancel();
-    // 只提示所到位置，正文及其草稿始终保留在原节点且不淡出。
+    const changed = previous.current !== page;
+    previous.current = page;
+    const root = target.current;
+    const selector = targets[page];
+    if (!changed || !root || !selector || hidden || reduced || document.hidden) return;
+
+    let waiting: MutationObserver | undefined;
+    const animations: Animation[] = [];
+    const play = () => {
+      const skeleton = root.querySelector(`[data-workspace-skeleton="${page}"][data-loading-region="document"]`);
+      if (skeleton && !skeleton.closest('[hidden]')) return false;
+      const regions = [...root.querySelectorAll<HTMLElement>(selector)].filter(node => !node.closest('[hidden]'));
+      if (!regions.length) return false;
+      waiting?.disconnect();
+      for (const region of regions) {
+        const animation = region.animate?.([{ opacity: .86 }, { opacity: 1 }], { duration: MOTION.page, easing: MOTION.ease });
+        if (!animation) continue;
+        void animation.finished.catch(() => {});
+        animations.push(animation);
+      }
+      return true;
+    };
+    // Cold routes animate only when the real dock content replaces the skeleton.
+    if (!play()) {
+      waiting = new MutationObserver(play);
+      waiting.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
+    }
+    return () => {
+      waiting?.disconnect();
+      for (const animation of animations) animation.cancel();
+    };
   }, [page, target, hidden, reduced]);
   return null;
 }

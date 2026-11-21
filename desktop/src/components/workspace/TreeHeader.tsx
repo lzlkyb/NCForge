@@ -8,17 +8,21 @@ import { treeFilterFor, useTreeFilter } from "../../lib/treeFilter";
 import "../../reading-tools.css";
 
 /**
- * 树只保留视图、定位、名称过滤和新建；工程切换与全文搜索使用顶栏统一入口。
+ * 工程切换与全文搜索使用顶栏统一入口。
  */
 export function TreeHeader({
   root,
   projectCount = 1,
+  canCollapse,
+  onCollapseAll,
   onCreateFile,
   onCreateDir,
 }: {
   root: string;
   /** 关联工程数（含当前）。>1 时在标题下说清「编译 / SVN 只作用于当前」 */
   projectCount?: number;
+  canCollapse: boolean;
+  onCollapseAll: () => void;
   onCreateFile: () => void;
   onCreateDir: () => void;
 }) {
@@ -42,6 +46,8 @@ export function TreeHeader({
           </div>
         </div>
         <div className="wb-pane-acts">
+          <button type="button" className="wb-icon-btn" aria-label="全部折叠" title="全部折叠"
+            disabled={switching || !canCollapse} onClick={onCollapseAll}><Icon name="collapseAll" size={16} /></button>
           <button type="button" className="wb-icon-btn" aria-label="自动定位" aria-pressed={reveal}
             title={`自动定位${reveal ? "已开启，点击关闭" : "已关闭，点击开启"}：打开文件时在资源树中展开并定位；手动定位不受影响`}
             onClick={toggleRevealOnOpen}><Icon name="target" size={16} /></button>

@@ -64,7 +64,7 @@ const projectOutcome = (): ProjectsSearchOutcome => ({
 });
 
 describe("buildResultView", () => {
-  it("全部工程：同名路径按工程分开，汇总各工程计数并保留错误", () => {
+  it("全部工程：同名路径按工程分开，保留错误并标记搜索范围未查全", () => {
     const view = buildResultView(
       form({ scope: "all", projectOutcome: projectOutcome(), outcomeRoot: "C:\\w\\newar" }),
     )!;
@@ -82,7 +82,7 @@ describe("buildResultView", () => {
       filesScanned: 200,
       elapsedMs: 620,
       projects: 2,
-      truncated: false,
+      truncated: true,
     });
     expect(view.errors).toEqual(["old: 读取失败"]);
     expect(view.outcomeRoot).toBe("C:\\w\\newar");
@@ -90,6 +90,7 @@ describe("buildResultView", () => {
 
   it("任一工程截断都按截断处理（不能报成「全都搜完了」）", () => {
     const po = projectOutcome();
+    po.errors = [];
     po.projects[1].outcome.truncated = true;
     const view = buildResultView(form({ scope: "all", projectOutcome: po }))!;
     expect(view.summary.truncated).toBe(true);

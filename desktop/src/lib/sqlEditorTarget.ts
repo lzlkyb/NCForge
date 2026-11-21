@@ -8,6 +8,7 @@ import { pickStatement, splitStatements, type Stmt } from "./sqlSplit";
 import { statementsOf } from "./sqlStmtCache";
 import { applyFormatEdits, fallbackFormatEdits, formatTargetOf, type SqlFormatScope } from "./sqlFormatTarget";
 import { formatSql, sqlLanguageOf } from "./sqlFormat";
+import { mysqlDelimiterRegions, partialSqlFormatProblem, preserveSqlFormatEdges } from "./sqlFormatSafety";
 import { connOf, sqlTabOf } from "./dbStore";
 import { toast } from "../components/ui/toast";
 
@@ -25,6 +26,7 @@ export interface SqlExecutionScope {
   tabId: string;
   selected: boolean;
   statements: RunStmt[];
+  current?: RunStmt;
 }
 
 export type SqlRunMode = "auto" | "current" | "script";
@@ -71,6 +73,13 @@ export async function formatAt(editor: Editor, scope: SqlFormatScope = "auto") {
   }
   const connId = sqlTabOf(tabIdOfModel(model))?.connId;
   const language = sqlLanguageOf(connId ? connOf(connId)?.url ?? "" : "");
+  if (target.kind !== "script") {
+    const { startLineNumber, startColumn, endLineNumber, endColumn } = target.range;
+    const start = model.getOffsetAt({ lineNumber: startLineNumber, column: startColumn });
+    const end = model.getOffsetAt({ lineNumber: endLineNumber, column: endColumn });
+    const problem = partialSqlFormatProblem(model.getValue(), start, end, language);
+    if (problem) { toast(problem, "warning"); return; }
+  }
   const version = model.getVersionId();
   const stale = () => editor.getModel() !== model || model.getVersionId() !== version;
   let text: string | null = null;
@@ -78,7 +87,12 @@ export async function formatAt(editor: Editor, scope: SqlFormatScope = "auto") {
   try { text = await formatSql(target.text, language); }
   catch (e) { error = e instanceof Error ? e.message : String(e); }
   if (stale()) return;
-  if (text !== null) { applyFormatEdits(editor, [{ range: target.range, text }]); return; }
+  if (text !== null) {
+    if (target.kind !== "script" && text !== target.text) text = preserveSqlFormatEdges(target.text, text);
+    if (text !== target.text) applyFormatEdits(editor, [{ range: target.range, text }]);
+    else if (mysqlDelimiterRegions(target.text, language).length) toast("DELIMITER 指令和过程体已保留", "info");
+    return;
+  }
   if (target.kind !== "script") { toast(`SQL 格式化失败：${error}`, "warning"); return; }
   // 整个脚本里有一条没写完（引号/括号未闭合）会整篇解析失败：逐条排版，只跳过那一条。
   const result = await fallbackFormatEdits(model, target.text, language);

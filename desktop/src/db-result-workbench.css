@@ -53,7 +53,9 @@
 .dbx-result-head .dbx-rtab { height:100%; }
 .dbx-result-head > .dbx-ibtn { flex:none; }
 .dbx-result-head > .dbx-compare-baseline > :not(b) { display:none; }
-.dbx-result-head > .dbx-query-status { margin-left:0;max-width:32%; }
+.dbx-result-head > .dbx-query-status { margin-left:0;flex:0 0 min(32%, 250px);max-width:none; }
+.dbx-query-status-text { min-width:0;overflow:hidden;text-overflow:ellipsis; }
+.dbx-query-status .dbx-query-time { flex:none;font-variant-numeric:tabular-nums; }
 .dbx-result-tab-table { max-width:clamp(5ch,15cqi,22ch);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:hsl(var(--muted-foreground));font-family:var(--font-mono); }
 /* 注释给结果标签起的名字：比序号重要，但不该抢过表名的位置，所以单独限宽。 */
 .dbx-result-tab-name { max-width:clamp(6ch,18cqi,24ch);overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }

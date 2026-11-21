@@ -455,6 +455,10 @@ fn write_frame(stdin: &Mutex<ChildStdin>, msg: &Value) -> Result<(), String> {
 }
 
 impl LspClient {
+    pub(crate) fn memory_pid(&self) -> Option<u32> {
+        Some(self.child.try_lock().ok()?.id())
+    }
+
     /// 拉起进程并开始读取。进程的 stderr 丢弃（jdt.ls 的日志量很大且对用户无用）。
     pub fn spawn(cmd: Command, handler: Arc<dyn LspHandler>) -> Result<Self, String> {
         Self::spawn_inner(cmd, handler, None)

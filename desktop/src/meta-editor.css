@@ -192,7 +192,11 @@
 .meta-workbench .meta-canvas-node:focus-visible .meta-node-surface { stroke: hsl(var(--ring)); stroke-width: 2px; }
 .meta-zoom-value { min-width: 36px; justify-content: center; font-variant-numeric: tabular-nums; }
 .meta-canvas-empty { align-self: center; text-align: center; padding: 24px; }
-.meta-empty-toolbar { padding: 10px 12px; }
+.meta-empty-state { flex: 1; min-height: 0; gap: 14px; padding: 24px; }
+.meta-empty-state > :is(.empty-ring, svg.absolute) { display: none; }
+.meta-empty-state > svg.relative { color: hsl(var(--primary)); }
+.meta-empty-state > p { max-width: 360px; text-wrap: balance; }
+.meta-empty-state > div { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--gap-control); }
 .meta-workbench[data-size="compact"] .meta-sev-summary { display: none; }
 .meta-workbench[data-size="compact"] .meta-main-head { flex-wrap: wrap; }
 .meta-workbench[data-size="compact"] .meta-editor-toolbar { gap: 7px; }

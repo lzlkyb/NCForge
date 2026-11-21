@@ -46,9 +46,13 @@ describe("手动编译任务", () => {
     done(RESULT); await running;
     expect(mocks.state.compileResult).toMatchObject({ completedAtMs: expect.any(Number), sourceSnapshots: { "d:/p/x.java": { mtimeMs: 10, atMs: expect.any(Number) } } });
   });
-  it("锁定布局时编译失败保留用户当前工具", async () => {
-    updateWorkbenchLayout({ locked: true });
-    mocks.all.mockImplementation(async () => { mocks.state.panelTab = "svc"; return { ...RESULT, ok: false, errorCount: 1 }; });
+  it("编译开始及失败均保留用户当前面板", async () => {
+    mocks.state.panelTab = "svc"; mocks.state.panelOpen = false;
+    mocks.all.mockImplementation(async () => {
+      expect(mocks.state.panelOpen).toBe(false);
+      expect(mocks.state.panelTab).toBe("svc");
+      return { ...RESULT, ok: false, errorCount: 1 };
+    });
     expect(await api.compileAll()).toBe(false);
     expect(mocks.state.panelTab).toBe("svc");
   });
@@ -90,7 +94,7 @@ describe("手动编译任务", () => {
     expect(last().state).toBe("cancelling"); expect(mocks.state.compiling).toBe(true);
     fail(new Error("CANCELLED: stopped")); expect(await running).toBe(false);
     expect(last().state).toBe("cancelled"); expect(mocks.state.compiling).toBe(false);
-    expect(mocks.toast).toHaveBeenCalledWith("已取消编译", "info");
+    expect(mocks.toast).not.toHaveBeenCalled();
   });
   it("切换工程后不把旧诊断写进新工程", async () => {
     let done!: (value: typeof RESULT) => void;

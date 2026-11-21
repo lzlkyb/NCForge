@@ -579,6 +579,10 @@ fn launch(
     // 现在各模块互不混用，又能复用；只留最近用过的 DATA_KEEP 份控制磁盘占用。
     let data_dir = data_dir_for(&base, root, &nc_home, &ls_dir, shadow);
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("无法创建代码智能目录: {e}"))?;
+    let _ = crate::atomic_file::write_atomic(
+        &data_dir.join(crate::maintenance_storage::INDEX_OWNER),
+        format!("{} · {}", root.display(), shadow.as_str()).as_bytes(),
+    );
     remove_legacy_data(&base);
     touch_and_prune(&data_dir, DATA_KEEP, now_ms());
 

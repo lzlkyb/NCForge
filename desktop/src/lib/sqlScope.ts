@@ -1,8 +1,8 @@
 import type { SqlLanguage } from "sql-formatter";
-import { isSqlName, scanSql, sqlName, sqlReferenceKey, type SqlToken } from "./sqlLex";
+import { isSqlName, scanSql, sqlName, sqlReferenceKey, usesSqlAggregateFilter, type SqlToken } from "./sqlLex";
 
-export type SqlRole = "table" | "column" | "alias" | "cte" | "function";
-export interface SqlSource { name: string; nameRef?: string; alias?: string; aliasRef?: string; table?: string; tableRef?: string; schema?: string; quoted?: boolean; columns?: string[]; declaration: number }
+export type SqlRole = "table" | "column" | "alias" | "cte" | "function" | "keyword";
+export interface SqlSource { name: string; nameRef?: string; alias?: string; aliasRef?: string; table?: string; tableRef?: string; schema?: string; quoted?: boolean; columns?: string[]; declaredColumnKeys?: string[]; declaration: number }
 interface Cte { name: string; source: SqlSource; body: Region; visible: number; recursive: boolean }
 interface Region { start: number; end: number; parent?: Region; indices: number[]; scopes: Scope[]; ctes: Cte[]; isolated: boolean }
 interface Scope { start: number; end: number; select: number; indices: number[]; region: Region; sources: SqlSource[]; columns: string[] }
@@ -20,7 +20,9 @@ export function analyzeSql(sql: string, dialect: SqlLanguage = "sql"): SqlAnalys
   const regions = regionsOf(tokens, sql.length), scopes: Scope[] = [];
   if (regions.reduce((count, region) => count + region.indices.filter(i => QUERY.has(upper(tokens[i]))).length, 0) > SQL_SCOPE_LIMIT) return { tokens, roles, scopes, regions: [], dialect };
   for (const region of regions) {
-    const starts = region.indices.filter(i => QUERY.has(upper(tokens[i])));
+    const merge = upper(tokens[region.indices[0]]) === "MERGE";
+    // UPDATE / INSERT inside WHEN branches belong to the MERGE, not separate statements.
+    const starts = merge ? [region.indices[0]] : region.indices.filter(i => QUERY.has(upper(tokens[i])));
     for (let n = 0; n < starts.length; n++) {
       const select = starts[n], next = starts[n + 1];
       // INSERT ... SELECT shares a region, but SELECT owns its FROM and projection.
@@ -30,7 +32,7 @@ export function analyzeSql(sql: string, dialect: SqlLanguage = "sql"): SqlAnalys
       const scope: Scope = { start: n === 0 ? region.start : tokens[select].start, end: branch === undefined ? end : tokens[branch].start, select, indices, region, sources: [], columns: [] };
       region.scopes.push(scope); scopes.push(scope);
     }
-    readCtes(region, tokens, regions, roles);
+    readCtes(region, tokens, regions, roles, dialect);
   }
   // Inner outputs must exist before a derived table's outer projection is resolved.
   for (const scope of [...scopes].reverse()) {
@@ -59,7 +61,7 @@ function regionsOf(tokens: SqlToken[], length: number): Region[] {
   return regions;
 }
 
-function readCtes(region: Region, tokens: SqlToken[], regions: Region[], roles: Map<number, SqlRole>) {
+function readCtes(region: Region, tokens: SqlToken[], regions: Region[], roles: Map<number, SqlRole>, dialect: SqlLanguage) {
   const ids = region.indices;
   let p = ids.findIndex(i => upper(tokens[i]) === "WITH");
   if (p < 0) return;
@@ -68,10 +70,14 @@ function readCtes(region: Region, tokens: SqlToken[], regions: Region[], roles: 
   if (recursive) p++;
   while (p < ids.length && isSqlName(tokens[ids[p]])) {
     const declaration = ids[p++], name = sqlName(tokens[declaration]);
-    let columns: string[] | undefined;
+    let columns: string[] | undefined, declaredColumnKeys: string[] | undefined;
     if (tokens[ids[p]]?.text === "(") {
       const list = regions.find(r => r.start === tokens[ids[p]].end);
-      columns = list?.indices.filter(i => isSqlName(tokens[i])).map(i => sqlName(tokens[i]));
+      const fields = list?.indices.map(i => tokens[i]);
+      columns = fields?.filter(isSqlName).map(sqlName);
+      if (fields?.length && fields.length % 2 && fields.every((token, index) => index % 2 ? token.text === "," : isSqlName(token))) {
+        declaredColumnKeys = fields.filter(isSqlName).map(token => sqlReferenceKey(sqlName(token), token.text, dialect));
+      }
       p += 2;
     }
     if (upper(tokens[ids[p]]) !== "AS") break;
@@ -81,7 +87,7 @@ function readCtes(region: Region, tokens: SqlToken[], regions: Region[], roles: 
     const body = regions.find(r => r.start === tokens[ids[p]]?.end);
     if (!body) break;
     body.isolated = true;
-    region.ctes.push({ name, body, recursive, visible: body.end, source: { name, nameRef: tokens[declaration].text, columns, declaration } });
+    region.ctes.push({ name, body, recursive, visible: body.end, source: { name, nameRef: tokens[declaration].text, columns, declaredColumnKeys, declaration } });
     roles.set(declaration, "cte");
     p += 2;
     if (tokens[ids[p]]?.text !== ",") break;
@@ -104,7 +110,7 @@ function projectionOf(scope: Scope, tokens: SqlToken[]): string[] {
   for (const i of scope.indices.slice(1)) {
     const token = tokens[i], word = upper(token);
     if (word === "FROM" || STOP_FROM.has(word)) break;
-    if (word === "DISTINCT" || word === "ALL") continue;
+    if (word === "DISTINCT" || word === "ALL" || word === "DISTINCTROW" && token.kind === "keyword") continue;
     if (token.text === ",") items.push([]); else items[items.length - 1].push(i);
   }
   return [...new Set(items.flatMap(item => {
@@ -118,11 +124,14 @@ function projectionOf(scope: Scope, tokens: SqlToken[]): string[] {
 
 function sourcesOf(scope: Scope, tokens: SqlToken[], regions: Region[], roles: Map<number, SqlRole>, dialect: SqlLanguage): SqlSource[] {
   const sources: SqlSource[] = [], ids = scope.indices;
+  const merge = upper(tokens[scope.select]) === "MERGE";
   let inFrom = false, expectSource = false, sourceClause = "";
   for (let p = 0; p < ids.length; p++) {
     const token = tokens[ids[p]], word = upper(token);
     if (STOP_FROM.has(word)) inFrom = false;
-    if (["FROM", "JOIN", "UPDATE", "INTO"].includes(word)) { inFrom = word === "FROM" || inFrom; sourceClause = word; expectSource = true; continue; }
+    if (["FROM", "JOIN", "UPDATE", "INTO"].includes(word) || merge && word === "USING") {
+      inFrom = word === "FROM" || inFrom; sourceClause = word; expectSource = true; continue;
+    }
     if (inFrom && token.text === ",") { sourceClause = "FROM"; expectSource = true; continue; }
     if (!expectSource) continue;
     expectSource = false;
@@ -194,6 +203,12 @@ function classifyReferences(analysis: SqlAnalysis) {
     const i = ids[p], token = analysis.tokens[i];
     if (!isSqlName(token) || analysis.roles.has(i)) continue;
     const next = analysis.tokens[ids[p + 1]], previous = analysis.tokens[ids[p - 1]];
+    // A clause may start on the following line or after a comment; bare FILTER stays an identifier.
+    if (usesSqlAggregateFilter(analysis.dialect ?? "sql") && upper(token) === "FILTER" && previous?.text !== "."
+        && next?.text === "(" && upper(analysis.tokens[ids[p + 2]]) === "WHERE") {
+      analysis.roles.set(i, "keyword");
+      continue;
+    }
     if (next?.text === "(" && !["TABLE", "VIEW", "INDEX", "CONSTRAINT"].includes(upper(previous))) { analysis.roles.set(i, "function"); continue; }
     if (next?.text === ".") {
       const source = resolveSqlQualifier(analysis, token.start, sqlName(token), token.text);

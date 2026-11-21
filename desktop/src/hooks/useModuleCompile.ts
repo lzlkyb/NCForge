@@ -29,9 +29,7 @@ import {
 } from "../lib/ncTasks";
 import { beginOperation } from "../lib/operations";
 import { failureText } from "../lib/friendlyError";
-import { errorToast } from "../lib/errorToast";
 import { captureCompileSources, stampCompileResult } from "../lib/compileFreshness";
-import { getWorkbenchLayout } from "../lib/workbenchLayout";
 import { compileCancel } from "../lib/compile";
 import { toast } from "../components/ui/toast";
 import { missingResourceId } from "../lib/resourceMissing";
@@ -123,14 +121,15 @@ export function useModuleCompile() {
     mergeFiles?: readonly string[],
   ): Promise<boolean> => {
     if (getSession().compiling) { toast("已有编译在进行，请等待当前编译结束", "info"); return false; }
-    const operation = beginOperation({ key: "compile.manual", label: "编译工程", scope: getSession().root ?? "工作区", page: "files", phase: "编译磁盘中的源码", cancel: compileCancel });
+    const operation = beginOperation({ key: "compile.manual", label: "编译工程", scope: getSession().root ?? "工作区", page: "files", phase: "编译磁盘中的源码", cancel: compileCancel,
+      reveal: () => setSession({ panelOpen: true, panelTab: "build" }) });
     if (!operation) return false;
     if (unsavedHint && tabs.some((t) => t.dirty || t.eolChanged)) {
       toast("有未保存的文件，编译读取的是磁盘版本，请先保存（Ctrl+S）", "warning");
     }
     // 开始构建**不**清空上一轮结果：新结果要过几秒才回来，期间问题面板空掉
     // 会让人以为错误都修好了。日志仍然清空（那是本轮的过程输出）。
-    setSession({ panelOpen: true, panelTab: "build", compileResourceMissing: false, buildProgress: null });
+    setSession({ compileResourceMissing: false, buildProgress: null });
     setCompiling(true);
     flushLog.current();
     setCompileLog([]);
@@ -149,7 +148,6 @@ export function useModuleCompile() {
         : r;
       operation.finish(r.ok ? "success" : "failed", `编译 ${r.sourceCount} 个源文件，${r.errorCount} 个错误、${r.warningCount} 个警告`);
       setCompileResult(merged);
-      if (!getWorkbenchLayout().locked) setSession({ panelTab: merged.errorCount > 0 ? "problems" : "build" });
       // 任务链据此决定要不要继续投送/重启：编不过就不该把旧产物推上去
       return r.ok && merged.errorCount === 0;
     } catch (e) {
@@ -159,11 +157,9 @@ export function useModuleCompile() {
       operation.finish(isCompileCancelled(e) ? "cancelled" : "failed", String(e));
       if (isCompileCancelled(e)) {
         setCompileLog((l) => [...l, "编译已取消"]);
-        toast("已取消编译", "info");
       } else {
         setSession({ compileResourceMissing: missingResourceId(e) === "ecj" });
         setCompileLog((l) => [...l, failureText("编译", e)]);
-        errorToast("编译", e);
       }
       return false;
     } finally {

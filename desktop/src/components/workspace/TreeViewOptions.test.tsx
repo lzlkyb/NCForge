@@ -40,6 +40,8 @@ const renderHeader = () =>
     root.render(
       <TreeHeader
         root={"C:\\w\\newar"}
+        canCollapse={false}
+        onCollapseAll={noop}
         onCreateFile={noop}
         onCreateDir={noop}
       />,

@@ -43,7 +43,7 @@ it("status stays inline and preserves script progress and stop confirmation",asy
 it("elapsed time lives in its own component and clears its timer",async()=>{
  vi.useFakeTimers();
  await act(async()=>root.render(<QueryElapsed startedAt={Date.now()}/>));
- await act(async()=>vi.advanceTimersByTime(1200));expect(host.textContent).toContain("1s");
+ await act(async()=>vi.advanceTimersByTime(1200));expect(host.textContent).toContain("已用 1 秒");
  await act(async()=>root.unmount());expect(vi.getTimerCount()).toBe(0);root=createRoot(host);vi.useRealTimers();
 });
 

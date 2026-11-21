@@ -50,27 +50,33 @@ export function useSqlConsoleSplit(tabId: string) {
     // 专注模式属于当前文档，不能把隐藏后的全高写回用户的分隔比例。
     setLayouts(current => ({ ...current, [tabId]: { preferred: current[tabId]?.preferred ?? initialHeight, focus: next } }));
   };
-  const startDrag = (startY: number) => {
+  const startDrag = (startY: number, pointerId?: number) => {
     if (focus !== "split") return;
     dragCleanup.current?.();
     const start = height;
     const finish = () => {
       window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", finish);
+      window.removeEventListener("pointerup", pointerEnd);
+      window.removeEventListener("pointercancel", pointerEnd);
+      window.removeEventListener("lostpointercapture", pointerEnd);
+      window.removeEventListener("blur", finish);
       dragCleanup.current = null;
       setDragging(false);
       save();
     };
     const move = (event: PointerEvent) => {
-      if (event.buttons === 0) return finish();
+      if (pointerId !== undefined && event.pointerId !== pointerId) return;
+      if (!(event.buttons & 1)) return finish();
       change(start + startY - event.clientY);
     };
+    const pointerEnd = (event: PointerEvent) => { if (pointerId === undefined || event.pointerId === pointerId) finish(); };
     dragCleanup.current = finish;
     setDragging(true);
     window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", finish, { once: true });
-    window.addEventListener("pointercancel", finish, { once: true });
+    window.addEventListener("pointerup", pointerEnd);
+    window.addEventListener("pointercancel", pointerEnd);
+    window.addEventListener("lostpointercapture", pointerEnd);
+    window.addEventListener("blur", finish);
   };
   const onKeyDown = (event: KeyboardEvent) => {
     if (focus !== "split") return;

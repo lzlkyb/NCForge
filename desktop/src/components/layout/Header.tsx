@@ -5,9 +5,7 @@ import { Button } from "../ui/button";
 import { APP_INFO } from "../../lib/about";
 import { Icon } from "../ui/icon";
 import { TitleBarControls } from "./TitleBarControls";
-import { UpdateReadout } from "../update/UpdateReadout";
 import { ApplicationMenu, LayoutMenu } from "./HeaderMenus";
-import { OperationStatus } from "../ui/OperationStatus";
 import { ResourceDownloadEntry } from "../resource/ResourceDownloadEntry";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 import { ServiceStatusButton } from "../workspace/ServiceStatusButton";
@@ -19,7 +17,7 @@ import { useWorkspaceSelector } from "../../lib/workspaceSession";
  *
  * 与 cc-bridge 版 Header 的差异：剥去了「服务启停按钮」「安全徽章」「挂起命令胶囊」
  * 等业务件，保留全部 chrome 范式——拖拽区划分（data-tauri-drag-region）、
- * UpdateReadout 挂载点、窗口控件。业务按钮加在右侧 group 里即可。
+ * 窗口控件。业务按钮加在右侧 group 里即可。
  */
 function HeaderImpl({
   onOpenPalette,
@@ -63,20 +61,17 @@ function HeaderImpl({
         <WorkspaceMenu />
       </div>
 
-      {/* 中部：拖拽空白（无系统标题栏，需要留足可拖区域）+ 下载期读数。
-          读数只在这块空白里铺开、且自带 pointer-events:none，拖拽不受影响。 */}
+      {/* 无系统标题栏，留出拖拽区域。 */}
       <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center self-stretch">
-        {onOpenPalette && <button type="button" className="wb-global-search" data-tauri-drag-region="false" onClick={onOpenPalette} title="转到文件、类型、符号或命令（输入 > 进入命令，@ 进入符号）">
-          <Icon name="search" size={14} /><span>转到文件、搜索、符号…</span><kbd>{paletteKeyLabel("file", keymap)}</kbd>
+        {onOpenPalette && <button type="button" className="wb-global-search" data-tauri-drag-region="false" onClick={onOpenPalette} title="搜索文件、正文、符号和命令">
+          <Icon name="search" size={14} /><span>搜索文件、正文、符号和命令…</span><kbd>{paletteKeyLabel("file", keymap)}</kbd>
         </button>}
-        <UpdateReadout />
       </div>
 
       {/* 右侧：搜索 / 主题 / 窗口控件 */}
       <div data-tauri-drag-region="false" className="flex shrink-0 items-center gap-1">
         <ToolReturnEntry />
         <ServiceStatusButton header />
-        <OperationStatus />
         <ResourceDownloadEntry />
         {(activeTool !== "files" || !activePath) && <LayoutMenu activeTool={activeTool} />}
         <Button

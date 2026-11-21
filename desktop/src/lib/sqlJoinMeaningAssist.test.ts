@@ -2,7 +2,10 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { monaco } from "./monacoSetup";
 const h = vi.hoisted(() => ({ enabled: true, subscriptions: new Set<() => void>(), markers: vi.fn(), providers: new Set<monaco.languages.CodeActionProvider>() }));
 vi.mock("./monacoSetup", () => ({ monaco: { MarkerSeverity: { Info: 2 }, Range: { fromPositions: (a: { lineNumber: number; column: number }, b: { lineNumber: number; column: number }) => ({ startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column }) }, editor: { setModelMarkers: h.markers }, languages: { registerCodeActionProvider: (_: string, p: monaco.languages.CodeActionProvider) => { h.providers.add(p); return { dispose: () => h.providers.delete(p) }; } } } }));
-vi.mock("./monacoSql", () => ({ dialectOfSqlModel: () => "plsql", SQL_LANGUAGE_IDS: ["sql"] }));
+vi.mock("./monacoSql", async () => {
+  const { analyzeSql } = await import("./sqlScope");
+  return { sqlAnalysisOf: (model: monaco.editor.ITextModel) => analyzeSql(model.getValue(), "plsql"), SQL_LANGUAGE_IDS: ["sql"] };
+});
 vi.mock("./sqlTemplates", () => ({ getSqlTemplatesEnabled: () => h.enabled, subscribeSqlTemplates: (fn: () => void) => { h.subscriptions.add(fn); return () => h.subscriptions.delete(fn); } }));
 import { wireSqlJoinMeaningAssist } from "./sqlJoinMeaningAssist";
 const cleanups: (() => void)[] = [];

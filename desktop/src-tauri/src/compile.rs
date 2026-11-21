@@ -887,10 +887,7 @@ fn write_args(
     ));
     s.push_str(&format!("-d \"{}\"\n", fwd(out_dir)));
     for (p, enc) in sources {
-        let tag = match enc {
-            TextEncoding::Gbk => "GBK",
-            TextEncoding::Utf8 => "UTF-8",
-        };
+        let tag = enc.label();
         s.push_str(&format!("\"{}[{tag}]\"\n", fwd(p)));
     }
     std::fs::write(path, s)

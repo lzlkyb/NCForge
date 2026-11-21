@@ -10,8 +10,23 @@ export const sqlLanguageId = (dialect: SqlLanguage) => dialect === "sql" ? "sql"
 export const SQL_LANGUAGE_IDS = DIALECTS.map(sqlLanguageId);
 export const dialectOfSqlModel = (model: Monaco.editor.ITextModel): SqlLanguage => DIALECTS.find(d => sqlLanguageId(d) === model.getLanguageId()) ?? "sql";
 const cache = new WeakMap<Monaco.editor.ITextModel, { version: number; dialect: SqlLanguage; analysis: SqlAnalysis }>();
+const activeStatements = new WeakMap<Monaco.editor.ITextModel, { version: number; dialect: SqlLanguage; analysis: SqlAnalysis }>();
+const listeners = new Set<() => void>();
+
+export function publishActiveSqlStatement(model: Monaco.editor.ITextModel, analysis?: SqlAnalysis) {
+  if (analysis) activeStatements.set(model, { version: model.getVersionId(), dialect: dialectOfSqlModel(model), analysis });
+  else if (!activeStatements.delete(model)) return;
+  for (const listener of listeners) listener();
+}
+
+function activeSqlStatement(model: Monaco.editor.ITextModel) {
+  const active = activeStatements.get(model);
+  return active?.version === model.getVersionId() && active.dialect === dialectOfSqlModel(model) ? active.analysis : undefined;
+}
 
 export function sqlAnalysisOf(model: Monaco.editor.ITextModel): SqlAnalysis {
+  const active = activeSqlStatement(model);
+  if (active) return active;
   const version = model.getVersionId(), dialect = dialectOfSqlModel(model), previous = cache.get(model);
   if (previous?.version === version && previous.dialect === dialect) return previous.analysis;
   // Monaco still tokenizes visible lines; large scripts skip full-document completion/link analysis.
@@ -40,9 +55,15 @@ export function sqlTokensProvider(dialect: SqlLanguage): Monaco.languages.Tokens
 
 export function sqlSemanticProvider(): Monaco.languages.DocumentSemanticTokensProvider {
   return {
+    onDidChange(listener, receiver) {
+      const handler = () => listener.call(receiver, undefined);
+      listeners.add(handler);
+      const disposable = { dispose: () => { listeners.delete(handler); } };
+      return disposable;
+    },
     getLegend: () => ({ tokenTypes: SQL_HIGHLIGHT_KINDS.map(sqlTokenStyle), tokenModifiers: [] }),
     provideDocumentSemanticTokens: (model, _lastResultId, cancel) => {
-      if (cancel.isCancellationRequested || model.isDisposed() || model.getValueLength() > SQL_ANALYSIS_LIMIT) return null;
+      if (cancel.isCancellationRequested || model.isDisposed() || model.getValueLength() > SQL_ANALYSIS_LIMIT && !activeSqlStatement(model)) return null;
       const analysis = sqlAnalysisOf(model), data: number[] = [];
       let lastLine = 0, lastColumn = 0;
       for (const [i] of [...analysis.roles].sort(([a], [b]) => a - b)) {
@@ -59,7 +80,7 @@ export function sqlSemanticProvider(): Monaco.languages.DocumentSemanticTokensPr
           offset += line.length + 1;
         }
       }
-      return cancel.isCancellationRequested ? null : { resultId: String(model.getVersionId()), data: new Uint32Array(data) };
+      return cancel.isCancellationRequested ? null : { resultId: `${model.getVersionId()}:${analysis.tokens[0]?.start ?? 0}`, data: new Uint32Array(data) };
     },
     // The cache belongs to the model WeakMap; result IDs hold no external resources.
     releaseDocumentSemanticTokens: () => {},

@@ -55,6 +55,8 @@ vi.mock("../../lib/editorStore", () => ({
 vi.mock("../../lib/lang", () => ({
   initLang: vi.fn(async () => {}),
   ensureLang: vi.fn(),
+  // 文件页挂载会经过 `useLangWiring`，它在工作区变化时预热代码智能
+  prepareLang: vi.fn(async () => {}),
   stopLang: vi.fn(async () => {}),
   setNavHandler: vi.fn(),
   navigate: vi.fn(),

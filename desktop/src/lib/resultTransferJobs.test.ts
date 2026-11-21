@@ -127,6 +127,6 @@ describe("导出任务隔离与取消", () => {
     mocks.file.mockRejectedValueOnce(new Error("disk is full")); await jobs.startTransferJob(source("conn-a", "failed"), request(), "失败");
     expect(jobs.getTransferJob(jobs.transferJobKey(source("conn-a", "failed")))).toMatchObject({ state: "failed", error: "disk is full" });
     expect(mocks.unlisteners.every(un => un.mock.calls.length === 1)).toBe(true);
-    expect(operations.getOperations().map(operation => operation.state)).toEqual(["cancelled", "success", "failed"]);
+    expect(operations.getOperations().map(operation => operation.state)).toEqual(["cancelled", "partial", "failed"]);
   });
 });

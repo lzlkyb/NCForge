@@ -137,14 +137,13 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
   // 空面板与分隔条靠 workbench-layout.css 的 `:empty` 规则收起。
   return <WorkbenchDockContext.Provider value={dock}>
     <ShowDocumentBridge show={showDocument} />
-    <WorkspacePageMotion page={activeTool} target={pageRef} />
-    <div className="wb-root" data-tool={activeTool}>
+    <div ref={pageRef} className="wb-root" data-tool={activeTool}>
       <div className="wb-content-frame">
       <header className="wb-toolbar" hidden={!hasToolbar}>
         <div ref={refs.toolbar} className="wb-toolbar-host" />
         <div ref={refs.actions} className="wb-toolbar-actions" />
       </header>
-      <div className="wb-layout" data-side-open={sideShown} style={{ gridTemplateColumns: sideShown ? `${sideWidth}px 4px minmax(0,1fr)` : "0px 0px minmax(0,1fr)" }}>
+      <div className="wb-layout" data-side-open={sideShown} style={{ gridTemplateColumns: `${sideShown ? sideWidth : 0}px 0px minmax(0,1fr)` }}>
         {/* 收起时不能用 hidden：display:none 的 aside 不占网格格子，后面的分隔条与主区会各前进一格，主区落进 0px 那一列 */}
         <button type="button" className="wb-side-backdrop" aria-label="收起侧栏" tabIndex={-1} hidden={!sideShown} onClick={closeSide} />
         <aside ref={sideRef} className="wb-tree" data-closed={!sideShown || undefined} aria-label={sideLabel} style={narrow ? undefined : { width: sideWidth }}>
@@ -161,7 +160,7 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
             e.preventDefault();
             resize("side", e.clientX, sideWidth, { id: e.pointerId, element: e.currentTarget });
           }} onKeyDown={e => onSeparatorKey(e, "side")} />
-        <div className="wb-main-with-inspector" ref={node => { pageRef.current = node; if (node) node.inert = drawerOpen; }}>
+        <div className="wb-main-with-inspector" ref={node => { if (node) node.inert = drawerOpen; }}>
         <section className="wb-main" data-service-mode={panelOpen && panelTab === "svc" || undefined} data-service-expanded={panelExpanded || undefined} data-panel-expanded={panelExpanded || undefined}>
           <div className="wb-surface-stack">
           {/* 代码面自带文件标签条：切到工具页时整块 hidden，文件标签就不可能和
@@ -204,5 +203,6 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
       <div ref={fileRefs.status} className="wb-status-host">{status}</div>
       <div className="wb-tool-runtime">{tool}</div>
     </div>
+    <WorkspacePageMotion page={activeTool} target={pageRef} />
   </WorkbenchDockContext.Provider>;
 }

@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
-import { act, createRef } from "react";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { TreeSvnContext } from "./TreeSvnContext";
 import { pathKey } from "../../lib/treeSvn";
-import { FileTree, type FileTreeHandle } from "./FileTree";
+import { FileTree } from "./FileTree";
+import { listCommands } from "../../lib/commandRegistry";
+import { treeFilterFor } from "../../lib/treeFilter";
 import { getSession, setSession } from "../../lib/workspaceSession";
+import { invalidateWorkspaceRequests } from "../../lib/workspaceEpoch";
 import {
   setCompactPackages,
   setNcStructure,
@@ -61,7 +64,6 @@ const onCreated = vi.fn();
 const onRenamed = vi.fn();
 const onDeleted = vi.fn();
 const onCompileModule = vi.fn();
-const treeRef = createRef<FileTreeHandle>();
 
 const render = async (activePath: string | null = null, projects?: LinkedProject[], svn: React.ContextType<typeof TreeSvnContext> = { files: new Map(), directories: new Map(), summary: null }) => {
   await act(async () =>
@@ -69,7 +71,6 @@ const render = async (activePath: string | null = null, projects?: LinkedProject
       <ViewActivityContext.Provider value={true}>
         <TreeSvnContext.Provider value={svn}>
         <FileTree
-          ref={treeRef}
           root={ROOT}
           projects={projects}
           activePath={activePath}
@@ -115,6 +116,12 @@ const click = async (el: Element | undefined | null) => {
   await act(async () => (el as HTMLElement).click());
 };
 
+const collapseButton = () => container.querySelector<HTMLButtonElement>('[aria-label="全部折叠"]')!;
+const createFileFromToolbar = async () => {
+  await click(container.querySelector('[aria-label="更多资源操作"]'));
+  await click(menuItem("新建文件"));
+};
+
 /** React 受控输入：必须走原生 setter，否则 React 收不到这次变化。 */
 const typeInto = async (el: HTMLInputElement, value: string) =>
   act(async () => {
@@ -130,11 +137,13 @@ const pressEnter = async (el: HTMLInputElement) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  treeFilterFor(ROOT).set({ text: "", open: false });
   setCodeDiags([]);
   setCompactPackages(true);
   setRevealOnOpen(true);
   setNcStructure(false);
   setPackageView(false);
+  invalidateWorkspaceRequests();
   // 预置一棵已展开的树，免得每次渲染都去 listDir
   setSession({
     compileResult: null,
@@ -221,6 +230,34 @@ it("只看改动保留父目录，退出后恢复展开状态和滚动位置", a
   expect(rowByExact("readme.txt")).toBeTruthy();
   expect(rowByExact(name)).toBeNull();
   expect(list.scrollTop).toBe(90);
+});
+
+it("有筛选时通过命令面板折叠，退出筛选也不会展开旧目录", async () => {
+  const file = `${MODULES}\\changed.txt`;
+  setSession({ tree: { ...getSession().tree, expanded: new Set([ROOT, MODULES]), dirs: {
+    ...getSession().tree.dirs, [MODULES]: { status: "ok", items: [{ name: "changed.txt", isDir: false, size: 1 }] },
+  } } });
+  await render(null, undefined, {
+    files: new Map([[pathKey(file), "M"]]), directories: new Map([[pathKey(ROOT), 1], [pathKey(MODULES), 1]]), summary: null,
+  });
+  const list = container.querySelector<HTMLElement>('[role="tree"]')!;
+  const filter = container.querySelector<HTMLButtonElement>('.wb-tree-problem-tools button[title*="SVN"]')!;
+  list.scrollTop = 90;
+  await click(filter);
+  await click(rowByExact("changed.txt"));
+  await act(async () => treeFilterFor(ROOT).set({ text: "modules", open: true }));
+  const command = () => listCommands().find(c => c.id === "view.collapseTree");
+  const collapse = command();
+  expect(collapse).toBeDefined();
+  await act(async () => collapse!.run());
+  expect(filter.getAttribute("aria-pressed")).toBe("true");
+  expect(treeFilterFor(ROOT).get()).toEqual({ text: "modules", open: true });
+  expect(collapseButton().disabled).toBe(true);
+  expect(command()).toBeUndefined();
+  await click(filter);
+  expect(getSession().tree.expanded).toEqual(new Set([ROOT]));
+  expect(rowByExact("modules")?.getAttribute("aria-expanded")).toBe("false");
+  expect(list.scrollTop).toBe(0);
 });
 
 describe("树目录文件类型", () => {
@@ -501,7 +538,7 @@ describe("文件树的右键操作", () => {
   it("标题栏的新建按钮作用在当前选中项上", async () => {
     await render();
     // 没选中时建在根下
-    await act(async () => treeRef.current?.startCreate("file"));
+    await createFileFromToolbar();
     const input = container.querySelector<HTMLInputElement>(".wb-tree-edit-input")!;
     await typeInto(input, "Top.java");
     await pressEnter(input);
@@ -564,6 +601,20 @@ describe("多工程树", () => {
     expect(rowByExact("Util.java")).toBeTruthy();
     // 目录已缓存，展开工程行不该再打一次 IPC
     expect(mocks.invoke).not.toHaveBeenCalledWith("fs_list_dir", { path: OTHER });
+  });
+
+  it("多工程一次收起全部根，保留目录缓存和可见的选择", async () => {
+    await render(null, PROJECTS);
+    await click(projectRow("lib"));
+    await click(rowByExact("Util.java"));
+    const dirs = getSession().tree.dirs;
+    await click(collapseButton());
+    expect(projectRow("lib")?.getAttribute("aria-expanded")).toBe("false");
+    expect(projectRow("newar")?.getAttribute("aria-expanded")).toBe("false");
+    expect(projectRow("lib")?.getAttribute("aria-selected")).toBe("true");
+    expect(rowByExact("Util.java")).toBeNull();
+    expect(getSession().tree.dirs).toBe(dirs);
+    expect(collapseButton().disabled).toBe(true);
   });
 
   it("依赖工程的文件只读：菜单没有新建，改名 / 删除是禁用态", async () => {
@@ -671,6 +722,35 @@ describe("自动定位", () => {
     if (cmd === "fs_encoding_marks") return [];
     return [];
   };
+  it.each([0, 130])("全部折叠取消正在排队或执行的定位（%dms），下次跳转仍能展开", async (delay) => {
+    vi.useFakeTimers();
+    try {
+      setPackageView(true);
+      let finishRead!: (entries: { name: string; isDir: boolean; size: number }[]) => void;
+      const pending = new Promise<Parameters<typeof finishRead>[0]>(resolve => { finishRead = resolve; });
+      mocks.invoke.mockImplementation(async (cmd, args) => cmd === "fs_list_dir" && args.path === MODULES ? pending : []);
+      await render(FILE);
+      await act(async () => vi.advanceTimersByTimeAsync(delay));
+      expect(mocks.invoke.mock.calls.some(([cmd, args]) => cmd === "fs_list_dir" && args.path === MODULES)).toBe(delay > 0);
+      await click(collapseButton());
+      await act(async () => {
+        finishRead([{ name: "A.java", isDir: false, size: 10 }]);
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(getSession().tree.expanded.size).toBe(0);
+      expect(rowByExact("A.java")).toBeNull();
+      expect(container.querySelector('[aria-label="自动定位"]')?.getAttribute("aria-pressed")).toBe("true");
+      await render(`${ROOT}\\readme.txt`);
+      await act(async () => vi.advanceTimersByTimeAsync(200));
+      expect(rowByExact("readme.txt")?.getAttribute("aria-current")).toBe("true");
+      expect(rowByExact("modules")?.getAttribute("aria-expanded")).toBe("false");
+      await click(collapseButton());
+      await act(async () => window.dispatchEvent(new CustomEvent("ncforge-reveal-in-tree", { detail: FILE })));
+      expect(rowByExact("A.java")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("默认开：切到某个文件就展开父目录并显示那一行", async () => {
     mocks.invoke.mockImplementation(replyA);
     await render(FILE);
@@ -812,7 +892,6 @@ describe("压缩中间包", () => {
         ),
       },
     });
-    // 展开时会刷新链尾那一层，回同一份列表
     mocks.invoke.mockImplementation(async (cmd: string, args: { path?: string } = {}) => {
       if (cmd === "fs_list_dir") return LISTING[args.path ?? ""] ?? [];
       if (cmd === "fs_encoding_marks") return [];
@@ -828,6 +907,10 @@ describe("压缩中间包", () => {
 
     await click(rowByExact("com.aier.erp"));
     expect(rowByExact("Deep.java")).toBeTruthy();
+    await click(rowByExact("com.aier.erp"));
+    await click(rowByExact("com.aier.erp"));
+    expect(rowByExact("Deep.java")).toBeTruthy();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("fs_list_dir", { path: ERP });
   });
 
   it("关掉开关后每层各占一行，点一次只展开这一层", async () => {
@@ -1133,6 +1216,50 @@ describe("NC 结构视图", () => {
 
 
 describe("包资源管理器", () => {
+  it("后台准备源码根，点击后直接显示包和源码根的文件", async () => {
+    vi.useFakeTimers();
+    try {
+      const source = `${ROOT}\\src`;
+      const folder = { name: "src", isDir: true, size: 0 };
+      const index = [{ relative: "nccloud/itf", isPackage: true }];
+      let finishRefresh!: (value: typeof index) => void;
+      const refresh = new Promise<typeof index>(resolve => { finishRefresh = resolve; });
+      let indexReads = 0;
+      setSession({ tree: { root: ROOT, dirs: { [ROOT]: { status: "ok", items: [folder] } }, expanded: new Set([ROOT]), marks: {} } });
+      mocks.invoke.mockImplementation(async (cmd: string, { path }: { path?: string } = {}) => {
+        if (cmd === "fs_read_file") return { text: '<classpath><classpathentry kind="src" path="src"/></classpath>' };
+        if (cmd === "nc_manifest") return { components: [] };
+        if (cmd === "fs_list_dir") return path === ROOT ? [folder] : [{ name: "root.properties", isDir: false, size: 1 }];
+        if (cmd === "fs_package_dirs") return indexReads++ === 0 ? index : refresh;
+        throw new Error(cmd);
+      });
+      setPackageView(true);
+      await render();
+      expect(mocks.invoke).not.toHaveBeenCalledWith("fs_package_dirs", { path: source });
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(mocks.invoke).toHaveBeenCalledWith("fs_package_dirs", { path: source });
+      const requests = mocks.invoke.mock.calls.length;
+      await click(rowByExact("src"));
+      expect(rowByExact("nccloud.itf")).toBeTruthy();
+      expect(rowByExact("root.properties")).toBeTruthy();
+      expect(container.textContent).not.toMatch(/正在整理包列表|加载中…/);
+      await click(rowByExact("src"));
+      await click(rowByExact("src"));
+      expect(mocks.invoke.mock.calls).toHaveLength(requests);
+
+      await act(async () => root.render(null));
+      await render();
+      expect(indexReads).toBe(2);
+      expect(rowByExact("nccloud.itf")).toBeTruthy();
+      expect(container.textContent).not.toContain("正在整理包列表");
+      await act(async () => finishRefresh([{ relative: "nccloud/impl", isPackage: true }]));
+      expect(rowByExact("nccloud.impl")).toBeTruthy();
+      expect(rowByExact("nccloud.itf")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("完整文件名后显示 SVN 提交人和时间，改动置于图标旁", async () => {
     const changedName = "AierReturnPushBillForJCBO.java";
     const names = ["Clean.java", changedName, "New.java", "Conflict.java", "Untracked.java", "Unknown.java"];
@@ -1250,6 +1377,12 @@ describe("包资源管理器", () => {
     await click(rowByExact("Demo.java")!.querySelector(".wb-file-disclosure"));
     expect(rowByExact("unsaved()")).toBeTruthy();
     expect(mocks.invoke.mock.calls.filter(call => call[0] === "fs_java_outline_source")).toHaveLength(1);
+    await click(collapseButton());
+    expect(rowByExact("Demo.java")).toBeNull();
+    expect(collapseButton().disabled).toBe(true);
+    await click(container.querySelector(".wb-row-project"));
+    expect(rowByExact("Demo.java")).toBeTruthy();
+    expect(rowByExact("unsaved()")).toBeNull();
   });
 
   it("完整包名同级展示，展开和定位无需打开前缀目录", async () => {
@@ -1309,7 +1442,7 @@ describe("包资源管理器", () => {
     expect(editor()?.style.getPropertyValue("--wb-tree-pad")).toBe("52px");
     await act(async () => editor()?.querySelector("input")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
 
-    await act(async () => treeRef.current?.startCreate("file"));
+    await createFileFromToolbar();
     expect(editor()?.style.getPropertyValue("--wb-tree-pad")).toBe("52px");
     expect(editor()?.querySelector("input")?.getAttribute("placeholder")).toBe("文件名");
   });
@@ -1526,7 +1659,7 @@ describe("树键盘导航", () => {
 
   it("编辑态下 Escape 能取消，方向键不穿透到树", async () => {
     await render();
-    await act(async () => treeRef.current!.startCreate("file"));
+    await createFileFromToolbar();
     expect(editInput()).toBeTruthy();
     await key("ArrowDown");
     expect(treeEl().getAttribute("aria-activedescendant")).toBeNull();

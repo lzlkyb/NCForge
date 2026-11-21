@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { onBuildProgress } from "../lib/compile";
 import { setSession } from "../lib/workspaceSession";
+import { updateOperation } from "../lib/operations";
 
 /**
  * 订阅模块级构建进度（`build-progress`）。
@@ -12,7 +13,14 @@ export function useBuildProgress(): void {
   useEffect(() => {
     let cancelled = false;
     let off: (() => void) | undefined;
-    void onBuildProgress((p) => setSession({ buildProgress: p }))
+    void onBuildProgress((p) => {
+      if (cancelled) return;
+      setSession({ buildProgress: p });
+      updateOperation("compile.manual", {
+        phase: p.module ? `${p.phase} · ${p.module}` : p.phase,
+        progress: p.total > 0 ? { done: p.done, total: p.total, unit: "个模块" } : undefined,
+      });
+    })
       .then((f) => {
         if (cancelled) f();
         else off = f;

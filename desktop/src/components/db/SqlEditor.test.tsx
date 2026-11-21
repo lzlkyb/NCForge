@@ -177,7 +177,7 @@ describe("SQL 编辑器动作与真实执行目标", () => {
   });
   it("主执行与当前语句分别接到一致的菜单和快捷键", () => {
     const onRun = vi.fn(); mount("", onRun);
-    expect(mocks.actions.map(action => action.id)).toEqual(["ncforge.sql.run", "ncforge.sql.runCurrent", "ncforge.sql.runScript", "ncforge.sql.format"]);
+    expect(mocks.actions.map(action => action.id)).toEqual(["ncforge.sql.run", "ncforge.sql.runCurrent", "ncforge.sql.runScript", "ncforge.sql.format", "ncforge.sql.businessLookup"]);
     for (const action of mocks.actions) { expect(action.contextMenuGroupId).toBeTruthy(); expect(action.label.length).toBeGreaterThan(0); }
     const [run, current, script, format] = mocks.actions;
     expect(run.keybindings).toEqual([2048 | 3]); expect(current.keybindings).toEqual([2048 | 1024 | 3]); expect(script.keybindings).toEqual([512 | 88]); expect(format.keybindings).toEqual([2048 | 1024 | 70]);
@@ -199,7 +199,7 @@ describe("SQL 编辑器动作与真实执行目标", () => {
     select({ startLineNumber: 2, startColumn: 1, endLineNumber: 5, endColumn: 20 });
     const target = apiRef.current!.target("auto");
     const shown = onScope.mock.lastCall![0];
-    expect(shown).toEqual({ tabId: "t1", selected: true, statements: target });
+    expect(shown).toEqual({ tabId: "t1", selected: true, statements: target, current: apiRef.current!.target("current")[0] });
     expect(target).toHaveLength(2);
     expect(target[0].startLine).toBe(2); expect(target[1].endLine).toBe(5);
     expect(apiRef.current!.target("script")).toHaveLength(2);
@@ -273,7 +273,7 @@ it("切标签恢复各自视图，并立即替换执行范围，隐藏的旧视�
   expect(onScope.mock.lastCall![0].selected).toBe(false);
   expect(mocks.scrollTop).toBe(0);
   render("t1", false); render("t1", true);
-  expect(onScope.mock.lastCall![0]).toEqual({ tabId: "t1", selected: true, statements: firstTarget });
+  expect(onScope.mock.lastCall![0]).toEqual({ tabId: "t1", selected: true, statements: firstTarget, current: apiRef.current!.target("current")[0] });
   expect(mocks.scrollTop).toBe(120);
 });
 
@@ -339,6 +339,25 @@ describe("SQL 格式化范围", () => {
     select({ startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 9 });
     await act(async () => { await apiRef.current!.format("auto"); });
     expect(mocks.format).toHaveBeenCalledWith("select 1", "plsql");
+  });
+
+  it("选区排版保留末尾换行，下一行不会被行注释吞掉", async () => {
+    mocks.format.mockResolvedValue("select\n  a -- note");
+    const { apiRef } = mount("select a -- note\nfrom t");
+    select({ startLineNumber: 1, startColumn: 1, endLineNumber: 2, endColumn: 1 });
+    await act(async () => { await apiRef.current!.format(); });
+    expect(mocks.model!.getValue()).toBe("select\n  a -- note\nfrom t");
+  });
+
+  it("只选过程体执行排版时同样保护 MySQL DELIMITER 段", async () => {
+    mocks.language.mockReturnValueOnce("mysql");
+    const sql = "DELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; END$$\nDELIMITER ;";
+    const { apiRef } = mount(sql);
+    select({ startLineNumber: 2, startColumn: 28, endLineNumber: 2, endColumn: 36 });
+    await act(async () => { await apiRef.current!.format(); });
+    expect(mocks.format).not.toHaveBeenCalled();
+    expect(mocks.model!.getValue()).toBe(sql);
+    expect(mocks.toast).toHaveBeenCalledWith(expect.stringContaining("DELIMITER"), "warning");
   });
 });
 

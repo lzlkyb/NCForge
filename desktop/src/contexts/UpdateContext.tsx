@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect, useMemo, u
 import { relaunch } from "@tauri-apps/plugin-process";
 import { invoke } from "../lib/tauri";
 import { beginOperation, type OperationHandle } from "../lib/operations";
+import { createOperationEstimator } from "../lib/operationEstimate";
 import { listen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
 import { UpdateNotesDialog } from "../components/update/UpdateNotesDialog";
 import { RestartOverlay } from "../components/update/RestartOverlay";
@@ -227,6 +228,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   });
   const checkTask = useRef<OperationHandle | null>(null);
   const downloadTask = useRef<OperationHandle | null>(null);
+  const estimateDownload = useRef<ReturnType<typeof createOperationEstimator>>();
   const installTask = useRef<OperationHandle | null>(null);
   const checkingRef = useRef(false);
   const downloadingRef = useRef(false);
@@ -371,6 +373,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     if (!update || checkingRef.current || downloadingRef.current || restartingRef.current || statusRef.current === "ready" || statusRef.current === "installing") return;
     downloadingRef.current = true;
     downloadTask.current = beginOperation({ key: "update.download", label: "下载软件更新", page: "settings", phase: "检查更新包并开始下载" });
+    estimateDownload.current = createOperationEstimator();
     installedRef.current = false;
     userInitiatedRef.current = !automatic; // 后台失败只显示状态，不打断工作。
     setStatus("downloading");
@@ -464,13 +467,18 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       track(
         await register<{ downloaded: number; total: number | null; bytesPerSec?: number }>("update:progress", (e) => {
           const { downloaded, total, bytesPerSec: bps } = e.payload;
-          downloadTask.current?.update({ phase: "下载更新包", progress: { done: downloaded, total: total ?? undefined } });
+          const received = total != null && total > 0 && downloaded >= total;
+          downloadTask.current?.update({
+            phase: received ? "正在验证更新包" : "下载更新包",
+            progress: received ? undefined : { done: downloaded, total: total ?? undefined, unit: "字节" },
+            estimate: estimateDownload.current?.("download", downloaded, total),
+          });
           setDownloadedBytes(downloaded);
           // totalBytes 是顶栏读数算「已下载/总量」与「剩余时间」的唯一来源；
           // total 为 null（源未返回 Content-Length）时保持 null ⇒ 读数走不确定态。
           setTotalBytes(total);
           if (total) {
-            setProgress(Math.round((downloaded / total) * 100));
+            setProgress(Math.min(100, Math.floor((downloaded / total) * 100)));
             setProgressIndeterminate(false);
           } else {
             // total 未知（如某些源不返回 Content-Length）：无法计算百分比，标记不确定态

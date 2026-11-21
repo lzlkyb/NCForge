@@ -1,21 +1,22 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useResultOrder } from "../../hooks/useResultOrder";
 import { selectionBounds } from "../../lib/gridViewport";
-import { selectedEditableCells } from "../../lib/gridSelection";
+import { reconcileGridSelection } from "../../lib/gridSelection";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
-import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
+import { ContextMenu } from "../workspace/ContextMenu";
 import { ResultGrid, type GridEdit, type ResultGridApi } from "./ResultGrid";
 import { CellDetail } from "./CellDetail";
 import { binaryColumn, decodeCell } from "../../lib/cellCodec";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import { lobLoaderFor } from "../../lib/lobLoader";
 import { ResultTransfer } from "./ResultTransfer";
-import type { TransferFrame, TransferSource } from "../../lib/resultTransferContext";
+import type { TransferSource } from "../../lib/resultTransferContext";
 import { quickCopyTransfer } from "../../lib/resultTransferQuick";
-import { fitWidth, nextSort, cellBrief, type SortState, type ValueFilter } from "../../lib/resultView";
+import { fitWidth, nextSort, type SortState, type ValueFilter } from "../../lib/resultView";
 import { headMenuItems } from "../../lib/resultHeadMenu";
 import { ResultViewState } from "./ResultViewState";
+import { Dialog, DialogHeader, DialogTitle } from "../ui/dialog";
 
 /**
  * 结果表 + 工具条（筛选 / 复制为… / 导出 / 详情）+ 底栏。SQL 控制台与表页共用。
@@ -29,10 +30,10 @@ import { ResultViewState } from "./ResultViewState";
 import { GridColumns } from "./GridColumns";
 import { ResultCompare } from "./ResultCompare";
 import { ResultSource } from "./ResultSource";
-import { loadLayout, saveLayout, gridColumns, type Selection, type GridLayout, type ResultSnapshot } from "../../lib/dbResultTools";
-import { rowActionItems } from "../../lib/dbRowActions";
-
+import { loadLayout, saveLayout, gridColumns, buildResultFrame, type Selection, type GridLayout, type ResultSnapshot } from "../../lib/dbResultTools";
 import { thousands } from "../../lib/db";
+import { cellMenuItems } from "../../lib/resultCellMenu";
+import { useResultTableUi } from "../../hooks/useResultTableUi";
 import type { ResultFilterMatch } from "../../lib/dbResultFollowup";
 /**
  * 取大文本完整值需要的上下文。结果集只带 8K 预览，用户点「加载完整值」时
@@ -91,6 +92,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
   const [filter, setFilter] = useState("");
   const gridApi = useRef<ResultGridApi | null>(null);
   const filterInput = useRef<HTMLInputElement>(null);
+  const [jump, setJump] = useState<{ row: string; column: string } | null>(null);
 
   const [sort, setSort] = useState<SortState | null>(null);
   /** 「以此值筛选」：只在一列里做整值相等，和关键字筛选可以叠加。 */
@@ -98,6 +100,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
   /** 关键字筛选 / 排序 / 值筛选一起清掉：状态条与「计算失败」两处都要，别写成两份。 */
   const clearView = () => { setFilter(""); setSort(null); setValueFilter(null); };
   const [selection,setSelection] = useState<Selection|null>(null);
+  const [selectionAdjusted, setSelectionAdjusted] = useState(false);
   const sel=selection?.end ?? null;
   const singleCell = sel && selection?.anchor.r === sel.r && selection.anchor.c === sel.c ? sel : null;
   const chosenValue = singleCell && !edit?.isDraftRow?.(singleCell.r) ? rows[singleCell.r]?.[singleCell.c] : undefined;
@@ -108,66 +111,46 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
   const setColumns=(value:GridLayout)=>{setLayout(value);setSelection(null);try{saveLayout(layoutKey,value);}catch{toast("列布局未能保存，当前布局仍可使用","error");}};
   // 宽度 / 换行 / 解码只影响显示，不该把用户正选着的区域扔掉——于是不走 `setColumns`。
   const setLayoutOnly=(value:GridLayout)=>{setLayout(value);try{saveLayout(layoutKey,value);}catch{toast("列布局未能保存，当前布局仍可使用","error");}};
-  const select=(p:{r:number;c:number},extend=false)=>setSelection(current=>({anchor:extend && current ? current.anchor : p,end:p}));
+  const select=(p:{r:number;c:number},extend=false)=>{ setSelectionAdjusted(false); setSelection(current=>({anchor:extend && current ? current.anchor : p,end:p})); };
   // 自适应列宽：全部 = 清空手调值，回到 `fitWidth` 的测量结果；
   // 单列 = 只把这一列记成手调宽度，其余列保持用户已经调好的样子。
   const fitAll=()=>setLayoutOnly({...layout,widths:{}});
   const fitOne=(c:number)=>{const name=columns[c]?.name; if(name) setLayoutOnly({...layout,widths:{...layout.widths,[name]:fitWidth(columns[c],rows,c)}});};
-  const [ui,setUi] = useState<{filterOpen:boolean;columnOpen:boolean;detail:boolean;menu:{x:number;y:number;items:ContextMenuItem[]}|null;head:{x:number;y:number;col:number}|null}>({filterOpen:false,columnOpen:false,detail:false,menu:null,head:null});
-  const {filterOpen,columnOpen,detail,menu,head}=ui;
-  const setFilterOpen=(value:boolean|((v:boolean)=>boolean))=>setUi(v=>({...v,filterOpen:typeof value==="function"?value(v.filterOpen):value}));
-  const setColumnOpen=(columnOpen:boolean)=>setUi(v=>({...v,columnOpen}));
-  const setDetail=(detail:boolean)=>setUi(v=>({...v,detail}));
-  const setMenu=(menu:typeof ui.menu)=>setUi(v=>({...v,menu}));
-  const setHead=(head:typeof ui.head)=>setUi(v=>({...v,head}));
+  // 筛选框 / 列布局 / 详情 / 两个右键菜单：一组「界面开关」收在一个状态袋里（联动时不容易漏）。
+  const { filterOpen, columnOpen, detail, menu, head, setFilterOpen, setColumnOpen, setDetail, setMenu, setHead } = useResultTableUi();
   const { order, pending, error: orderError, retry } = useResultOrder(rows, columns, filter, sort, valueFilter);
+  const selectionView = useRef({ order, visible, rows });
+  useLayoutEffect(() => {
+    const previous = selectionView.current;
+    selectionView.current = { order, visible, rows };
+    if (!selection || (previous.order === order && previous.visible === visible && previous.rows === rows)) return;
+    const sameRows = previous.rows === rows || previous.rows.every((row, index) => rows[index] === row);
+    const next = sameRows ? reconcileGridSelection(selection, previous.order, previous.visible, order, visible) : null;
+    if (next !== selection) {
+      setSelection(next);
+      setSelectionAdjusted(true);
+      // 选区被排序 / 筛选改写了：守着旧格的详情和右键菜单都失去意义，一起收掉。
+      setDetail(false);
+      setMenu(null);
+    }
+  }, [order, visible, rows, selection, setDetail, setMenu]);
   const bounds = selectionBounds(order,visible,selection);
-  const valueAt=(r:number,c:number)=>edit?.changed.has(`${r}:${c}`) ? edit.changed.get(`${r}:${c}`)! : rows[r][c];
-  const frame: TransferFrame = { data: { columns, rows }, order, visible, selection,
-    labels: columns.map(c => zh?.[c.name.toLowerCase()] || c.name),
-    source: transferSource ?? { connId: null, resultId: layoutKey || "result", sql: snapshot?.sql ?? "", source: snapshot?.source ?? "当前结果", complete: snapshot?.complete ?? true, table, canRequery: false } };
-  /** 选区里的可编辑格；没有选区就是当前格。 */
-  const selectedCells = () => edit && bounds ? selectedEditableCells(bounds, order, visible, edit.canEdit) : [];
-  const cellMenu = (r:number,c:number,x:number,y:number) => {
-    const cell = {...frame,selection:{anchor:{r,c},end:{r,c}}};
-    const column = {...cell,selection:null,visible:[c]};
-    setMenu({x,y,items:[
-      // 双击只负责编辑，看完整值要有明确入口：右键第一项 + F4 + 工具栏详情按钮。
-      {label:"查看完整值",icon:"eye",hint:"F4",onSelect:()=>setDetail(true)},
-      // 「以此值筛选」读的是 `rows` 里的原值，不是未写回的编辑草稿：本地筛选只作用于
-      // 已取到的数据，拿编辑后的值去筛会立刻筛出 0 行。
-      {label: (() => { const v = rows[r]?.[c] ?? null; return v === null ? "只看这一列为空" : `只看「${cellBrief(v)}」`; })(),
-        icon:"filter", hint: columns[c]?.name, onSelect: () => { const v = rows[r]?.[c] ?? null; setValueFilter({ col: c, original: v, value: v === null ? null : String(v) }); }},
-      ...(requery && rows[r]?.[c] !== undefined && !edit?.isDraftRow?.(r) ? [{ label: "按此值重新查询", icon: "database" as const, onSelect: () => requery({ column: c, value: rows[r][c] }) }] : []),
-      {label:"复制原始值",icon:"copy",separator:true,onSelect:()=>void quickCopyTransfer(cell,"tsv",true,edit?.changed)},
-      {label:"复制列名",onSelect:()=>void navigator.clipboard.writeText(columns[c].name).then(()=>toast("列名已复制","success"),e=>toast(`复制失败：${String(e)}`,"error"))},
-      {label:"复制唯一值（当前筛选列）",onSelect:()=>{const seen=new Set<Cell>();const order=column.order.filter(i=>{const key=valueAt(i,c);if(seen.has(key)) return false;seen.add(key);return true;});void quickCopyTransfer({...column,order},"tsv",false,edit?.changed);}},
-      {label:"复制为 IN 条件（当前筛选列）",icon:"code",onSelect:()=>void quickCopyTransfer(column,"where",false,edit?.changed)},
-      // 编辑相关动作只在「这一格真能改」时出现：主键列、只读类型、视图都没有这些项。
-      ...(edit?.canEdit(c, r) ? [
-        // 选中一列再置空是最常用的批量动作：有选区就作用整个选区，没选区就是这一格。
-        { label: selectedCells().length > 1 ? `选区设为 NULL（${selectedCells().length} 格）` : "设为 NULL",
-          hint: "写回时这些列置空",
-          onSelect: () => {
-            const cells = selectedCells();
-            if (edit.onEditMany && cells.length > 1) edit.onEditMany(cells.map(cell => ({ ...cell, value: null })));
-            else edit.onEdit(r, c, null);
-          } },
-        ...(edit.changed.has(`${r}:${c}`) && edit.onResetCell
-          ? [{ label: "撤销本格改动", icon: "restore" as const, separator: true,
-              onSelect: () => {
-                const cells = selectedCells();
-                if (cells.length > 1) cells.forEach(cell => edit.onResetCell!(cell.row, cell.col));
-                else edit.onResetCell!(r, c);
-              } }]
-          : []),
-      ] : []),
-      ...(edit?.onCloneRow ? [{ label: "复制此行（新增）", icon: "copy" as const, hint: "主键列留空", onSelect: () => edit.onCloneRow!(r) }] : []),
-      // 行级增删只挂在能定位唯一行的结果上（表页有主键、且不是只读）。
-      // 放在单元格右键而不是工具条：删除是「对着这一行」的动作，选中态会随排序/筛选漂移。
-      ...rowActionItems(edit, r),
-    ]});
+  const openJump = () => {
+    if (!order.length || !visible.length) return;
+    setJump({ row: String(sel ? Math.max(0, order.indexOf(sel.r)) + 1 : 1), column: String(sel ? Math.max(0, visible.indexOf(sel.c)) + 1 : 1) });
   };
+  const jumpRow = Number(jump?.row), jumpColumn = Number(jump?.column);
+  const validJump = Number.isInteger(jumpRow) && jumpRow >= 1 && jumpRow <= order.length
+    && Number.isInteger(jumpColumn) && jumpColumn >= 1 && jumpColumn <= visible.length;
+  const valueAt=(r:number,c:number)=>edit?.changed.has(`${r}:${c}`) ? edit.changed.get(`${r}:${c}`)! : rows[r][c];
+  // 复制 / 导出 / 右键菜单共用的取数帧：数据、显示顺序、列名标签、来源说明。
+  const frame = buildResultFrame({ columns, rows, order, visible, selection, zh, transferSource, layoutKey, snapshot, table });
+  const cellMenu = (r:number,c:number,x:number,y:number) => setMenu({x,y,items: cellMenuItems({
+    r, c, frame, bounds, order, visible, rows, columns, edit, valueAt, requery,
+    select, setDetail, setValueFilter,
+    // 点在选区外时先把选区落到这一格：菜单动作作用于「即将选中」的格。
+    onFocusCell: () => { select({ r, c }); setDetail(false); },
+  })});
 
   const selValue = sel ? valueAt(sel.r,sel.c) : undefined;
   // 详情面板要显示网格里那个「第 N 行」（排序/筛选后的显示序号）。
@@ -194,10 +177,11 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
   const headDecodable = useMemo(() => head ? rows.slice(0,50).some(r=>decodeCell(r[head.col],{auto:true})) : false, [head, rows]);
   return (
     <div className="dbx-result-table" data-result-edit-owner={editOwner} onKeyDown={event=>{
-      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase()==="f" &&
-        event.target instanceof HTMLElement && event.target.closest('[role="grid"]') && !event.target.closest('input,textarea,[contenteditable="true"]')) {
-        event.preventDefault();setFilterOpen(true);requestAnimationFrame(()=>filterInput.current?.focus());
-      }
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || !(event.target instanceof HTMLElement)
+        || !event.target.closest('[role="grid"]') || event.target.closest('input,textarea,[contenteditable="true"]')) return;
+      const key = event.key.toLowerCase();
+      if (key === "f") { event.preventDefault(); setFilterOpen(true); requestAnimationFrame(()=>filterInput.current?.focus()); }
+      else if (key === "g" && order.length) { event.preventDefault(); openJump(); }
     }}>
       {tabs && <div className="dbx-result-head">{tabs}</div>}
       <div className="dbx-rbar dbx-result-tools">
@@ -226,8 +210,10 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
         <span className="dbx-sp" />
         {!snapshot && <span className="meta">{meta}</span>}
         {tools}
+        {selectionAdjusted && <span className="dbx-muted" role="status">选区已调整</span>}
         {(running || pending) && <span className="dbx-busy" role="status"><Icon name="spinner" size={12} />{running ? "执行中…" : "正在整理结果…"}</span>}
         <ResultTransfer frame={frame} edits={edit?.changed} />
+        <button type="button" className="dbx-ibtn" title="跳转到行列 · Ctrl+G" aria-label="跳转到行列" disabled={!order.length || !visible.length} onClick={openJump}><Icon name="target" size={14} /></button>
         <button type="button" className="dbx-ibtn" data-on={detail || undefined} title="单元格详情 · F4" aria-label="单元格详情" aria-pressed={detail} onClick={()=>setDetail(!detail)}><Icon name="cellInspect" size={14} /></button>
         {snapshot && <ResultSource snapshot={snapshot} meta={meta} />}
         {settings}
@@ -282,6 +268,20 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
         )}
       </div>
       {foot && <div className="dbx-result-footer">{foot}</div>}
+      {jump && <Dialog open onClose={() => setJump(null)} ariaLabel="跳转到行列">
+        <DialogHeader><DialogTitle>跳转到行列</DialogTitle></DialogHeader>
+        <form className="flex flex-col gap-3" onSubmit={event => {
+          event.preventDefault();
+          if (!validJump) return;
+          setJump(null);
+          requestAnimationFrame(() => gridApi.current?.goTo?.(jumpRow - 1, jumpColumn - 1));
+        }}>
+          <label className="flex items-center justify-between gap-3">行号（1–{order.length}）<input autoFocus type="number" min={1} max={order.length} value={jump.row} className="dbx-inp" onChange={event => setJump({ ...jump, row: event.target.value })} /></label>
+          <label className="flex items-center justify-between gap-3">列号（1–{visible.length}）<input type="number" min={1} max={visible.length} value={jump.column} className="dbx-inp" onChange={event => setJump({ ...jump, column: event.target.value })} /></label>
+          <span className="dbx-muted">以当前筛选、排序和列顺序为准。</span>
+          <div className="dbx-filter-actions"><button type="button" className="dbx-btn" onClick={() => setJump(null)}>取消</button><button type="submit" className="dbx-btn pri" disabled={!validJump}>跳转</button></div>
+        </form>
+      </Dialog>}
       {columnOpen && <GridColumns columns={columns} layout={layout} onChange={setColumns} onClose={()=>setColumnOpen(false)} />}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
       {head && (

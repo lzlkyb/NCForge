@@ -27,7 +27,7 @@ vi.mock("./monacoSql", async () => {
     sqlAnalysisOf: (model: monaco.editor.ITextModel) => analyzeSql(model.getValue(), "plsql") };
 });
 vi.mock("./sqlTemplates", async (orig) => ({ ...(await orig<typeof import("./sqlTemplates")>()), getSqlTemplatesEnabled: () => h.enabled }));
-vi.mock("./sqlUsage", () => ({ sqlUsageScope: () => "scope" }));
+vi.mock("./sqlUsage", async importOriginal => ({ ...await importOriginal<typeof import("./sqlUsage")>(), sqlUsageScope: () => "scope" }));
 vi.mock("./dbResultContext", () => ({ connectionKey: () => "id" }));
 vi.mock("./sqlModels", () => ({ tabIdOfModel: () => "t1" }));
 vi.mock("./sqlFormatPrefs", () => ({ getSqlFormatPrefs: () => ({ keywordCase: "upper" }) }));

@@ -158,11 +158,11 @@ export function SearchTab({
       return;
     }
     // 后端回的是相对路径 + `/`，读写文件要绝对路径 + Windows 分隔符。
-    // ranges 是行内 UTF-16 偏移，+1 换成 1 基列号——只跳到行首的话长行还要肉眼找。
+    // 新结果带原始列号，预览截断后仍能落到源文件里真正的命中位置。
     onOpenFile(
       path,
       hit.line,
-      (hit.ranges[0]?.start ?? 0) + 1,
+      hit.column ?? (hit.ranges[0]?.start ?? 0) + 1,
     );
   };
 

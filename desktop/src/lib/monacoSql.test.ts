@@ -35,3 +35,12 @@ it("模型按版本和方言缓存，语义数据采用同一角色分类", () =
   expect(provider.provideDocumentSemanticTokens(m, null, { isCancellationRequested: true } as Monaco.CancellationToken)).toBeNull();
   expect(provider.provideDocumentSemanticTokens(modelOf(" ".repeat(200_001)) as unknown as Monaco.editor.ITextModel, null, { isCancellationRequested: false } as Monaco.CancellationToken)).toBeNull();
 });
+
+it("跨行和带注释的聚合 FILTER 在预览与 Monaco 语义高亮中都归为关键字", () => {
+  const text = "SELECT filter, filter(payload), COUNT(*) FILTER /* keep */\n(WHERE active) FROM t";
+  const model = modelOf(text, "ncforge-sql-postgresql") as unknown as Monaco.editor.ITextModel;
+  expect(highlightedSql(text, "postgresql").filter(token => /^filter$/i.test(token.text)).map(token => token.kind)).toEqual(["column", "function", "keyword"]);
+  const provider = sqlSemanticProvider();
+  const result = provider.provideDocumentSemanticTokens(model, null, { isCancellationRequested: false } as Monaco.CancellationToken) as Monaco.languages.SemanticTokens;
+  expect([...result.data].filter((_, i) => i % 5 === 3).map(i => provider.getLegend().tokenTypes[i])).toContain("nc-sql-keyword");
+});

@@ -2,7 +2,7 @@ import type { SqlLanguage } from "sql-formatter";
 import type { BusinessSuggestion, SqlBusinessColumn, SqlBusinessSource } from "./sqlBusiness";
 import { isSqlName, sqlName, sqlReferenceKey, sqlWordKind, type SqlToken } from "./sqlLex";
 import { resolveSqlQualifier, sqlScopeAt, type SqlAnalysis, type SqlSource } from "./sqlScope";
-import { getSqlUsageEnabled } from "./sqlUsage";
+import { getSqlUsageEnabled, sqlJoinUsageKey } from "./sqlUsage";
 
 type Columns = Record<string, SqlBusinessColumn[]>;
 interface JoinEntry { left: string; right: string; from: string[]; to: string[]; count: number; score: number; lastUsed: number }
@@ -161,6 +161,22 @@ export function sqlHistoricalJoinSuggestions(scopeKey: string, sources: SqlBusin
   return out;
 }
 export function sqlJoinHistoryGeneration(scopeKey: string): number { return generations.get(scopeKey) ?? 0; }
+
+/** Use verified past executions as a fallback for current metadata-backed choices. */
+export function sqlJoinHistoryRanks(scopeKey: string, table: string): ReadonlyMap<string, number> {
+  const ranks = new Map<string, number>();
+  if (!getSqlUsageEnabled() || !validScope(scopeKey)) return ranks;
+  const owner = schemaOfScope(scopeKey) + ".", root = owner + table.toLowerCase(), now = Date.now();
+  for (const entry of read().scopes[scopeKey] ?? []) {
+    const forward = entry.left === root;
+    if (!forward && entry.right !== root) continue;
+    const other = forward ? entry.right : entry.left;
+    if (!other.startsWith(owner) || other.slice(owner.length).includes(".")) continue;
+    const key = sqlJoinUsageKey(table, other.slice(owner.length), forward ? entry.from : entry.to, forward ? entry.to : entry.from);
+    ranks.set(key, Math.max(ranks.get(key) ?? 0, decay(entry, now)));
+  }
+  return ranks;
+}
 export function snapshotSqlJoinHistory(scopeKey: string): () => boolean {
   const snapshot = read().scopes[scopeKey] ?? [];
   return () => {

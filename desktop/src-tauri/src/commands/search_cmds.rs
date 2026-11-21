@@ -186,26 +186,81 @@ pub struct FileList {
     /// 相对工作区根、`/` 分隔。
     pub files: Vec<String>,
     pub truncated: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<ProjectFiles>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProjectFiles {
+    pub name: String,
+    pub root: String,
+    pub files: Vec<String>,
 }
 
 #[tauri::command]
-pub async fn search_list_files(state: tauri::State<'_, Arc<AppState>>) -> Result<FileList, String> {
-    let root = state
-        .config
-        .read()
-        .await
+pub async fn search_list_files(
+    state: tauri::State<'_, Arc<AppState>>,
+    linked: Option<bool>,
+) -> Result<FileList, String> {
+    let cfg = state.config.read().await;
+    let root = cfg
         .workspace_root
         .clone()
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
+    let overrides = linked
+        .unwrap_or(false)
+        .then(|| crate::eclipse_cp::active_overrides(&cfg.linked_overrides));
+    drop(cfg);
     let root = PathBuf::from(root);
     let cache_dir = state.config_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        // 带缓存：面板打开时立即出结果，全树扫描只在缓存全空或后台校准时发生
-        let (files, truncated) = search::list_files_cached(&root, &cache_dir);
-        FileList { files, truncated }
+        let mut result = FileList {
+            files: vec![],
+            truncated: false,
+            projects: vec![],
+            errors: vec![],
+        };
+        if let Some(overrides) = overrides {
+            let (roots, errors) = linked_search_roots(&root, &overrides);
+            result.errors = errors;
+            for (name, root) in roots {
+                let (files, cut) = search::list_files(Path::new(&root));
+                result.truncated |= cut;
+                result.projects.push(ProjectFiles { name, root, files });
+            }
+        } else {
+            // A hot primary listing and the associated-project query run independently.
+            (result.files, result.truncated) = search::list_files_cached(&root, &cache_dir);
+        }
+        result
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))
+}
+
+fn linked_search_roots(
+    primary: &Path,
+    overrides: &[crate::eclipse_cp::LinkedOverride],
+) -> (Vec<(String, String)>, Vec<String>) {
+    let mut roots: Vec<(String, String)> = Vec::new();
+    let mut errors = Vec::new();
+    for project in crate::eclipse_cp::projects(primary, overrides)
+        .into_iter()
+        .filter(|p| !p.disabled && p.origin != "primary")
+    {
+        let Some(root) = project.root.filter(|root| Path::new(root).is_dir()) else {
+            errors.push(format!("{}：工程目录不可用", project.name));
+            continue;
+        };
+        if !root.eq_ignore_ascii_case(&primary.to_string_lossy())
+            && !roots.iter().any(|(_, r)| r.eq_ignore_ascii_case(&root))
+        {
+            roots.push((project.name, root));
+        }
+    }
+    (roots, errors)
 }
 
 /// 丢掉文件清单缓存（文件树里新建 / 改名 / 删除后调用）。
@@ -300,8 +355,6 @@ pub async fn search_projects(
         .clone()
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
     let primary_path = PathBuf::from(&primary);
-    // 每个工程根都有自己的包：`ensure` 把没建好的排进串行队列，本次仍走磁盘。
-    // 只在命令入口登记 primary，队列里的都是依赖工程，不会同时开几次全量读盘。
     let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
     let cache = state.config_dir.clone();
 
@@ -312,35 +365,15 @@ pub async fn search_projects(
         resolve_overlay(&primary_path, &mut options, overlay_refs)?;
         crate::content_pack::ensure_primary(&primary_path, &cache);
         Ok(request.run(|cancel| {
-            let mut roots: Vec<(String, String)> = Vec::new();
-            for p in crate::eclipse_cp::projects(&primary_path, &overrides) {
-                let Some(root) = p.root else { continue };
-                if !Path::new(&root).is_dir() {
-                    continue;
-                }
-                if roots.iter().any(|(_, r)| r.eq_ignore_ascii_case(&root)) {
-                    continue;
-                }
-                roots.push((p.name, root));
-            }
-            // 覆盖表解析异常时至少还要能搜当前工作区
-            if !roots.iter().any(|(_, r)| r.eq_ignore_ascii_case(&primary)) {
-                let name = primary_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| primary.clone());
-                roots.insert(0, (name, primary.clone()));
-            }
-
-            // 给每个工程排队：第一次「全部工程」搜索付一次建包成本，之后都是毫秒级。
-            // 放循环前，搜索过程中不再改队列状态。
-            for (_, root) in &roots {
-                crate::content_pack::ensure(Path::new(root), &cache);
-            }
+            let (mut roots, mut errors) = linked_search_roots(&primary_path, &overrides);
+            let name = primary_path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| primary.clone());
+            roots.insert(0, (name, primary.clone()));
 
             let started = Instant::now();
             let mut projects = Vec::new();
-            let mut errors = Vec::new();
             let mut truncated = false;
             for (project, root) in roots {
                 if cancel.load(Ordering::Relaxed) {

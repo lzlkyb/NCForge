@@ -1,38 +1,41 @@
-import { useSyncExternalStore } from "react";
 import { Icon } from "../ui/icon";
 import { thousands } from "../../lib/db";
 import { useTaskElapsed } from "../../hooks/useTaskElapsed";
-import { BusyIndicator } from "../ui/BusyIndicator";
-import { getOperations, subscribeOperations } from "../../lib/operations";
+import { useActiveOperation, useOperationById } from "../../lib/operations";
+import { useViewActive } from "../../lib/viewActivity";
 
-/** The clock stays inside the stop button, so it never rerenders the result grid. */
+/** Isolate the clock from the editor, grid and live region. */
 export function QueryElapsed({ startedAt }: { startedAt: number }) {
-  const seconds = useTaskElapsed(true, startedAt, startedAt);
-  return <span className="dbx-query-time" aria-hidden="true"> · {seconds}s</span>;
+  const seconds = useTaskElapsed(useViewActive(), startedAt, startedAt);
+  return <span className="dbx-query-time" aria-live="off"> · 已用 {seconds} 秒</span>;
 }
 
 /** Execution status belongs to the existing result header, not a separate row. */
-export function SqlExecutionFeedback({ executionId, previousAt }: { executionId?: number; previousAt?: number }) {
-  const operation = useSyncExternalStore(subscribeOperations, () => getOperations().find(op => op.id === executionId));
-  if (!operation) return null;
+export function SqlExecutionFeedback({ tabId, executionId, previousAt }: { tabId?: string; executionId?: number; previousAt?: number }) {
+  const execution = useActiveOperation(tabId ? "db.sql:" + tabId : "");
+  const explain = useActiveOperation(tabId ? "db.explain:" + tabId : "");
+  const resultOperation = useOperationById(executionId);
+  const operation = execution ?? explain ?? resultOperation;
+  if (!operation) return <span className="dbx-query-status" aria-hidden="true" />;
   const active = operation.endedAt === undefined;
   const progress = operation.progress;
   const script = (progress?.total ?? 0) > 1;
   const cost = operation.endedAt === undefined ? 0 : Math.max(0, operation.endedAt - operation.startedAt);
-  // 单条成功也要说话：DML 本来就没有结果集，用户唯一能确认「跑完了、花了多久」的
-  // 线索就是这里。以前这里直接 return null，执行完屏幕上什么都没变。
-  if (!active && !script && operation.state !== "cancelled" && operation.state !== "failed" && operation.state !== "success") return null;
   const old = previousAt !== undefined && previousAt < operation.startedAt;
   const text = active
     ? operation.state === "cancelling" ? "等待数据库停止确认"
       : script ? `执行脚本 · ${thousands(progress?.done ?? 0)} / ${thousands(progress?.total ?? 0)} 条`
-      : old ? "正在重新查询 · 当前为上次结果" : operation.phase
+      : operation.phase
     : operation.state === "cancelled" ? operation.detail?.startsWith("连接未建立") ? "未执行 · 连接未建立" : "执行已停止"
       : operation.state === "failed" ? script ? "脚本执行有失败" : "执行失败"
         : script ? "脚本执行完成" : "执行完成";
-  return <span className="dbx-query-status" data-state={operation.state} role="status" title={operation.detail ?? text}>
-    {active ? <BusyIndicator size={12} operationKey={operation.id} /> : <Icon name={operation.state === "success" ? "check" : operation.state === "failed" ? "alert" : "stop"} size={12} />}
-    {text}{!active && script && progress && <span> · 已处理 {thousands(progress.done)} / {thousands(progress.total ?? 0)} 条</span>}
-    {!active && !script && cost > 0 && <span> · {cost < 1000 ? `${Math.round(cost)}ms` : `${(cost / 1000).toFixed(1)}s`}</span>}
+  return <span className="dbx-query-status" data-state={operation.state} title={operation.detail ?? (text + (active && old ? " · 上次结果" : ""))}>
+    {active ? <span className="op-wait-dot" data-live={operation.visible && operation.state === "running" || undefined} aria-hidden="true" /> : <Icon name={operation.state === "success" ? "check" : operation.state === "failed" ? "alert" : "stop"} size={12} />}
+    <span className="dbx-query-status-text" role="status">{text}
+      {active && old && " · 上次结果"}
+      {!active && script && progress && ` · 已处理 ${thousands(progress.done)} / ${thousands(progress.total ?? 0)} 条`}
+      {!active && !script && cost > 0 && ` · ${cost < 1000 ? `${Math.round(cost)}ms` : `${(cost / 1000).toFixed(1)}s`}`}
+    </span>
+    {active && operation.visible && <QueryElapsed startedAt={operation.startedAt}/>}
   </span>;
 }
