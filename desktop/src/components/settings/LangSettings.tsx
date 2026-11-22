@@ -7,6 +7,7 @@ import { ResourceDownloadButton } from "../resource/ResourceDownloadButton";
 import { Card } from "../ui/card";
 import { LangMemoryField } from "./LangMemoryField";
 import { DeclIndexStatusLine } from "./DeclIndexStatusLine";
+import { BindingResolverStatusLine } from "./BindingResolverStatusLine";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Badge } from "../ui/badge";
 import { SettingsRow } from "../ui/SettingsRow";
@@ -154,6 +155,23 @@ export function LangSettings() {
         {/* 快通道（声明索引）与 jdt.ls 是两套东西：jdt.ls 没起来时跳转全靠它，
             所以即使「轻量模式」也显示 —— 那正是它最有用的时候。 */}
         <DeclIndexStatusLine />
+        {/* 精确解析与声明索引是同一层里的前后脚：索引答不上（继承成员 / 精确接收者）
+            时才轮到它。同在轻量模式下工作，所以也放在总开关外面。 */}
+        <BindingResolverStatusLine />
+        <ToggleRow
+          id="lang-binding-resolver"
+          label="启用精确解析"
+          sub="关闭后跳转按原有链路：声明索引 → 按类名搜索"
+          info="jdt.ls 未启动时，用编译内核补上「继承成员、精确接收者」这类声明索引答不了的跳转。会常驻一个 Java 进程（约 768MB，空闲 2 分钟自动退出）；内存紧张或只用轻量模式时建议关闭。"
+          checked={cfg.lang_binding_resolver}
+          saved={feedback.saved === "binding"}
+          pending={feedback.pending === "binding"}
+          disabled={busy}
+          disabledReason={busy ? "正在保存，请稍候" : undefined}
+          error={feedback.errorKey === "binding" ? feedback.error : undefined}
+          keywords={["精确解析", "binding", "跳转", "继承成员"]}
+          onChange={(v) => void apply({ lang_binding_resolver: v }, "binding")}
+        />
         <ToggleRow
           id="lang-enabled"
           label="启用代码智能"

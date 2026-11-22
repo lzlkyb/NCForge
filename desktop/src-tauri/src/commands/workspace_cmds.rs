@@ -257,6 +257,10 @@ pub async fn set_workspace(
     super::library_cmds::spawn_prewarm_library(state.inner().clone());
     // 新工作区的改动清单：缓存是「本进程 + 同一个根」，换根必然作废，重新预热一遍
     super::svn_cmds::spawn_prewarm_svn(app.clone(), state.inner().clone());
+    // 常驻 resolver 显式退场（设计 §4：切工作区 → 旧 resolver 退出，新工作区首次查询
+    // 重新 init）。不依赖 resolve 里的 env_key 懒换代——那条路要等下一次查询才杀，
+    // 用户不点就赖到空闲 TTL。杀子进程放 spawn_blocking，不占 tokio worker。
+    let _ = tauri::async_runtime::spawn_blocking(crate::bind_resolver::shutdown).await;
     Ok(shown)
 }
 

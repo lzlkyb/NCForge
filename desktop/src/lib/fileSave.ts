@@ -1,6 +1,6 @@
 import { getModel, getText, markSaved } from "./editorStore";
 import { captureLocalHistory } from "./localHistory";
-import { notifyLangSaved } from "./lang";
+import { notifyBindingSaved, notifyLangSaved } from "./lang";
 import { notifyLocalSave } from "./localSaves";
 import { baseName, writeFile, type Eol, type TextEncoding } from "./workspace";
 import { isHistoryRestoring } from "./historyRestoreGuard";
@@ -103,5 +103,8 @@ export async function saveOne(tab: SaveTarget, opts: SaveOptions = {}): Promise<
   // 语言服务也想知道这一份变了（junction 源根它自己看不见，见 `notifyLangSaved`）。
   // 不 await：保存已经成功，通知慢一拍不该拖住保存。
   notifyLangSaved(tab.path);
+  // 精确解析（binding resolver）同样按原始字节比对 CU 缓存，但 `le.reset()` 要显式发
+  // （见 `notifyBindingSaved`）。同款 fire-and-forget；开关关着时后端什么都不做。
+  notifyBindingSaved(tab.path);
   return { mtimeMs, encoding, hasBom, converted: !!opts.encodingOverride };
 }

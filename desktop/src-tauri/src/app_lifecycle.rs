@@ -43,5 +43,8 @@ pub fn shutdown(app: &tauri::AppHandle) {
             bridge.shutdown();
         }
         ecj_worker::shutdown_all();
+        // 常驻 binding resolver 的 Holder 是进程级 static，永不 drop ⇒ Bridge 的
+        // Drop 不会跑；不在这里显式杀，退出时那个 768MB 的 java 子进程会成孤儿。
+        crate::bind_resolver::shutdown();
     }
 }

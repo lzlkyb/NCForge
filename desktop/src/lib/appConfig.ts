@@ -33,6 +33,11 @@ export interface AppConfig {
    */
   lang_shadow_mode: ShadowMode;
   /**
+   * 精确解析（常驻 binding resolver）开关，默认关。关掉时 `lang_binding_resolve`
+   * 直接回空，跳转链路与之前逐字节一致。
+   */
+  lang_binding_resolver: boolean;
+  /**
    * 多工程覆盖表（停用 / 排前 / 追加目录）。
    *
    * 字段名同样是 snake_case；**条目内**是 `action/target/dir` 几个单词，两边写法一致。
@@ -104,6 +109,8 @@ export interface LangConfigPatch {
   lang_xmx_mb?: number;
   /** `flat` / `single`。改了下次拉起生效（要立刻生效就先 `langStop` 再启动）。 */
   lang_shadow_mode?: ShadowMode;
+  /** 精确解析开关。改了立即生效（后端下一条查询就按新值答）。 */
+  lang_binding_resolver?: boolean;
 }
 
 export const langConfigSet = (patch: LangConfigPatch) =>

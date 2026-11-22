@@ -445,7 +445,10 @@ pub fn definition(
 /// project/classpath 附件，我们不需要，`parse_jdt_uri` 本来就丢掉它。
 ///
 /// 内部类保留 `$`：`p.Outer$Inner` → `p/Outer$Inner.class`，与 jar 里的条目名一致。
-fn jar_uri(jar: &str, fqcn: &str) -> String {
+///
+/// `pub(crate)`：`lang_binding_cmds` 映射 resolver 的 Hit 时要用（同一个 jdt:// 约定，
+/// 那边再抄一份就会和这边漂移）。
+pub(crate) fn jar_uri(jar: &str, fqcn: &str) -> String {
     let name = Path::new(jar)
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())

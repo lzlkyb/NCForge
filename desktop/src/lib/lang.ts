@@ -49,6 +49,11 @@ export interface LangView extends ViewCore {
 export interface LangPrefs {
   lang_enabled: boolean;
   lang_auto_start: boolean;
+  /**
+   * 精确解析（常驻 binding resolver）开关，默认关。
+   * 关掉时跳转链路与之前逐字节一致：`lang_binding_resolve` 直接回空。
+   */
+  lang_binding_resolver: boolean;
 }
 
 /**
@@ -76,6 +81,11 @@ const MARKER_OWNER = "jdt.ls";
 const STOPPED: LangStatus = { state: "stopped", module: null, message: "", sourceFiles: 0, jarCount: 0 };
 
 let prefs = { enabled: true, autoStart: true };
+/**
+ * 精确解析开关。与 `prefs` 分开存：它不进 `LangView`（状态栏不显示它），
+ * 混在一起会让 `setView` 的展开把它带进视图对象。
+ */
+let bindingResolver = false;
 let view: LangView = { ...STOPPED, settled: false, ...prefs };
 let capabilityEpoch = 0;
 /** 服务重启时即使工作区和文件未变，旧 JDT 候选的 request id 也已经失效。 */
@@ -95,7 +105,13 @@ function setView(next: ViewCore): void {
 /** 设置页改了开关后调用。关掉总开关时后端会自己停服务并发 stopped 事件。 */
 export function applyLangPrefs(p: LangPrefs): void {
   prefs = { enabled: p.lang_enabled, autoStart: p.lang_auto_start };
+  bindingResolver = p.lang_binding_resolver ?? false;
   setView(view);
+}
+
+/** 精确解析（常驻 binding resolver）开没开。跳转链路与保存通知都看它。 */
+export function bindingResolverEnabled(): boolean {
+  return bindingResolver;
 }
 
 export function getLangView(): LangView {
@@ -636,6 +652,21 @@ export function notifyLangSaved(path: string): void {
   if (!prefs.enabled) return;
   if (!path.toLowerCase().endsWith(".java")) return;
   void invoke("lang_notify", { method: "textDocument/didSave", path, params: {} }).catch(() => {});
+}
+
+/**
+ * 文件落盘后作废精确解析（binding resolver）的 CU 缓存，与 `notifyLangSaved` 并排。
+ *
+ * 严格说这不是 correctness 必需——resolver 的 CU 缓存按原始字节比对，内容变了自然
+ *  miss。但 `le.reset()` 会连类型绑定缓存一起清，别的文件里指向这个类型的引用才会
+ * 跟着更新；顺手通知的代价是一次 IPC。
+ *
+ * 同样不 `await`、不报错；开关关着时什么都不发。
+ */
+export function notifyBindingSaved(path: string): void {
+  if (!bindingResolver) return;
+  if (!path.toLowerCase().endsWith(".java")) return;
+  void invoke("lang_binding_invalidate", { paths: [path] }).catch(() => {});
 }
 
 /**

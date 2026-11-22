@@ -37,7 +37,9 @@ pub const PROJECT_NAME: &str = "nc-forge-shadow";
 pub const OUTPUT_DIR: &str = "shadow-bin";
 const JRE_CONTAINER: &str =
     "org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-1.8";
-const SRC_DIRS: [&str; 3] = ["src/public", "src/client", "src/private"];
+/// 源目录三件套（NC 模块的标准布局）。`bind_resolver` 的兜底 classpath 也按它
+/// 枚举工作区源根——两处必须是同一组名字，否则兜底路径会漏源根。
+pub(crate) const SRC_DIRS: [&str; 3] = ["src/public", "src/client", "src/private"];
 /// 不算模块的一级目录：`out` 是 Eclipse 的默认输出（含外部源码产物），
 /// `META-INF` 是注册文件目录，`nclogs` 是日志，`bin` 是外部工具的输出。
 const NOT_MODULE: [&str; 4] = ["out", "META-INF", "nclogs", "bin"];

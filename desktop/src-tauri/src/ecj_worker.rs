@@ -211,7 +211,8 @@ fn pool() -> &'static (Mutex<Pool>, Condvar) {
 }
 
 /// 文件指纹：路径 + 大小 + mtime。只看路径的话，资源包原地换 jar 后旧 JVM 仍在用旧类。
-fn stamp(path: &Path) -> String {
+/// `bind_resolver` 的环境指纹也用它（同一套「内容变了要换代」的判据）。
+pub(crate) fn stamp(path: &Path) -> String {
     match std::fs::metadata(path) {
         Ok(m) => {
             let nanos = m

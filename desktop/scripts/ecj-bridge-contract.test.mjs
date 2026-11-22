@@ -397,6 +397,145 @@ test('索引器 NcIndexer：独立入口能建出格式正确的 types.idx', () 
 });
 
 /**
+ * ⑧ 常驻 binding resolver（窗口期精确跳转的第二链路）与桥**同一个 jar**，独立 main
+ * （`java -cp ncecj.jar;ecj-3.17.jar BindingResolver`，行协议照 NcEcjBridge）。
+ *
+ * 防三件事：Java 改了忘记 `build-bridge-jar.mjs ecj`（jar 里没有新类，探针 = ClassNotFound）；
+ * 行协议与 `src/bind_resolver/args.rs` 的写入侧漂移（id 字符串、init/resolve/invalidate 帧）；
+ * 以及身份语义——Java 只回 kind+fqcn+name，位置由 Rust 查 decl_index，这里钉住
+ * 「点号成员判 method、类型引用判 type、空白处回 null」三类 offset 的归属。
+ * 其中 `a.value()` 点 value 必须回 method/demo.A/value 而不是 local/a：QualifiedNameReference
+ * 逐 token 归属（sourcePositions + indexOfFirstFieldBinding + otherBindings）的回归探针
+ * （2026-11-21 合成冒烟抓到过，见 BindingResolver.java 文件头坑 6）。
+ */
+test('BindingResolver：init/resolve 协议与身份语义', async () => {
+  assert.ok(existsSync(BRIDGE), `缺 ${BRIDGE}，先跑 node scripts/build-bridge-jar.mjs ecj`);
+
+  const dir = mkdtempSync(join(tmpdir(), 'ncforge-binding-'));
+  const src = join(dir, 'src');
+  const pkg = join(src, 'demo');
+  mkdirSync(pkg, { recursive: true });
+  // 两个类：A 是被引用的类型；B 里同时踩「点号成员」「类型引用」「语句间空白」三种 offset
+  const a = 'package demo;\npublic class A {\n  public int value() { return 1; }\n}\n';
+  const b = 'package demo;\npublic class B {\n  void run(A a) { a.value(); }\n}\n';
+  writeFileSync(join(pkg, 'A.java'), a);
+  writeFileSync(join(pkg, 'B.java'), b);
+
+  const norm = (p) => p.split(sep).join('/');
+  const java = findJava();
+  const child = spawn(java, ['-Dfile.encoding=UTF-8', '-Xmx512m', '-cp', `${norm(BRIDGE)};${norm(ECJ)}`, 'BindingResolver'], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let buf = '';
+  let stderr = '';
+  const waiters = new Map();
+  child.stdout.on('data', (d) => {
+    buf += d.toString('utf8');
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i);
+      buf = buf.slice(i + 1);
+      if (!line.trim()) continue;
+      const msg = JSON.parse(line);
+      const w = waiters.get(msg.id);
+      if (w) {
+        waiters.delete(msg.id);
+        w(msg);
+      }
+    }
+  });
+  child.stderr.on('data', (d) => (stderr += d.toString('utf8')));
+  const request = (id, cmd, arg) =>
+    new Promise((resolvePromise, reject) => {
+      const timer = setTimeout(() => reject(new Error(`等 ${id} 超时；stderr=${stderr}`)), 60000);
+      waiters.set(String(id), (msg) => {
+        clearTimeout(timer);
+        resolvePromise(msg);
+      });
+      child.stdin.write(`${id}\t${cmd}\t${escape(arg)}\n`);
+    });
+  const argsFile = (name, text) => {
+    const p = join(dir, name);
+    writeFileSync(p, text);
+    return norm(p);
+  };
+  const bPath = norm(join(pkg, 'B.java'));
+
+  try {
+    // ① 尚未 init 要先答 error/other：Rust 侧把非 ok 当失败计数，不能静默回 null 冒充「没有引用」
+    const early = await request(1, 'resolve', argsFile('early.json', JSON.stringify({ path: bPath, offset: 0 })));
+    assert.equal(early.id, '1', 'id 必须是字符串：java_bridge.rs 读线程按 as_str() 分发');
+    assert.equal(early.ok, false);
+    assert.equal(early.code, 'other');
+    assert.match(early.error, /尚未 init/);
+
+    // ② init：classpath 一行一个源根（源根必须在目录条目里——包名按最长目录前缀推导）；
+    //    data 回条目数与 rt.jar 是否找到（Java 9+ 布局没有 rt.jar，绑定退化但不炸）
+    const init = await request(2, 'init', argsFile('cp.txt', `${norm(src)}\n`));
+    assert.equal(init.ok, true);
+    assert.equal(init.data.entries, 1, '一个源根');
+    assert.equal(init.data.dirs, 1, '源根是目录条目');
+    assert.equal(typeof init.data.rtJar, 'boolean');
+    if (!init.data.rtJar) console.warn('未找到 rt.jar（Java 9+ 布局）：java.lang 绑定会退化，本机建议用 Java 8');
+
+    // ③ offset 口径 = UTF-16 code unit（纯 ASCII 下与 indexOf 相同）；
+    //    `a.value()` 的 value 必须回 method/demo.A/value——逐 token 归属的回归探针
+    const vOff = b.indexOf('a.value()') + 2;
+    assert.equal(b.slice(vOff, vOff + 5), 'value', 'offset 应落在 value 上');
+    const mv = await request(3, 'resolve', argsFile('mv.json', JSON.stringify({ path: bPath, offset: vOff })));
+    assert.equal(mv.ok, true);
+    assert.equal(mv.data.kind, 'method', `点号成员应判成方法：${JSON.stringify(mv.data)}`);
+    assert.equal(mv.data.fqcn, 'demo.A');
+    assert.equal(mv.data.name, 'value');
+
+    // ④ 类型引用 → type，name 取简单名
+    const tOff = b.indexOf('void run(A a)') + 'void run('.length;
+    assert.equal(b.slice(tOff, tOff + 1), 'A', 'offset 应落在类型 A 上');
+    const tv = await request(4, 'resolve', argsFile('tv.json', JSON.stringify({ path: bPath, offset: tOff })));
+    assert.equal(tv.ok, true);
+    assert.equal(tv.data.kind, 'type', `类型引用应判成 type：${JSON.stringify(tv.data)}`);
+    assert.equal(tv.data.fqcn, 'demo.A');
+    assert.equal(tv.data.name, 'A');
+
+    // ⑤ 同一进程缓存命中：再来一次必须同一答案（CU 缓存不改变语义）
+    const again = await request(5, 'resolve', argsFile('mv2.json', JSON.stringify({ path: bPath, offset: vOff })));
+    assert.equal(again.ok, true);
+    assert.equal(again.data.kind, 'method');
+    assert.equal(again.data.fqcn, 'demo.A');
+
+    // ⑥ 语句间空白没有可解析引用 → data 为 null（Rust 侧据此退回内容搜索，不当成错误）
+    const blankOff = b.indexOf('{ a.value()') + 1;
+    assert.equal(b.slice(blankOff, blankOff + 1), ' ', 'offset 应落在 { 后的空格上');
+    const nv = await request(6, 'resolve', argsFile('nv.json', JSON.stringify({ path: bPath, offset: blankOff })));
+    assert.equal(nv.ok, true);
+    assert.equal(nv.data, null, `空白处应回 null：${JSON.stringify(nv.data)}`);
+
+    // ⑦ invalidate 整体作废 CU 缓存，之后查询仍须自愈（reset 不破坏引擎）
+    const inv = await request(7, 'invalidate', argsFile('inv.txt', `${bPath}\n`));
+    assert.equal(inv.ok, true);
+    assert.equal(inv.data.paths, 1);
+    assert.ok(inv.data.cachedCleared >= 1, 'B.java 已解析过，缓存里应有它');
+    const healed = await request(8, 'resolve', argsFile('mv3.json', JSON.stringify({ path: bPath, offset: vOff })));
+    assert.equal(healed.ok, true);
+    assert.equal(healed.data.kind, 'method');
+    assert.equal(healed.data.fqcn, 'demo.A');
+
+    // ⑧ 未知命令 → other（Rust 侧按 code 分桶计数，不能炸进程）
+    const unk = await request(9, 'frobnicate', argsFile('x.txt', 'x\n'));
+    assert.equal(unk.ok, false);
+    assert.equal(unk.code, 'other');
+
+    child.stdin.write('10\tquit\n');
+    await new Promise((r) => child.once('exit', r));
+  } catch (e) {
+    child.kill();
+    throw e;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
  * 把 `types.idx` 整体解成对象。**与 `src/decl_index.rs::parse_with` 逐字段对应**：
  * 两边任何一侧改了写法，这条测试都会红（这是它存在的唯一理由）。
  */

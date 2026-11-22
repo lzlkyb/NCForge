@@ -13,6 +13,7 @@
 pub mod app_error;
 pub mod app_lifecycle;
 pub mod atomic_file;
+pub mod bind_resolver;
 pub mod bmf_excel;
 pub mod bmf_export;
 pub mod bmf_gen;

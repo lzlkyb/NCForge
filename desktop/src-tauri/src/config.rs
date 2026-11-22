@@ -125,6 +125,14 @@ pub struct AppConfig {
     /// 见 `docs/NCForge-智能代码-实施方案-2026-11-21.md` 阶段 2。
     #[serde(default)]
     pub lang_shadow_mode: ShadowMode,
+    /// 精确解析（常驻 binding resolver）：jdt.ls 没起来时，用 ECJ 编译内核补上
+    /// 「继承成员 / 精确接收者」这类声明索引答不了的跳转。默认关。
+    ///
+    /// 代价是一个 768MB 的常驻 JVM（空闲 120s 自退）；关掉时行为与之前逐字节一致
+    /// （命令直接回空，前端继续走内容搜索）。见
+    /// `docs/NCForge-窗口期精确解析-设计方案-2026-11-21.md`。
+    #[serde(default)]
+    pub lang_binding_resolver: bool,
     /// 启动服务/编译成功后，把工程模块的 `META-INF/*.upm` 等元数据投送到 NCHOME。
     ///
     /// 默认开：不投送时「改了 upm 不生效」没有任何提示，排查成本远高于多写几百 KB。
@@ -374,6 +382,7 @@ impl Default for AppConfig {
             lang_enabled: true,
             lang_auto_start: true,
             lang_shadow_mode: ShadowMode::Flat,
+            lang_binding_resolver: false,
             lang_xmx_mb: None,
             deploy_on_start: true,
             hotswap_enabled: true,

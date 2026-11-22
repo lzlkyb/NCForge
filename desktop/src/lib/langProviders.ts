@@ -4,7 +4,7 @@
 import { pathOfModel } from "./editorStore";
 import { searchWorkspace, type SearchHit } from "./search";
 import { getSession } from "./workspaceSession";
-import { langRequest, loadJdtSource, navigate, langCapabilityEpoch } from "./lang";
+import { langRequest, loadJdtSource, navigate, langCapabilityEpoch, bindingResolverEnabled } from "./lang";
 import { workspaceEpoch } from "./workspaceEpoch";
 import {
   contentsToMarkdown,
@@ -72,10 +72,11 @@ type Loc = { uri: ReturnType<typeof monaco.Uri.parse>; range: ReturnType<typeof 
 
 /**
  * 轻量模式的跳转：jdt.ls 不可用（关闭 / 还没就绪 / 文件不在当前模块）时，
- * 先问 Phase 1 声明索引（`lang_fast_definition`），索引没命中再退回「按类名搜工作区源码」。
+ * 按 ① 声明索引 → ② 精确解析（开关默认关）→ ③ 按类名搜工作区源码 的顺序问。
  *
- * 索引覆盖**源码 + jar 两侧**：jar 里的类返回 `jdt://` 地址，点开走既有的反编译标签页
- * （`registerEditorOpener` 拦截）。内容搜索只覆盖源码 —— 这也是加索引的主要动机。
+ * ① 覆盖**源码 + jar 两侧**：jar 里的类返回 `jdt://` 地址，点开走既有的反编译标签页
+ * （`registerEditorOpener` 拦截）。② 补 ① 答不了的（继承成员、精确接收者）。
+ * ③ 内容搜索只覆盖源码 —— 这也是加索引的主要动机。
  */
 /**
  * 按类名缓存搜索结果。Monaco 在按住 Ctrl 移动鼠标时会对经过的每个单词调 provideDefinition，
@@ -134,6 +135,27 @@ async function lightDefinition(model: Model, pos: Pos): Promise<Loc[] | null> {
       out.push({ uri, range: toMonacoRange(t.range) });
     }
     return out;
+  }
+
+  // ② 精确解析（常驻 binding resolver，开关默认关）：ECJ 全量绑定，专治声明索引
+  // 答不了的「继承成员 / 精确接收者」。与 ① 同一条前提——没建好 / 没命中就落到 ③。
+  if (bindingResolverEnabled()) {
+    const bound = await invoke<FastLoc[] | null>("lang_binding_resolve", {
+      path,
+      line: pos.lineNumber,
+      character: Math.max(0, pos.column - 1),
+    }).catch(() => null);
+    if (bound && bound.length) {
+      if (epoch !== workspaceEpoch() || model.isDisposed() || version !== model.getVersionId()) return null;
+      const out: Loc[] = [];
+      for (const t of bound) {
+        // jar 目标同样不预建 model（Ctrl+悬停会扫过大量类名，理由同 ①）
+        const uri = monaco.Uri.parse(t.uri);
+        rememberUri(uri.toString(), t.uri);
+        out.push({ uri, range: toMonacoRange(t.range) });
+      }
+      return out;
+    }
   }
 
   const word = model.getWordAtPosition(pos)?.word;

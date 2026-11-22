@@ -47,7 +47,12 @@ const BRIDGES = {
     src: join(ta, 'ecj-bridge', 'NcEcjBridge.java'),
     // Phase 1 声明索引器：独立 main，同 jar 不同入口（`java -cp ncecj.jar NcIndexer …`）。
     // 合进一个 jar 是为了复用这里的 Java 8 编译约束与 ecj-bridge-contract 的校验。
-    extraSrc: [join(ta, 'ecj-bridge', 'NcIndexer.java')],
+    // BindingResolver：窗口期 binding 解析，第三个入口（`java -cp ncecj.jar BindingResolver`，
+    // 行协议 init/resolve/invalidate/quit，见该文件头与窗口期精确解析设计方案 §3）。
+    extraSrc: [
+      join(ta, 'ecj-bridge', 'NcIndexer.java'),
+      join(ta, 'ecj-bridge', 'BindingResolver.java'),
+    ],
     out: join(ta, 'resources', 'ecj-bridge', 'ncecj.jar'),
     // ecj 的批量编译入口（Main.compile）与 ClassFileReader（struct/diff 命令）编桥时要在
     // classpath 上；运行时也用它。

@@ -3,10 +3,11 @@ const h=vi.hoisted(()=>({getText:vi.fn(()=>"提交文本"),getModel:vi.fn(),mark
 vi.mock("./editorStore",()=>({getText:h.getText,getModel:h.getModel,markSaved:h.markSaved}));
 vi.mock("./workspace",()=>({writeFile:h.writeFile,baseName:(p:string)=>p}));
 vi.mock("./localHistory",()=>({captureLocalHistory:h.history}));
-// `fileSave` 保存成功后会通知 jdt.ls（`notifyLangSaved`），而 `./lang` 会连带引入
+// `fileSave` 保存成功后会通知 jdt.ls（`notifyLangSaved`）与精确解析
+// （`notifyBindingSaved`），而 `./lang` 会连带引入
 // monaco（`window` 未定义，node 环境直接炸）。这条用例只测「保存语义」，
 // 把通知打桩掉即可 —— 通知本身有 `heavy/live` 用例覆盖。
-vi.mock("./lang",()=>({notifyLangSaved:vi.fn()}));
+vi.mock("./lang",()=>({notifyLangSaved:vi.fn(),notifyBindingSaved:vi.fn()}));
 import { saveOne } from "./fileSave";
 const target={path:"C:\\w\\A.java",encoding:"UTF-8" as const,hasBom:false,eol:"LF" as const,mtimeMs:1};
 beforeEach(()=>{vi.clearAllMocks();h.history.mockResolvedValue(undefined);h.writeFile.mockResolvedValue(3);});

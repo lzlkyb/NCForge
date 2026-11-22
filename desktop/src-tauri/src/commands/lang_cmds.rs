@@ -299,6 +299,9 @@ impl LspHandler for Handler {
                     // 就绪之后不再有进度：留着 100% 会让状态栏一直挂个百分比
                     cur.progress = None;
                     cur.stage = String::new();
+                    // resolver 唯一的使命就是窗口期（设计 §4 生命周期）：jdt.ls 就绪即
+                    // 主动退场，不依赖前端通知、不等空闲 TTL。之后的跳转本来就比它全。
+                    crate::bind_resolver::shutdown();
                 } else {
                     // 原文带 NN% / A/B 时给出百分比，带不到就保持 None（不编）
                     if let Some(p) = crate::lang::parse_progress(&message) {
@@ -973,6 +976,10 @@ pub struct LangConfigPatch {
     /// 影子工程形态（`flat` / `single`）。改了**不会**动正在跑的实例，下次拉起生效。
     #[serde(default)]
     pub lang_shadow_mode: Option<ShadowMode>,
+    /// 精确解析（常驻 binding resolver）开关。改了立即生效：关掉之后下一条查询
+    /// 就回空（前端退回内容搜索），已起的 JVM 留给空闲回收，不主动杀。
+    #[serde(default)]
+    pub lang_binding_resolver: Option<bool>,
 }
 
 /// 改代码智能的设置。内存上限越界时明确报错；关掉总开关时顺手停掉正在跑的 jdt.ls。
@@ -1001,6 +1008,9 @@ pub async fn lang_config_set(
             }
             if let Some(v) = patch.lang_shadow_mode {
                 cfg.lang_shadow_mode = v;
+            }
+            if let Some(v) = patch.lang_binding_resolver {
+                cfg.lang_binding_resolver = v;
             }
             Ok(())
         })

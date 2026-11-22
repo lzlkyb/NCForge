@@ -47,6 +47,7 @@ export interface AppConfig {
   lang_auto_start: boolean;
   lang_xmx_mb: number | null;
   lang_shadow_mode: "flat" | "single";
+  lang_binding_resolver: boolean;
   deploy_on_start: boolean;
   hotswap_enabled: boolean;
   hotswap_auto: boolean;
@@ -61,14 +62,14 @@ export interface AppConfig {
   linked_overrides: LinkedOverrideConfig[];
 }
 
-/** src-tauri/src/config.rs:209 · response */
+/** src-tauri/src/config.rs:217 · response */
 export interface LinkedOverrideConfig {
   action: string;
   target: string;
   dir: string | null;
 }
 
-/** src-tauri/src/config.rs:233 · response */
+/** src-tauri/src/config.rs:241 · response */
 export interface DbConnConfig {
   id: string;
   name: string;

@@ -40,6 +40,7 @@ mod hotswap_cmds;
 mod jar_symbol_cmds;
 mod java_diagnostics_cmds;
 mod java_run_cmds;
+mod lang_binding_cmds;
 mod lang_cache;
 mod lang_cmds;
 mod lang_fast_cmds;
@@ -102,6 +103,7 @@ pub use hotswap_cmds::*;
 pub use jar_symbol_cmds::*;
 pub use java_diagnostics_cmds::*;
 pub use java_run_cmds::*;
+pub use lang_binding_cmds::*;
 pub use lang_cache::*;
 pub use lang_cmds::*;
 pub use lang_fast_cmds::*;
@@ -224,6 +226,9 @@ macro_rules! nc_forge_commands {
         $crate::commands::lang_status,
         $crate::commands::lang_fast_definition,
         $crate::commands::lang_fast_status,
+        $crate::commands::lang_binding_resolve,
+        $crate::commands::lang_binding_status,
+        $crate::commands::lang_binding_invalidate,
         $crate::commands::lang_request,
         $crate::commands::lang_notify,
         $crate::commands::lang_semantic_tokens,

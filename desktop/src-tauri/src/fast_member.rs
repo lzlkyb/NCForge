@@ -299,7 +299,9 @@ fn declared_type_of(src: &str, name: &str, cursor_line: u32) -> Option<String> {
 }
 
 /// `name` 在当前方法的声明行（1 基）。声明在光标同一行时也返回。
-fn local_decl_line(src: &str, name: &str, cursor_line: u32) -> Option<u32> {
+/// `commands::lang_binding_cmds` 的 local 目标复用同一套启发式（binding 只给名字，
+/// 声明行照旧要在这里找）。
+pub(crate) fn local_decl_line(src: &str, name: &str, cursor_line: u32) -> Option<u32> {
     let lines: Vec<&str> = src.split('\n').collect();
     let cur = (cursor_line as usize).min(lines.len());
     let start = cur.saturating_sub(SEARCH_LINES);
@@ -579,7 +581,7 @@ mod tests {
         let off = src.find("getCode").unwrap();
         // 不认领（交回类型级），但也不能因为这一跳就跳到一个同名类上
         assert!(
-            resolve(src, off, &idx, file(), "so").map_or(true, |t| t.is_empty()),
+            resolve(src, off, &idx, file(), "so").is_none_or(|t| t.is_empty()),
             "接收者是方法返回值，不猜"
         );
     }
@@ -590,7 +592,7 @@ mod tests {
         let src = "package nc.vo.so;\nclass A {\n  void f(Helper h) {\n    h.run();\n  }\n}\n";
         let off = src.find("run").unwrap();
         assert!(
-            resolve(src, off, &idx, file(), "so").map_or(true, |t| t.is_empty()),
+            resolve(src, off, &idx, file(), "so").is_none_or(|t| t.is_empty()),
             "jar 侧成员行号恒 0，跳过去也落不到点上"
         );
     }
@@ -600,7 +602,7 @@ mod tests {
         let idx = fixture();
         let src = "package nc.vo.so;\nclass A {\n  void f() {\n    unknown.method();\n  }\n}\n";
         let off = src.find("method").unwrap();
-        assert!(resolve(src, off, &idx, file(), "so").map_or(true, |t| t.is_empty()));
+        assert!(resolve(src, off, &idx, file(), "so").is_none_or(|t| t.is_empty()));
     }
 
     /// 🔴 回归：`import com.x.y.Itf;` 的 `Itf` 前面也是 `.`，
