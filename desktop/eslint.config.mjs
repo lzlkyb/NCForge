@@ -40,6 +40,10 @@ export default tseslint.config(
       "scripts/_*/**",
       // 截图/冒烟探针的落盘目录（`.gitignore` 里也忽略），里面是同一类一次性脚本。
       ".cache/**",
+      // 外部 agent 跑验证时留下的探针脚本（`snapshot-*` / `*probe*.mjs`）。同样是
+      // 「跑一次就删」的一次性脚本，`.gitignore` 已忽略它，eslint 不同步忽略的话
+      // 只要本机跑过一轮就会把门禁刷红——那会逼着人把这些脚本 commit 上去。
+      ".codex-artifacts/**",
     ],
   },
   js.configs.recommended,

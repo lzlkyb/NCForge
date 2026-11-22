@@ -74,3 +74,7 @@ desktop/scripts/boot-budget.json
 
 # 索引器探针的编译产物（源码留在 tools/index-probe）
 tools/index-probe/out/
+
+# 数据库界面样式核查的 DataGrip 参考截图（团队决议不入库：外部产品界面，仅作设计参照）。
+# 同目录下 ours-*/mock-*/implemented-* 是本项目自己的截图，是否入库由该批提交决定。
+docs/db-style-audit-*/ref-*.png
