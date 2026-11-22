@@ -50,12 +50,14 @@ export const clientStatus = () => invoke<ClientStatus>("client_status");
 /**
  * 启动客户端。`debug` 为 true 时给 JVM 加 JDWP（只绑 127.0.0.1，端口由系统分配）。
  *
+ * `heapMb` 是启动配置带来的**本次覆盖**：只影响这一次启动，不写回全局配置。
+ *
  * 判成功的标准与中间件不同：客户端没有监听端口，进程活着就算启动成功；
  * 窗口出现还要几秒，所以文案说「进程已启动」而不是「界面已就绪」。
  */
-export function clientStart(debug = false, options?: { requestId?: string }): Promise<string> {
+export function clientStart(debug = false, options?: { requestId?: string; heapMb?: number | null }): Promise<string> {
   return startServiceOperation({ target: "client", debug, requestId: options?.requestId,
-    request: requestId => invoke<string>("client_start", { debug, requestId }),
+    request: requestId => invoke<string>("client_start", { debug, requestId, heapMb: options?.heapMb ?? null }),
     status: clientStatus, stop: expectedRunId => invoke<StopOutcome>("client_stop", { expectedRunId }) });
 }
 
@@ -86,10 +88,11 @@ export const clientClearLog = () =>
     () => invoke<LogClearResult>("client_clear_log"),
   );
 
-export const clientCommandLine = () =>
+/** 与 `clientStart` 同一组覆盖参数：预览必须就是下次真起的样子。 */
+export const clientCommandLine = (options?: { heapMb?: number | null }) =>
   trackOperation(
     { key: "client.command", label: "生成客户端命令行", scope: "NC 客户端", page: "files", panel: "svc" },
-    () => invoke<ClientPreview>("client_command_line"),
+    () => invoke<ClientPreview>("client_command_line", { heapMb: options?.heapMb ?? null }),
   );
 
 export const clientRevealLog = (previous = false) => invoke<void>("client_reveal_log", { previous });

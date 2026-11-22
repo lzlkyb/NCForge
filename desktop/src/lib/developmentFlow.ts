@@ -1,4 +1,16 @@
+import type { ClientOverrides, MiddlewareOverrides } from "./launchConfigs";
+
 export type DevelopmentTarget = "middleware" | "client";
+/**
+ * 开发流程启动时按目标各自带的覆盖值（来自选中的启动配置）。
+ *
+ * 两个目标必须分开：中间件配置可以选 8G、客户端配置选 1G，合成一个对象
+ * 就没法同时表达。缺省 / undefined = 用全局配置（回归路径）。
+ */
+export interface DevelopmentOverrides {
+  middleware?: MiddlewareOverrides;
+  client?: ClientOverrides;
+}
 export interface DevelopmentOptions {
   compile: boolean;
   deploy: boolean;

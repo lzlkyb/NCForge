@@ -24,12 +24,16 @@ use serde::{Deserialize, Serialize};
 /// 模块目录（2026-11-03 实测 newar 根 71 个可见条目，其中 6 个是这类元数据）。
 /// 隐藏的是**显示**，不是可访问性：`fs_read_file` 仍能打开里面的文件。
 ///
-const HIDDEN_DIRS: [&str; 5] = [
+/// `.ncforge` 是本工具自己的工程级数据（启动配置 `launches.json` 等，
+/// 见 `launch_config::config_path`）：与 `.settings` 同理，用户不需要在树里
+/// 编辑它，但它是普通文件，SVN 提交、外部 diff 都照旧看得见。
+const HIDDEN_DIRS: [&str; 6] = [
     ".svn",
     ".git",
     ".settings",
     ".nc-compile",
     ".externalToolBuilders",
+    ".ncforge",
 ];
 
 /// 目录树里不展示的文件：Eclipse / NC 的工程描述文件。

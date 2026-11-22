@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { JavaRunPanel } from "./JavaRunPanel";
 import type { JavaRunResult } from "../../lib/javaRun";
 import type { JavaRunConfig } from "../../lib/javaRunConfig";
@@ -21,11 +22,19 @@ vi.mock("../../lib/typeSearch", () => ({ searchTypes: mocks.search }));
 vi.mock("../../lib/openFileRequest", () => ({ requestOpenFile: mocks.open }));
 vi.mock("../../lib/errorToast", () => ({ errorToast: mocks.error }));
 vi.mock("./JavaDiagnosticTools", () => ({ JavaDiagnosticTools: () => <div>JVM 诊断</div> }));
+// 面板里的启动配置下拉要读启动配置库；这里只桩掉 IPC（其余纯函数保持真实），
+// 否则共用 invoke mock 的用例会把 java_run_discover 的返回值喂给 launch_config_list。
+vi.mock("../../lib/launchConfigs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/launchConfigs")>()),
+  listLaunchConfigs: () => Promise.resolve({ configs: [], notes: [] }),
+}));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement; let root: Root;
 const button = (text: string) => [...host.querySelectorAll("button")].find(element => element.textContent === text)!;
-const render = async () => { await act(async () => root.render(<JavaRunPanel />)); };
+// 面板里的启动配置下拉走 react-query（launch_config_list），渲染要带 Provider；
+// IPC 已被上面的 tauri mock 接住，返回 undefined 时按「没有配置」渲染。
+const render = async () => { await act(async () => root.render(<QueryClientProvider client={new QueryClient()}><JavaRunPanel /></QueryClientProvider>)); };
 const click = async (text: string) => { await act(async () => button(text).click()); };
 beforeEach(() => {
   vi.clearAllMocks(); mocks.snapshot.running = false; mocks.snapshot.result = null;

@@ -44,6 +44,7 @@ mod lang_binding_cmds;
 mod lang_cache;
 mod lang_cmds;
 mod lang_fast_cmds;
+mod launch_config_cmds;
 mod library_cmds;
 mod linked_cmds;
 mod local_history_cmds;
@@ -107,6 +108,7 @@ pub use lang_binding_cmds::*;
 pub use lang_cache::*;
 pub use lang_cmds::*;
 pub use lang_fast_cmds::*;
+pub use launch_config_cmds::*;
 pub use library_cmds::*;
 pub use linked_cmds::*;
 pub use local_history_cmds::*;
@@ -490,6 +492,11 @@ macro_rules! nc_forge_commands {
         $crate::commands::change_shelf_create,
         $crate::commands::change_shelf_plan,
         $crate::commands::change_shelf_delete,
+        // 启动配置库（<工程根>/.ncforge/launches.json）
+        $crate::commands::launch_config_list,
+        $crate::commands::launch_config_save,
+        $crate::commands::launch_config_delete,
+        $crate::commands::launch_config_duplicate,
         ]
     };
 }

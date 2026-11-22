@@ -4,6 +4,8 @@ import { invoke } from "../../lib/tauri";
 import { useWorkspaceSelector } from "../../lib/workspaceSession";
 import { configureJavaRun, configureRunFromEditor, runJava, cancelJavaRun, rerunFailed, useJavaRunSnapshot } from "../../lib/javaRun";
 import { inputLines } from "../../lib/javaRunConfig";
+import { javaOptionsToRunConfig, runConfigToJavaOptions, type LaunchConfig } from "../../lib/launchConfigs";
+import { LaunchConfigPicker } from "../services/LaunchConfigPicker";
 import { searchTypes } from "../../lib/typeSearch";
 import { requestOpenFile } from "../../lib/openFileRequest";
 import { errorToast } from "../../lib/errorToast";
@@ -17,6 +19,12 @@ export function JavaRunPanel() {
   const [busy, setBusy] = useState(false);
   const [sources, setSources] = useState<{ file: string; line: number }[]>([]);
   const config = snap.config;
+  // 「保存为配置」的快照 = 当前表单。调试/覆盖率不存：这三个按钮（运行/调试/覆盖率）
+  // 每次都是显式选择，存进配置反而会出现「配置说调试、点的却是运行」的分叉。
+  const javaSnapshot: LaunchConfig = { id: "", name: "", target: runConfigToJavaOptions(config, false, false) };
+  const applyJavaConfig = (picked: LaunchConfig | null) => {
+    if (picked?.target.kind === "java") configureJavaRun(javaOptionsToRunConfig(picked.target));
+  };
   const totals = snap.result?.tests.reduce((total, test) => ({ count: total.count + test.count, failures: total.failures + test.failures, ignored: total.ignored + test.ignored }), { count: 0, failures: 0, ignored: 0 });
   const update = (field: keyof typeof config, value: string) => configureJavaRun({ ...config, [field]: value });
   const discover = async () => {
@@ -59,6 +67,9 @@ export function JavaRunPanel() {
         <button type="button" className="wb-status-btn" disabled={busy || !config.classes.trim()} onClick={() => void runJava(config, true)}>调试</button>
         <button type="button" className="wb-status-btn" disabled={busy || !config.classes.trim()} onClick={() => void runJava(config, false, true)}>覆盖率</button>
       </>}
+    </div>
+    <div className="mb-2">
+      <LaunchConfigPicker kind="java" label="启动配置" snapshot={javaSnapshot} onSelected={applyJavaConfig} />
     </div>
     <div className="jrun-config" aria-label="Java 运行配置">
       <label>方式<select value={config.mode} disabled={snap.running} onChange={event => update("mode", event.target.value)}><option value="main">Java main</option><option value="test">JUnit 4 / 5</option></select></label>

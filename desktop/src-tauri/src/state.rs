@@ -32,6 +32,13 @@ pub struct AppState {
     /// 而两边都显示保存成功。临界区里只有内存拷贝和一个 `spawn_blocking` 的写盘，
     /// 锁跨过它是刻意的：写入顺序必须与修改顺序一致。
     config_write: tokio::sync::Mutex<()>,
+    /// 启动配置库（`<工程根>/.ncforge/launches.json`）的读改写串行化闸门。
+    ///
+    /// 与 `config_write` 同型：`launch_config_save/delete/duplicate` 都是
+    /// 「读全量 → 改一条 → 写全量」，并发的两次会各拿一份旧快照，后写的把前一条
+    /// 整个抹掉，而两边都显示成功。临界区里只有内存拷贝和一个 `spawn_blocking`
+    /// 的写盘，锁跨过它是刻意的：写入顺序必须与修改顺序一致。
+    launch_config_write: tokio::sync::Mutex<()>,
     /// 配置目录（`{config_dir}`，与 data_dir 相同）。
     pub config_dir: std::path::PathBuf,
     pub(crate) maintenance: crate::commands::Maintenance,
@@ -160,6 +167,7 @@ impl AppState {
         Arc::new(Self {
             config: RwLock::new(config),
             config_write: tokio::sync::Mutex::new(()),
+            launch_config_write: tokio::sync::Mutex::new(()),
             config_dir,
             maintenance: Default::default(),
             language_cache: std::sync::RwLock::new(()),
@@ -213,5 +221,86 @@ impl AppState {
             .map_err(|e| format!("保存配置的后台任务异常退出：{e}"))??;
         *self.config.write().await = cfg.clone();
         Ok(cfg)
+    }
+
+    /// 工程根（启动配置的存放处）。没选工作区、或填了空白串，都是错误。
+    ///
+    /// **不做 canonicalize**：这里的路径只用来定位 `<工程根>/.ncforge/launches.json`，
+    /// 不与任何别的路径做字符串比对；而 Windows 上 canonicalize 会带来 `\\?\` 前缀，
+    /// 只会平添一个 `strip_verbatim` 的坑。配置里存的 Java 路径同理——它们是给
+    /// `java_run` 自己校验的（运行目标必须位于当前工程）。
+    pub async fn project_root(&self) -> Result<std::path::PathBuf, String> {
+        let raw = self
+            .config
+            .read()
+            .await
+            .workspace_root
+            .clone()
+            .ok_or("尚未选择工作区目录")?;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err("尚未选择工作区目录".into());
+        }
+        Ok(std::path::PathBuf::from(trimmed))
+    }
+
+    /// 读启动配置库。返回（配置, 读取时攒下的说明）。
+    ///
+    /// 说明包括「文件坏了按空配置处理」「某一条校验不过被跳过」——前端要能说出来，
+    /// 否则用户只会看到「我存的配置少了一条」。
+    pub async fn launch_configs(
+        &self,
+    ) -> Result<(crate::launch_config::LaunchConfigFile, Vec<String>), String> {
+        let (_, file, notes) = self.launch_configs_at().await?;
+        Ok((file, notes))
+    }
+
+    /// 读工作区根 + 启动配置库，把根一起返回（读改写专用）。
+    ///
+    /// 「读 → 改 → 写」必须读写**同一个**根：分两次 `project_root()` 的话，两次之间
+    /// 恰好切了工作区，就会把旧工作区的配置写进新工作区——覆盖式的数据丢失。
+    async fn launch_configs_at(
+        &self,
+    ) -> Result<
+        (
+            std::path::PathBuf,
+            crate::launch_config::LaunchConfigFile,
+            Vec<String>,
+        ),
+        String,
+    > {
+        let root = self.project_root().await?;
+        let root_for_io = root.clone();
+        let (file, notes) = tauri::async_runtime::spawn_blocking(move || {
+            crate::launch_config::load_with_notes(&root_for_io)
+        })
+        .await
+        .map_err(|e| format!("读取启动配置的后台任务异常退出：{e}"))?;
+        Ok((root, file, notes))
+    }
+
+    /// 串行化的「读 → 改 → 写」，返回改完的配置、读取说明，以及闭包自己要带出来的值。
+    ///
+    /// 闭包返回 `Err` 时什么都不写——校验失败要能干净地退出（和
+    /// [`AppState::update_config`] 同一条纪律）。
+    ///
+    /// 第三个返回值是给调用方用的：save / duplicate 需要「入库后那条配置的 id」，
+    /// 让前端不必靠前后列表做差集（缓存未预热时差集恒真，会选中任意一条旧配置），
+    /// 也让「id 会变」的 duplicate 不必特判。
+    pub async fn update_launch_configs<F, T>(
+        &self,
+        edit: F,
+    ) -> Result<(crate::launch_config::LaunchConfigFile, Vec<String>, T), String>
+    where
+        F: FnOnce(&mut crate::launch_config::LaunchConfigFile) -> Result<T, String>,
+    {
+        let _serialized = self.launch_config_write.lock().await;
+        let (root, mut file, notes) = self.launch_configs_at().await?;
+        let out = edit(&mut file)?;
+        let to_save = file.clone();
+        tauri::async_runtime::spawn_blocking(move || crate::launch_config::save(&root, &to_save))
+            .await
+            .map_err(|e| format!("保存启动配置的后台任务异常退出：{e}"))??;
+        Ok((file, notes, out))
     }
 }

@@ -4,7 +4,7 @@ import { isNcTaskRunning } from "./ncTasks";
 import { getSession, subscribe } from "./workspaceSession";
 import { createSessionStore } from "./sessionStore";
 import { developmentRuntime } from "./developmentFlowRuntime";
-import { executeDevelopmentFlow, isDevelopmentCancelled, sameDevelopmentRoot, type DevelopmentExecution, type DevelopmentOptions } from "./developmentFlow";
+import { executeDevelopmentFlow, isDevelopmentCancelled, sameDevelopmentRoot, type DevelopmentExecution, type DevelopmentOptions, type DevelopmentOverrides } from "./developmentFlow";
 
 export interface DevelopmentSnapshot {
   state: "idle" | "running" | "cancelling" | "success" | "failed" | "cancelled";
@@ -37,14 +37,14 @@ export async function cancelDevelopmentFlow(reason?: string): Promise<void> {
 export function dismissDevelopmentResult(): void {
   if (!flight) developmentFlowStore.set({ state: "idle", phase: "", detail: "", operationId: null });
 }
-export async function runDevelopmentFlow(options: DevelopmentOptions, compileAll?: () => Promise<boolean>): Promise<void> {
+export async function runDevelopmentFlow(options: DevelopmentOptions, compileAll?: () => Promise<boolean>, overrides?: DevelopmentOverrides): Promise<void> {
   const root = getSession().root;
   if (!root) { toast("先打开工程再开始开发", "warning"); return; }
   if (flight || developmentControlsBusy()) { toast("已有编译、服务操作或开发流程在运行，请等待完成", "info"); return; }
   const operation = beginOperation({ key: "nc.development", label: "开始开发", scope: root, root, page: "files", panel: "svc", phase: "检查环境", cancel: () => cancelDevelopmentFlow() });
   if (!operation) return;
   developmentFlowStore.set({ state: "running", root, phase: "检查环境", detail: "", startedAt: Date.now(), operationId: operation.id });
-  const execution = executeDevelopmentFlow(options, developmentRuntime(root, compileAll), (phase) => {
+  const execution = executeDevelopmentFlow(options, developmentRuntime(root, compileAll, overrides), (phase) => {
     if (developmentFlowStore.get().state === "running") developmentFlowStore.set({ phase });
     operation.update({ phase });
   }, () => { if (sameDevelopmentRoot(getSession().root, root)) notifyChanged(); });

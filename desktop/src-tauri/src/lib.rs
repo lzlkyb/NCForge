@@ -99,6 +99,7 @@ pub mod java_types;
 pub mod jvm_runtime;
 pub mod lang;
 pub mod launch;
+pub mod launch_config;
 pub mod library_index;
 pub mod library_search;
 pub mod library_source;

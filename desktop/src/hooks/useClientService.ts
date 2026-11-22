@@ -15,7 +15,7 @@ import type { ServerState } from "../lib/server";
 import { errorToast } from "../lib/errorToast";
 import { readClientDebugModePref, writeClientDebugModePref } from "../lib/debugKeys";
 
-import { useServiceActions } from "./useServiceActions";
+import { useServiceActions, type StartOverrides } from "./useServiceActions";
 
 interface Options {
   /** 面板可见：不可见时不轮询（与中间件状态同一条约定）。 */
@@ -31,17 +31,21 @@ interface Options {
  */
 export function useClientService({ visible, appHidden }: Options) {
   /** 下次启动是否带 JDWP：与中间件的开关分开存（两个独立 JVM）。 */
-  const [debugMode, setDebugMode] = useState(readClientDebugModePref);
+  const [debugMode, setDebugModeState] = useState(readClientDebugModePref);
+  /** 用户明确选择：改开关就连同偏好一起落盘。 */
+  const setDebugMode = useCallback((next: boolean) => { setDebugModeState(next); writeClientDebugModePref(next); }, []);
+  /**
+   * 只改本次会话的开关，**不写偏好**。
+   *
+   * 启动配置里的 `debug` 是「这个工程这么起」，不是用户的长期偏好：选中配置后
+   * 换回「默认」，开关必须回到用户自己的选择；把配置的值写进 pref 会让下一次
+   * 不选配置的启动也带着 JDWP。
+   */
+  const adoptDebugMode = useCallback((next: boolean) => setDebugModeState(next), []);
   /** 每次启动 +1，让日志面板换一代（后端启动时把旧日志轮转成 .1）。 */
   const [generation, setGeneration] = useState(0);
   const bumpGeneration = useCallback(() => setGeneration((g) => g + 1), []);
-  const toggleDebugMode = useCallback(() => {
-    setDebugMode((prev) => {
-      const next = !prev;
-      writeClientDebugModePref(next);
-      return next;
-    });
-  }, []);
+  const toggleDebugMode = useCallback(() => setDebugMode(!debugMode), [setDebugMode, debugMode]);
   const queryClient = useQueryClient();
   const pollInterval = useMemo(servicePollInterval, []);
   const query = useQuery({
@@ -68,10 +72,10 @@ export function useClientService({ visible, appHidden }: Options) {
   const [preview, setPreview] = useState<ClientPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
 
-  const showCommandLine = useCallback(async () => {
+  const showCommandLine = useCallback(async (overrides?: StartOverrides) => {
     setPreviewing(true);
     try {
-      setPreview(await clientCommandLine());
+      setPreview(await clientCommandLine(overrides?.heapMb != null ? { heapMb: overrides.heapMb } : undefined));
     } catch (e) {
       errorToast("生成客户端命令行", e);
     } finally {
@@ -89,18 +93,20 @@ export function useClientService({ visible, appHidden }: Options) {
     error,
     refetch,
     busy,
-    start: (forceDebug?: boolean) => {
-      if (forceDebug !== undefined) { setDebugMode(forceDebug); writeClientDebugModePref(forceDebug); }
-      return start(forceDebug);
+    start: (forceDebug?: boolean, overrides?: StartOverrides) => {
+      if (forceDebug !== undefined) setDebugMode(forceDebug);
+      return start(forceDebug, overrides);
     },
     stop,
-    restart,
+    restart: (overrides?: StartOverrides) => restart(overrides),
     preview,
     previewing,
     showCommandLine,
     closePreview: () => setPreview(null),
     revealLog,
     debugMode,
+    setDebugMode,
+    adoptDebugMode,
     toggleDebugMode,
     generation,
   };

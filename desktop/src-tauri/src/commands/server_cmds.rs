@@ -357,7 +357,13 @@ pub async fn server_start(
     debug: Option<bool>,
     skip_deploy: Option<bool>,
     request_id: Option<String>,
+    heap_mb: Option<u32>,
+    hotwebs: Option<Vec<String>>,
 ) -> Result<String, String> {
+    // 启动配置带来的覆盖值先校验（在任何副作用之前）：越界就这一次不启动，
+    // 也不写回全局配置。规则与配置库里那份同一处（launch_config_cmds::check_*）。
+    super::launch_config_cmds::check_middleware_overrides(heap_mb, hotwebs.as_deref())
+        .map_err(|e| e.to_string())?;
     let st = state.inner().clone();
     // Reserve before any await/worker queue: an immediate cancellation can identify this preparation.
     let run_id = {
@@ -409,11 +415,12 @@ pub async fn server_start(
             .clone()
             .map(PathBuf::from)
             .unwrap_or_else(|| nc_home.clone());
-        // 堆上限取生效值（配置可能没设或被手改坏）；启动与命令行预览必须用同一份
-        let heap_mb = launch::effective_heap_mb(cfg.server_heap_mb);
+        // 堆上限取生效值（配置可能没设或被手改坏）；启动与命令行预览必须用同一份。
+        // 选了启动配置时，覆盖值优先，但只生效这一次——全局配置不动。
+        let heap_mb = launch::effective_heap_mb(heap_mb.or(cfg.server_heap_mb));
         // 挂哪些 web 应用同样以配置为准（None = 与 Eclipse 一致的 5 个）。
         // 名单决定 JVM 参数 -Duap.hotwebs，启动与预览必须共用同一份判断。
-        let hotwebs = launch::hotwebs_names(&nc_home, cfg.hotwebs.as_deref());
+        let hotwebs = launch::hotwebs_names(&nc_home, hotwebs.as_deref().or(cfg.hotwebs.as_deref()));
         // 慢的一步放锁外：写 7000 多条清单的 pathing jar 实测约 0.6 秒，
         // 持锁会让每秒一次的状态轮询一起卡住
         let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
@@ -666,7 +673,12 @@ pub async fn server_clear_log(
 pub async fn server_command_line(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
+    heap_mb: Option<u32>,
+    hotwebs: Option<Vec<String>>,
 ) -> Result<LaunchPreview, String> {
+    // 与 server_start 同一份校验：预览就是「下次真起的样子」，边界也必须一样
+    super::launch_config_cmds::check_middleware_overrides(heap_mb, hotwebs.as_deref())
+        .map_err(|e| e.to_string())?;
     let cfg = state.config.read().await.clone();
     let config_dir = state.config_dir.clone();
     let hotswap_jar = find_hotswap_jar(&app);
@@ -693,9 +705,10 @@ pub async fn server_command_line(
             .clone()
             .map(PathBuf::from)
             .unwrap_or_else(|| nc_home.clone());
-        let heap_mb = launch::effective_heap_mb(cfg.server_heap_mb);
+        let heap_mb = launch::effective_heap_mb(heap_mb.or(cfg.server_heap_mb));
         // 与启动同一份 webapp 名单：预览里的 -Duap.hotwebs 必须就是下次真起时的那串
-        let hotwebs = launch::hotwebs_names(&nc_home, cfg.hotwebs.as_deref());
+        let hotwebs =
+            launch::hotwebs_names(&nc_home, hotwebs.as_deref().or(cfg.hotwebs.as_deref()));
         // 与启动同一份判断，但 write=false：预览要是顺手换了令牌，正在跑的 JVM 就连不上了
         let java_agent = crate::hotswap::launch_agent_arg(
             &config_dir,

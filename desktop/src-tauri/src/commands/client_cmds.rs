@@ -251,7 +251,10 @@ pub async fn client_start(
     state: tauri::State<'_, Arc<AppState>>,
     debug: Option<bool>,
     request_id: Option<String>,
+    heap_mb: Option<u32>,
 ) -> Result<String, String> {
+    // 启动配置带来的堆上限覆盖：先校验再启动，只生效这一次，不写回全局配置
+    super::launch_config_cmds::check_client_overrides(heap_mb).map_err(|e| e.to_string())?;
     let st = state.inner().clone();
     let hotswap_jar = super::server_cmds::find_hotswap_jar(&app);
     let run_id = {
@@ -289,7 +292,7 @@ pub async fn client_start(
                 .clone()
                 .map(PathBuf::from)
                 .unwrap_or_else(|| nc_home.clone());
-            let heap_mb = launch::effective_client_heap_mb(cfg.client_heap_mb);
+            let heap_mb = launch::effective_client_heap_mb(heap_mb.or(cfg.client_heap_mb));
             let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
 
             // 热替换 agent：换新令牌、清旧就绪文件。与中间件各用各的会话文件。
@@ -487,7 +490,10 @@ pub async fn client_clear_log(
 pub async fn client_command_line(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
+    heap_mb: Option<u32>,
 ) -> Result<ClientPreview, String> {
+    // 与 client_start 同一份校验：预览就是下次真起的样子
+    super::launch_config_cmds::check_client_overrides(heap_mb).map_err(|e| e.to_string())?;
     let cfg = state.config.read().await.clone();
     let config_dir = state.config_dir.clone();
     let st = state.inner().clone();
@@ -513,7 +519,7 @@ pub async fn client_command_line(
             .clone()
             .map(PathBuf::from)
             .unwrap_or_else(|| nc_home.clone());
-        let heap_mb = launch::effective_client_heap_mb(cfg.client_heap_mb);
+        let heap_mb = launch::effective_client_heap_mb(heap_mb.or(cfg.client_heap_mb));
         let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
         // 与启动同一份判断，但 write=false：预览要是顺手换了令牌，正在跑的客户端就连不上了
         let java_agent = crate::hotswap::launch_agent_arg_for(

@@ -6,10 +6,10 @@ import { isNcTaskRunning } from "./ncTasks";
 import { operationActive } from "./operations";
 import { serverStart, serverStatus, serverStop } from "./server";
 import { getSession } from "./workspaceSession";
-import { sameDevelopmentRoot, type DevelopmentRuntime } from "./developmentFlow";
+import { sameDevelopmentRoot, type DevelopmentOverrides, type DevelopmentRuntime } from "./developmentFlow";
 
 /** 与既有命令/编译反馈共用运行时，不额外挂载 useModuleCompile 的订阅。 */
-export function developmentRuntime(root: string, compileAll?: () => Promise<boolean>): DevelopmentRuntime {
+export function developmentRuntime(root: string, compileAll?: () => Promise<boolean>, overrides?: DevelopmentOverrides): DevelopmentRuntime {
   let compileOwned = false;
   return {
     root,
@@ -34,9 +34,14 @@ export function developmentRuntime(root: string, compileAll?: () => Promise<bool
     deploy: deployApply,
     async start(target, debug, requestId) {
       if (operationActive(target === "middleware" ? "service.stop" : "client.stop")) throw new Error("服务正在停止，请等待完成后再开始开发");
-      return target === "middleware"
-        ? serverStart(debug, { skipDeploy: true, requestId })
-        : clientStart(debug, { requestId });
+      // 覆盖值来自流程开始时的启动配置选择，只在本次启动生效（与抽屉里的启动按钮
+      // 同一条路径），不写回全局配置。放工厂闭包而不是 start 参数：executeDevelopmentFlow
+      // 不该知道启动配置的存在。
+      if (target === "middleware") {
+        const own = overrides?.middleware;
+        return serverStart(debug, { skipDeploy: true, requestId, heapMb: own?.heapMb, hotwebs: own?.hotwebs });
+      }
+      return clientStart(debug, { requestId, heapMb: overrides?.client?.heapMb });
     },
     stop: (target, expectedRunId) => target === "middleware" ? serverStop(expectedRunId) : clientStop(expectedRunId),
     attach: (target) => attachDebugger(target === "middleware" ? "server" : "client"),

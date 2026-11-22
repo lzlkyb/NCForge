@@ -19,8 +19,11 @@ import { MetaDeployCard } from "../services/MetaDeployCard";
 import { ServiceNavigator, type ServiceDrawer } from "../services/ServiceNavigator";
 import { ServiceDetails } from "../services/ServiceDetails";
 import { ServiceDrawerPanel } from "../services/ServiceDrawerPanel";
+import { LaunchConfigPicker } from "../services/LaunchConfigPicker";
+import { sameSet } from "../services/HotwebsField";
 import { DevelopmentFlowProgress } from "../services/DevelopmentFlowProgress";
 import { useDevelopmentFlow } from "../../hooks/useDevelopmentFlow";
+import { useSelectedLaunchConfig } from "../../hooks/useLaunchConfigs";
 import { cancelDevelopmentFlow } from "../../lib/developmentFlowSession";
 import { useServiceCommands } from "../../hooks/useServiceCommands";
 import { useClientService } from "../../hooks/useClientService";
@@ -28,9 +31,10 @@ import { useAppHidden } from "../../lib/appVisibility";
 import { useWorkspaceSelector } from "../../lib/workspaceSession";
 import { errorToast } from "../../lib/errorToast";
 import { attachDebugger, detachDebugger, useDebugSnapshot } from "../../lib/debugSession";
-import { readDebugModePref, writeDebugModePref } from "../../lib/debugKeys";
+import { readClientDebugModePref, readDebugModePref, writeDebugModePref } from "../../lib/debugKeys";
 import { serviceNames, type ServiceSource } from "../../lib/servicePresentation";
-import { serverCommandLine, serverRevealLog, serverStatus, type LaunchPreview, type ServerState, type ServerStatus } from "../../lib/server";
+import { hotwebsProbe, ncHomeProbe, serverCommandLine, serverRevealLog, serverStatus, type LaunchPreview, type ServerState, type ServerStatus } from "../../lib/server";
+import { clientOverridesOf, middlewareOverridesOf, type LaunchConfig } from "../../lib/launchConfigs";
 import { HOTSWAP_STATUS_KEY, hotswapStatus } from "../../lib/hotswap";
 import { SERVICE_RESTART_EVENT, takeServiceRestartRequest } from "../../lib/servicePanel";
 import { ServiceContextBar } from "../services/ServiceContextBar";
@@ -78,6 +82,42 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   }, [askRestart]);
   const commands = useServiceCommands({ debugMode, refetch, patchState, onGeneration: bumpGeneration, onClearConfirm: clearConfirm });
   const flow = useDevelopmentFlow();
+  // 选中的启动配置 → 本次启动的覆盖值（undefined = 默认，不覆盖任何参数）。
+  const middlewareConfig = useSelectedLaunchConfig("middleware");
+  const clientConfig = useSelectedLaunchConfig("client");
+  const middlewareOverrides = middlewareOverridesOf(middlewareConfig);
+  const clientOverrides = clientOverridesOf(clientConfig);
+  // 「保存为配置」要存当前真实会怎么起：堆取状态里的生效值，web 应用取探针的生效名单，
+  // 与默认名单一致时存 null（跟随全局，默认名单调整后才能跟着走——与 HotwebsField 同规则）。
+  // 查询 key 与 ServiceConfig 完全相同，共用缓存不额外 IPC。
+  const ncHome = useQuery({ queryKey: ["nc-home"], queryFn: () => ncHomeProbe(), staleTime: 30_000, retry: false });
+  const hotwebs = useQuery({ queryKey: ["hotwebs"], queryFn: hotwebsProbe, enabled: !!ncHome.data, staleTime: 30_000, retry: false });
+  const middlewareSnapshot: LaunchConfig = {
+    id: "", name: "",
+    target: {
+      kind: "middleware",
+      heapMb: status?.heapMb ?? null,
+      hotwebs: hotwebs.data ? (sameSet(hotwebs.data.active, hotwebs.data.default) ? null : hotwebs.data.active) : null,
+      debug: debugMode,
+    },
+  };
+  const clientSnapshot: LaunchConfig = {
+    id: "", name: "",
+    target: { kind: "client", heapMb: client.status?.heapMb ?? null, debug: client.debugMode },
+  };
+  /**
+   * 选中配置即按它的调试开关走；选回「默认（跟随全局配置）」= 回到用户自己的偏好。
+   *
+   * 两条纪律：① 配置的 debug 只作用于**本次生效**，不写 pref——把「这个工程要调试」
+   * 写进长期偏好，会让下次不选配置的启动也带着 JDWP；② 选回默认必须真的回退，
+   * 否则复选框还勾着、下次点启动仍是配置里那个值，界面上却写着「默认」。
+   */
+  const syncDebugFromConfig = (kind: "middleware" | "client", config: LaunchConfig | null) => {
+    const pref = kind === "client" ? readClientDebugModePref() : readDebugModePref();
+    const on = config && config.target.kind === kind ? config.target.debug : pref;
+    if (kind === "client") client.adoptDebugMode(on);
+    else setDebugMode(on);
+  };
   const selected = ui.source === "client" ? client.status : status ?? null;
   const selectedFailed = ui.source === "client" ? client.isError : isError;
   const selectedBusy = ui.source === "client" ? client.busy : commands.busy;
@@ -90,9 +130,9 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
     void (detach ? detachDebugger(target) : attachDebugger(target)).then(() => toast(`${serviceNames[ui.source]}调试已${detach ? "断开" : "附加"}`, "success")).catch(e => errorToast(`${detach ? "断开" : "附加"}调试器`, e));
   };
   const showCommandLine = async () => {
-    if (ui.source === "client") { await client.showCommandLine(); return; }
+    if (ui.source === "client") { await client.showCommandLine(clientOverrides); return; }
     changeUi({ previewing: true });
-    try { changeUi({ preview: await serverCommandLine() }); }
+    try { changeUi({ preview: await serverCommandLine(middlewareOverrides) }); }
     catch (e) { errorToast("生成启动命令行", e); }
     finally { changeUi({ previewing: false }); }
   };
@@ -106,8 +146,8 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   const confirmAction = (kind: "stop" | "restart") => {
     const target = ui.confirm?.source;
     clearConfirm();
-    if (target === "client") void (kind === "stop" ? client.stop() : client.restart());
-    else void (kind === "stop" ? commands.stop() : commands.restart());
+    if (target === "client") void (kind === "stop" ? client.stop() : client.restart(clientOverrides));
+    else void (kind === "stop" ? commands.stop() : commands.restart(middlewareOverrides));
   };
   const tools = <ServiceActionsBar configOpen={ui.drawer === "config"} onToggleConfig={() => changeUi({ drawer: "config" })}
     previewing={ui.source === "client" ? client.previewing : ui.previewing} onCommandLine={() => void showCommandLine()}
@@ -117,8 +157,8 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   const toolbarProps = { status: selected, busy: selectedBusy, failed: selectedFailed,
     debugMode: ui.source === "client" ? client.debugMode : debugMode,
     onStart: (forceDebug?: boolean) => {
-      if (ui.source === "client") void client.start(forceDebug);
-      else { if (forceDebug !== undefined) { setDebugMode(forceDebug); writeDebugModePref(forceDebug); } void commands.start(forceDebug); }
+      if (ui.source === "client") void client.start(forceDebug, clientOverrides);
+      else { if (forceDebug !== undefined) { setDebugMode(forceDebug); writeDebugModePref(forceDebug); } void commands.start(forceDebug, middlewareOverrides); }
     }, onStop: requestStop, onRestart: () => changeUi({ confirm: { kind: "restart", source: ui.source } }),
     onRetry: () => void (ui.source === "client" ? client.refetch() : refetch()), debugAttached: selectedDebug.state === "attached", debugBusy: selectedDebug.busy !== null,
     onAttachDebug: () => attachDebug(false), onDetachDebug: () => attachDebug(true), workflowBusy: flow.running, tools };
@@ -140,7 +180,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
       </section>
       {ui.drawer && <ServiceDrawerPanel title={drawerTitle} onClose={() => changeUi({ drawer: null })}>
         {ui.drawer === "details" && <ServiceDetails source={ui.source} status={selected} failed={selectedFailed} onCommandLine={() => void showCommandLine()} onEditPort={() => changeUi({ portOpen: true })} />}
-        {ui.drawer === "config" && <><div className="sc-start-options"><label><input type="checkbox" checked={debugMode} onChange={e => { setDebugMode(e.target.checked); writeDebugModePref(e.target.checked); }} />中间件下次启动带调试</label><label><input type="checkbox" checked={client.debugMode} onChange={client.toggleDebugMode} />客户端下次启动带调试</label></div><ServiceConfig status={status ?? null} running={!status || status.state !== "stopped"} clientStatus={client.status} clientRunning={!client.status || client.status.state !== "stopped"} onRefetch={() => void refetch()} onRefetchClient={() => void client.refetch()} /></>}
+        {ui.drawer === "config" && <><div className="sc-start-options"><label><input type="checkbox" checked={debugMode} onChange={e => { setDebugMode(e.target.checked); writeDebugModePref(e.target.checked); }} />中间件下次启动带调试</label><label><input type="checkbox" checked={client.debugMode} onChange={client.toggleDebugMode} />客户端下次启动带调试</label></div><h3>启动配置</h3><LaunchConfigPicker kind="middleware" label="中间件" snapshot={middlewareSnapshot} onSelected={c => syncDebugFromConfig("middleware", c)} /><LaunchConfigPicker kind="client" label="客户端" snapshot={clientSnapshot} onSelected={c => syncDebugFromConfig("client", c)} /><ServiceConfig status={status ?? null} running={!status || status.state !== "stopped"} clientStatus={client.status} clientRunning={!client.status || client.status.state !== "stopped"} onRefetch={() => void refetch()} onRefetchClient={() => void client.refetch()} /></>}
         {ui.drawer === "deploy" && <MetaDeployCard defaultOpen />}
       </ServiceDrawerPanel>}
     </div></DockRegion>

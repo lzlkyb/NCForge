@@ -6,7 +6,7 @@ import type { HotwebsInfo } from "../../lib/server";
 import { errorToast } from "../../lib/errorToast";
 
 /** 两份名单是否同集合（顺序、重复都不算差异）。 */
-function sameSet(a: string[], b: string[]): boolean {
+export function sameSet(a: string[], b: string[]): boolean {
   const sa = [...new Set(a)].sort();
   const sb = [...new Set(b)].sort();
   return sa.length === sb.length && sa.every((n, i) => n === sb[i]);

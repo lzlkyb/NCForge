@@ -6,9 +6,19 @@ import { useWorkspaceSelector } from "../lib/workspaceSession";
 import type { ServerState, StopOutcome } from "../lib/server";
 
 type Busy = "start" | "stop" | "restart" | null;
+/**
+ * 启动配置带来的「仅本次生效」的覆盖值。
+ *
+ * 形状是中间件与客户端的并集：`hotwebs` 只有中间件认，客户端那份 options 里没有这个
+ * 字段——传过去被忽略（TS 结构化类型允许变量多带字段，对象字面量才做 ExcessCheck）。
+ */
+export interface StartOverrides {
+  heapMb?: number | null;
+  hotwebs?: string[] | null;
+}
 interface Options {
   name: string; debugMode: boolean;
-  startRequest: (debug: boolean) => Promise<unknown>;
+  startRequest: (debug: boolean, overrides?: StartOverrides) => Promise<unknown>;
   stopRequest: () => Promise<StopOutcome>;
   refetch: () => Promise<unknown>;
   patchState: (next: ServerState) => void;
@@ -25,7 +35,7 @@ export function useServiceActions({ name, debugMode, startRequest, stopRequest, 
   const root = useWorkspaceSelector(s => s.root);
   const invalidateContext = useCallback(() => { context.current++; }, []);
   useEffect(() => { alive.current = true; invalidateContext(); setBusy(null); return () => { alive.current = false; invalidateContext(); }; }, [root, invalidateContext]);
-  const run = useCallback(async (kind: "start" | "restart", debug = debugMode) => {
+  const run = useCallback(async (kind: "start" | "restart", debug = debugMode, overrides?: StartOverrides) => {
     if (startLock.current || stopLock.current || blocked?.()) return;
     startLock.current = true; cancelled.current = false;
     const generation = context.current;
@@ -38,7 +48,7 @@ export function useServiceActions({ name, debugMode, startRequest, stopRequest, 
       }
       if (cancelled.current || !valid()) return;
       onGeneration();
-      await startRequest(debug);
+      await startRequest(debug, overrides);
       if (!valid() || cancelled.current) return;
       patchState("starting");
       toast(`${name}${kind === "restart" ? "重启" : "启动"}请求已接受，正在等待运行状态`, "info");
@@ -66,5 +76,5 @@ export function useServiceActions({ name, debugMode, startRequest, stopRequest, 
       if (alive.current && context.current === generation) { setBusy(startLock.current ? "stop" : null); void refetch(); }
     }
   }, [name, onClearConfirm, patchState, refetch, stopRequest]);
-  return { busy, isPending: () => startLock.current || stopLock.current, start: (debug?: boolean) => run("start", debug), stop, restart: () => run("restart") };
+  return { busy, isPending: () => startLock.current || stopLock.current, start: (debug?: boolean, overrides?: StartOverrides) => run("start", debug, overrides), stop, restart: (overrides?: StartOverrides) => run("restart", undefined, overrides) };
 }

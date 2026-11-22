@@ -116,10 +116,13 @@ export const serverStatus = () => invoke<ServerStatus>("server_status");
 /**
  * 启动中间件。`debug` 为 true 时后端给 JVM 加 JDWP（只绑 127.0.0.1，端口由系统分配，
  * 启动后从 `ServerStatus.debugPort` 读回）。
+ *
+ * `heapMb` / `hotwebs` 是启动配置带来的**本次覆盖**：只影响这一次启动，不写回全局
+ * 配置（后端启动前校验，越界直接报错）。不传 = 用全局配置的值。
  */
-export function serverStart(debug = false, options?: { skipDeploy?: boolean; requestId?: string }): Promise<string> {
+export function serverStart(debug = false, options?: { skipDeploy?: boolean; requestId?: string; heapMb?: number | null; hotwebs?: string[] | null }): Promise<string> {
   return startServiceOperation({ target: "server", debug, requestId: options?.requestId,
-    request: requestId => invoke<string>("server_start", { debug, skipDeploy: options?.skipDeploy ?? false, requestId }),
+    request: requestId => invoke<string>("server_start", { debug, skipDeploy: options?.skipDeploy ?? false, requestId, heapMb: options?.heapMb ?? null, hotwebs: options?.hotwebs ?? null }),
     status: serverStatus, stop: expectedRunId => invoke<StopOutcome>("server_stop", { expectedRunId }) });
 }
 export const serverStop = (expectedRunId?: string) => trackOperation({ key: `service.stop${expectedRunId ? ':' + expectedRunId : ''}`, label: "停止服务", scope: "NC 中间件", page: "files", panel: "svc" },
@@ -133,7 +136,12 @@ export interface LogClearResult {
   rotated: boolean;
 }
 export const serverClearLog = () => trackOperation({ key: "service.log.clear", label: "清理服务日志", scope: "NC 中间件", page: "files", panel: "svc" }, () => invoke<LogClearResult>("server_clear_log"));
-export const serverCommandLine = () => trackOperation({ key: "service.command", label: "生成启动命令行", scope: "NC 中间件", page: "files", panel: "svc" }, () => invoke<LaunchPreview>("server_command_line"));
+/**
+ * 生成启动命令行。与 `serverStart` 同一组覆盖参数——**预览必须就是下次真起的样子**：
+ * 选了启动配置却不传给预览，会出现「命令行里写 4G、实际起 8G」。
+ */
+export const serverCommandLine = (options?: { heapMb?: number | null; hotwebs?: string[] | null }) =>
+  trackOperation({ key: "service.command", label: "生成启动命令行", scope: "NC 中间件", page: "files", panel: "svc" }, () => invoke<LaunchPreview>("server_command_line", { heapMb: options?.heapMb ?? null, hotwebs: options?.hotwebs ?? null }));
 export const serverRevealLog = (previous = false) => invoke<void>("server_reveal_log", { previous });
 /** 结束占用中间件端口的 java 进程（端口取自 NC 配置），返回被结束的 PID。 */
 export const serverKillPortOwner = () => trackOperation({ key: "service.kill", label: "结束端口占用进程", scope: "NC 中间件", page: "files", panel: "svc" }, () => invoke<number>("server_kill_port_owner"));
