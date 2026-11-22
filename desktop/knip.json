@@ -6,6 +6,7 @@
     "src/design-preview/update-preview.tsx",
     "src/design-preview/controls-preview.tsx",
     "src/design-preview/workbench-design.tsx",
+    "src/design-preview/wait-preview.tsx",
     "src/lib/bindings.check.ts",
     "scripts/build-bridge-jar.mjs",
     "scripts/build-design-preview.mjs",
