@@ -1699,6 +1699,17 @@ mod tests {
         std::fs::write(p, s).unwrap();
     }
 
+    /// 把 mtime 显式推后 `secs` 秒。stat 口径只到毫秒：同一毫秒内的两次写入
+    /// 区分不开（`decision_touch_*` 曾这样抖没，连跑 5 次红 2 次）。真实的 SVN
+    /// 更新 / 外部工具重写间隔远大于 1ms，显式推时间只是把场景钉死，不改被测语义。
+    fn bump_mtime(p: &Path, secs: u64) {
+        use std::fs::{FileTimes, OpenOptions};
+        let f = OpenOptions::new().write(true).open(p).unwrap();
+        let at = std::fs::metadata(p).unwrap().modified().unwrap()
+            + std::time::Duration::from_secs(secs);
+        f.set_times(FileTimes::new().set_modified(at)).unwrap();
+    }
+
     #[test]
     fn ext_refs_collects_imports_packages_and_mentioned_names() {
         let src = "package p; import q.A; import r.*; public class B { A a; C c; }";
@@ -1987,6 +1998,7 @@ mod tests {
 
         // touch（SVN 更新 / 外部工具重写同样内容）：stat 变了哈希没变 → Skip
         write(&a, "package p; public class A { public void f() {} }");
+        bump_mtime(&a, 2);
         assert_eq!(decide(&l, Some(&man), "cp", "cc", false), Decision::Skip);
         // Skip 后把新 stat 刷回清单，下次不再重复读文件
         let refreshed = touch_refresh(&l, &man).expect("touch 应触发 stat 刷新");
