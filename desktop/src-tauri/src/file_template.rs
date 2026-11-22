@@ -419,6 +419,13 @@ mod tests {
     #[test]
     fn 文件说明预览转义注释结束符且保持换行() {
         let dir = crate::test_support::tmp("java-header");
+        // 换行风格取「本目录最近的 .java」；不种样本就会沿父链上溯，而 %TEMP% 里
+        // 谁放了什么文件不在测试控制内（实测垃圾 .java 会让它判成 LF，本测试假红）。
+        std::fs::write(
+            dir.join("EolSample.java"),
+            "class EolSample {}\r\n// 只要有一个 CRLF 样本，最近一层就定调\r\n",
+        )
+        .unwrap();
         let preview = preview_with_header(
             &dir,
             "Bill",
