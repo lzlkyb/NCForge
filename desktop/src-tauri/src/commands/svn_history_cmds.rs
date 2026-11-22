@@ -103,6 +103,7 @@ pub async fn svn_revision_diff(
     root: String,
     repository_path: String,
     revision: i64,
+    base_revision: Option<i64>,
 ) -> Result<RevisionDiff, String> {
     if revision < 1 {
         return Err("版本号必须大于零".to_string());
@@ -114,16 +115,13 @@ pub async fn svn_revision_diff(
         let bridge = svn::bridge_for(&app, &st, &cfg)?;
         let info = svn::wc_info(&bridge, &source)?;
         svn::ensure_auth(&bridge, &cfg, &info.host)?;
+        let source_path = display_path(&source);
+        let rev = revision.to_string();
+        let base = base_revision.map(|value| value.to_string());
+        let mut args = vec![source_path.as_str(), repository_path.as_str(), rev.as_str()];
+        args.extend(base.as_deref());
         let value = bridge
-            .call(
-                "revision_diff",
-                &[
-                    &display_path(&source),
-                    &repository_path,
-                    &revision.to_string(),
-                ],
-                svn::T_NET,
-            )
+            .call("revision_diff", &args, svn::T_NET)
             .map_err(|e| svn::split_code_label(e.code, e.message))?;
         let (before_text, before_encoding) = decode_content(&value["before"])?;
         let (after_text, after_encoding) = decode_content(&value["after"])?;
@@ -193,6 +191,9 @@ pub async fn svn_conflict_snapshot(
             .call("conflict_snapshot", &[&display_path(&target)], svn::T_NET)
             .map_err(|e| svn::split_code_label(e.code, e.message))?;
         let working = workspace::read_text_file(&target).ok();
+        let editable = working
+            .as_ref()
+            .filter(|v| v.lossless && !matches!(v.eol, workspace::Eol::Mixed));
         Ok(ConflictSnapshot {
             tree_conflict: value["treeConflict"].as_bool().unwrap_or(false),
             property_conflict: value["propertyConflict"].as_bool().unwrap_or(false),
@@ -204,6 +205,8 @@ pub async fn svn_conflict_snapshot(
             working_has_markers: working
                 .as_ref()
                 .is_some_and(|v| has_conflict_markers(&v.text)),
+            working_text: editable.map(|v| v.text.clone()),
+            working_mtime_ms: editable.map(|v| v.mtime_ms),
         })
     })
     .await
@@ -216,6 +219,7 @@ pub async fn svn_resolve_working(
     state: tauri::State<'_, Arc<AppState>>,
     root: String,
     path: String,
+    merge: Option<SvnMergeDraft>,
 ) -> Result<svn::ResolveResult, String> {
     let cfg = state.config.read().await.clone();
     let st = state.inner().clone();
@@ -223,8 +227,19 @@ pub async fn svn_resolve_working(
         let source = check_root(&cfg, &root)?;
         let target = svn::safe_path(&cfg, &path)?;
         let content = workspace::read_text_file(&target)?;
-        if has_conflict_markers(&content.text) {
-            return Err("工作副本仍含冲突标记，请完成手工合并并保存".to_string());
+        let result_text = merge
+            .as_ref()
+            .map_or(content.text.as_str(), |value| value.text.as_str());
+        if has_conflict_markers(result_text) {
+            return Err("合并结果仍含冲突标记，请完成合并后再确认".to_string());
+        }
+        if let Some(draft) = &merge {
+            if content.mtime_ms != draft.expected_mtime_ms {
+                return Err("此文件在预览后已改变，请刷新副本再合并".to_string());
+            }
+            if !content.lossless || matches!(content.eol, workspace::Eol::Mixed) {
+                return Err("此文件无法按原编码和换行无损保存，请在 SVN 客户端处理".to_string());
+            }
         }
         let bridge = svn::bridge_for(&app, &st, &cfg)?;
         let conflict = bridge
@@ -238,10 +253,34 @@ pub async fn svn_resolve_working(
         if !conflict["textConflict"].as_bool().unwrap_or(false) {
             return Err("这个文件已经没有文本冲突".to_string());
         }
+        if merge.is_some()
+            && ["mine", "base", "theirs"]
+                .iter()
+                .any(|side| conflict[*side]["binary"].as_bool().unwrap_or(false))
+        {
+            return Err("二进制冲突需要在 SVN 客户端处理".to_string());
+        }
         let backup = svn::backup_conflict_files(&source, &target, &st.config_dir, &path)?;
+        if let Some(draft) = &merge {
+            workspace::write_text_file(
+                &target,
+                &draft.text,
+                content.encoding,
+                content.has_bom,
+                content.eol,
+                Some(draft.expected_mtime_ms),
+            )?;
+        }
         bridge
             .call("resolve_working", &[&display_path(&target)], svn::T_NET)
-            .map_err(|e| svn::split_code_label(e.code, e.message))?;
+            .map_err(|e| {
+                let error = svn::split_code_label(e.code, e.message);
+                if merge.is_some() {
+                    format!("合并正文已保存，请刷新副本核对冲突状态和备份: {error}")
+                } else {
+                    error
+                }
+            })?;
         Ok(svn::ResolveResult {
             backup_dir: backup.map(|p| display_path(&p)),
         })

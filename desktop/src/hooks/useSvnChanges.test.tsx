@@ -115,4 +115,10 @@ describe("SVN 提交及状态收尾", () => {
     expect(h.toast).toHaveBeenCalledWith(expect.stringContaining("已更新到 r9，但刷新未完成"), "warning");
     expect(h.toast.mock.calls.some(([message, tone]) => tone === "success" && String(message).includes("状态已核对"))).toBe(false);
   });
+  it("全工作副本更新阻止已打开但未保存的编辑", async () => {
+    setSession({ tabs:[{path,name:"A.java",dirty:true}] as never });
+    await act(async () => { await actions.doUpdate(9); });
+    expect(h.invoke.mock.calls.some(([command]) => command === "svn_update")).toBe(false);
+    expect(h.toast).toHaveBeenCalledWith(expect.stringContaining("未保存文件"),"error");
+  });
 });

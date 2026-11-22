@@ -9,65 +9,82 @@ import { SvnDiffEditor } from "./SvnDiffEditor";
 import { svnDiffLanguage } from "../../lib/svnDiffLanguage";
 import { toast } from "../ui/toast";
 import { Menu } from "../ui/Menu";
+import { RevisionPatchPreview } from "./RevisionPatchPreview";
 import "../../svn-history.css";
 const PAGE = 30;
-const initial = { entries: [] as HistoryEntry[], loading: false, done: false, error: null as string | null };
+const initial = { entries: [] as HistoryEntry[], repositoryPath: "", loading: false, done: false, error: null as string | null };
+type HistoryFilters = { scope: string; keyword: string; author: string; since: string; until: string };
 
 export function HistoryView({ path, title, modulePath, initialRevision, backLabel = "返回审查", onBack }: { path: string; title: string; modulePath?: string; initialRevision?: number; backLabel?: string; onBack: () => void }) {
   const root = useWorkspaceRoot(); const epoch = workspaceEpoch();
-  const [filters, setFilters] = useState({ scope: "file", keyword: "", author: "", since: "", until: "" });
+  const [filters, setFilters] = useState<HistoryFilters>({ scope: "file", keyword: "", author: "", since: "", until: "" });
   const [result, setResult] = useState(initial);
   const [revision, setRevision] = useState<number | null>(initialRevision ?? null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [showPatch, setShowPatch] = useState(false);
   const requests = useRef({ sequence: 0, loading: false, cursor: 0 });
   const source = filters.scope === "root" ? root ?? path : filters.scope === "module" ? modulePath ?? root ?? path : path;
-  const load = useCallback(async (reset: boolean) => {
+  const load = useCallback(async (reset: boolean, search?: HistoryFilters) => {
     if (!root || epoch !== workspaceEpoch()) return;
     if (!reset && requests.current.loading) return;
     const sequence = ++requests.current.sequence; requests.current.loading = true;
     setResult(prev => ({ ...(reset ? initial : prev), loading: true, error: null }));
     try {
-      const page = await svnHistory(source, PAGE, reset ? initialRevision ? initialRevision + 1 : 0 : requests.current.cursor);
-      if (sequence !== requests.current.sequence) return;
-      if (page.entries.length) requests.current.cursor = page.entries[page.entries.length - 1].revision;
-      setResult(prev => ({ entries: [...new Map([...(reset ? [] : prev.entries), ...page.entries].map(entry => [entry.revision, entry])).values()], loading: false, done: page.entries.length < PAGE, error: null }));
-      if (reset) {
-        const chosen = page.entries.find(entry => entry.revision === initialRevision);
-        setRevision(chosen?.revision ?? null);
-        setSelectedPath(chosen?.paths.find(change => change.path === page.repositoryPath)?.path ?? chosen?.paths[0]?.path ?? null);
+      let cursor = reset ? initialRevision ? initialRevision + 1 : 0 : requests.current.cursor;
+      const found = new Map<number,HistoryEntry>();
+      let done = false, repositoryPath = "";
+      // Keep each explicit search bounded so a distant match never queues an unbounded repository traversal.
+      for (let index = 0; index < (search ? 5 : 1); index++) {
+        const page = await svnHistory(source, PAGE, cursor);
+        if (sequence !== requests.current.sequence || epoch !== workspaceEpoch()) return;
+        repositoryPath = page.repositoryPath;
+        for (const entry of page.entries) found.set(entry.revision,entry);
+        const oldest = page.entries[page.entries.length - 1]?.revision ?? 0;
+        done = page.entries.length < PAGE || oldest <= 1 || (cursor > 0 && oldest >= cursor);
+        cursor = oldest;
+        if (done || !search || filterHistory(page.entries,search.keyword,search.author,search.since,search.until).length) break;
       }
+      requests.current.cursor = cursor;
+      setResult(prev => ({ repositoryPath, entries: [...new Map([...(reset ? [] : prev.entries), ...found.values()].map(entry => [entry.revision, entry])).values()], loading: false, done, error: null }));
+      if (!reset) return;
+      const chosen = initialRevision ? found.get(initialRevision) : found.values().next().value;
+      setRevision(chosen?.revision ?? null);
+      setSelectedPath(chosen?.paths.find((change: HistoryEntry["paths"][number]) => change.path === repositoryPath)?.path ?? chosen?.paths[0]?.path ?? null);
     } catch (error) { if (sequence === requests.current.sequence) setResult(prev => ({ ...prev, loading: false, error: friendlySvnError(error) })); }
     finally { if (sequence === requests.current.sequence) requests.current.loading = false; }
   }, [source, root, epoch, initialRevision]);
   useEffect(() => { const state = requests.current; state.cursor = 0; void load(true); return () => { state.sequence++; state.loading = false; }; }, [load]);
   const entries = filterHistory(result.entries, filters.keyword, filters.author, filters.since, filters.until);
+  const filtered = !!(filters.keyword.trim() || filters.author.trim() || filters.since || filters.until);
   const selected = result.entries.find(entry => entry.revision === revision);
   const diff = useQuery({ queryKey: ["svn-revision-diff", root, epoch, revision, selectedPath], queryFn: () => svnRevisionDiff(selectedPath!, revision!), enabled: !!selectedPath && !!revision, retry: false });
   const patchFilter = (patch: Partial<typeof filters>) => setFilters(prev => ({ ...prev, ...patch }));
   const copy = async (text: string) => { try { await navigator.clipboard.writeText(text); toast("已复制", "success"); } catch { toast("复制失败", "error"); } };
-  return <section className="vc-main vc-history">
+  return <section className="vc-main vc-history" data-workspace-history={path === root || undefined}>
     <div className="vc-bar"><Icon name="history" size={14} /><b>提交历史</b><span className="vc-path" title={source}>{title}</span><span className="vc-sp" /><button className="vc-btn" onClick={onBack}>{backLabel}</button><button className="vc-btn" disabled={result.loading} onClick={() => void load(true)}><Icon name="refresh" size={12} className={result.loading ? "animate-spin" : undefined} />刷新</button></div>
     <div className="vc-history-filters">
       <select aria-label="历史范围" value={filters.scope} onChange={event => patchFilter({ scope: event.target.value })}><option value="file">当前路径</option>{modulePath && <option value="module">当前模块</option>}<option value="root">工作副本</option></select>
-      <input aria-label="筛选已加载历史" placeholder="说明、版本或路径" value={filters.keyword} onChange={event => patchFilter({ keyword: event.target.value })} />
+      <input aria-label="筛选已加载历史" placeholder="说明、版本或路径" value={filters.keyword} onChange={event => patchFilter({ keyword: event.target.value })} onKeyDown={event => { if (event.key === "Enter" && !event.nativeEvent.isComposing && filtered && !result.loading && !result.done) void load(false,filters); }} />
       <Menu portal width="w-72" trigger={(open,toggle)=><button type="button" className="vc-btn vc-btn-sm" aria-haspopup="menu" aria-expanded={open} onClick={toggle}>更多筛选{(filters.author || filters.since || filters.until) ? " · 已设置" : ""}</button>}>
-        {()=><div className="vc-history-filter-options"><label>作者<select aria-label="历史作者" value={filters.author} onChange={event => patchFilter({ author: event.target.value })}><option value="">所有作者</option>{[...new Set(result.entries.map(entry => entry.author))].map(author => <option key={author} value={author}>{author || "无作者"}</option>)}</select></label>
+        {()=><div className="vc-history-filter-options"><label>作者<input aria-label="历史作者" placeholder="输入作者账号" value={filters.author} onChange={event => patchFilter({ author: event.target.value })}/></label>
         <label>开始日期<input type="date" aria-label="历史开始日期" value={filters.since} onChange={event => patchFilter({ since: event.target.value })} /></label><label>结束日期<input type="date" aria-label="历史结束日期" value={filters.until} onChange={event => patchFilter({ until: event.target.value })} /></label></div>}
       </Menu>
-      <span className="vc-hint">筛选已加载 {result.entries.length} 条，匹配 {entries.length} 条</span>
+      <span className="vc-hint">{result.entries.length ? `已查 r${result.entries[result.entries.length - 1].revision}–r${result.entries[0].revision} · 匹配 ${entries.length} 条` : "尚未加载记录"}</span>
+      {filtered && <button className="vc-btn vc-btn-sm" type="button" onClick={() => patchFilter({keyword:"",author:"",since:"",until:""})}>清除筛选</button>}
     </div>
     {result.error && <div className="vc-alert" data-tone="warn"><span>{result.error}</span><button className="vc-btn" disabled={result.loading} onClick={() => void load(result.entries.length === 0)}>重试</button></div>}
-    <div className="vc-history-layout">
+    <div className="vc-history-layout" data-with-patch={showPatch && !!selected || undefined}>
       <div className="vc-history-records" aria-label="提交记录">
         {result.loading && !result.entries.length && <div className="vc-empty"><Icon name="spinner" className="animate-spin" /><span>正在读取提交记录…</span></div>}
-        {!result.loading && !result.error && !entries.length && <div className="vc-empty">{result.entries.length ? "当前筛选没有匹配记录" : "这个路径没有提交记录"}</div>}
+        {!result.loading && !result.error && !entries.length && <div className="vc-empty">{result.entries.length ? result.done ? "此范围内没有匹配记录" : "已读版本未匹配，可继续搜索更早的记录" : "这个路径没有提交记录"}</div>}
         {entries.map(entry => <button type="button" className="vc-history-record" data-on={revision === entry.revision || undefined} key={entry.revision} onClick={() => { setRevision(entry.revision); setSelectedPath(entry.paths[0]?.path ?? null); }}><span className="vc-log-hd"><b className="vc-log-rev">r{entry.revision}</b><span>{entry.author || "无作者"}</span><span className="vc-hint">{formatRevTime(entry.date)}</span></span><span className="vc-log-msg">{entry.message.split("\n")[0] || "无提交说明"}</span><span className="vc-hint">{entry.paths.length} 个改动路径</span></button>)}
-        {!!result.entries.length && !result.done && <button className="vc-btn vc-history-more" disabled={result.loading} onClick={() => void load(false)}>{result.loading ? "加载中…" : "加载更早的提交"}</button>}
+        {!!result.entries.length && !result.done && <button className="vc-btn vc-history-more" disabled={result.loading} onClick={() => void load(false,filtered ? filters : undefined)}>{result.loading ? "加载中…" : filtered ? "继续搜索更早版本" : "加载更早的提交"}</button>}
         {result.done && !!result.entries.length && <p className="vc-hint vc-history-more">已到当前路径最早记录</p>}
       </div>
       <div className="vc-history-detail">
         {!selected && <div className="vc-empty">选择一条提交查看实际改动路径和版本差异</div>}
         {selected && <><div className="vc-history-contextbar"><b>r{selected.revision}</b><select aria-label="历史改动路径" value={selectedPath ?? ""} onChange={e=>setSelectedPath(e.target.value)}>{selected.paths.map(change=><option key={change.path} value={change.path}>{change.action} · {change.path}</option>)}</select>
+          {source === root && !!selected.paths.length && <button type="button" className="vc-btn vc-btn-sm" aria-expanded={showPatch} onClick={() => setShowPatch(open => !open)}><Icon name="package" size={13}/>预览 NC 补丁</button>}
           <Menu portal width="w-96" trigger={(open,toggle)=><button type="button" className="vc-btn vc-btn-sm" aria-haspopup="menu" aria-expanded={open} onClick={toggle}>提交详情 · {selected.paths.length} 路径</button>}>
           {()=><><div className="vc-history-summary"><b>r{selected.revision} · {selected.author || "无作者"}</b><button className="vc-btn" onClick={() => void copy(`r${selected.revision}`)}>复制版本号</button><p>{selected.message || "无提交说明"}</p></div>
           <div className="vc-history-paths">{selected.paths.map(change => <div className="vc-history-path" key={change.path}><button className="vc-btn" data-on={selectedPath === change.path || undefined} title={change.path} onClick={() => setSelectedPath(change.path)}><b>{change.action}</b><span>{change.path}</span></button><button className="vc-btn" aria-label={`复制路径 ${change.path}`} onClick={() => void copy(change.path)}><Icon name="copy" size={12} /></button>{change.copyFromPath && <span className="vc-hint">来自 {change.copyFromPath} @ r{change.copyFromRevision}</span>}</div>)}</div>
@@ -78,6 +95,7 @@ export function HistoryView({ path, title, modulePath, initialRevision, backLabe
           {!diff.isFetching && diff.data && <SvnDiffEditor original={diff.data.beforeText} modified={diff.data.afterText} sourceKey={`history:${root}:${epoch}:${revision}:${selectedPath}`} root={root} language={svnDiffLanguage(diff.data.path, diff.data.afterText || diff.data.beforeText)} originalLabel={diff.data.beforeEmpty ? "新增前：不存在" : `${diff.data.beforePath} @ r${diff.data.beforeRevision}`} modifiedLabel={diff.data.afterEmpty ? `r${revision}：已删除` : `${diff.data.path} @ r${revision}`} />}
         </>}
       </div>
+      {showPatch && selected && root && source === root && <RevisionPatchPreview key={selected.revision} root={root} repositoryPath={result.repositoryPath} entry={selected} onClose={() => setShowPatch(false)}/>}
     </div>
   </section>;
 }

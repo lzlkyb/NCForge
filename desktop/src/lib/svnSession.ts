@@ -10,7 +10,7 @@ import { getSession, useWorkspaceRoot } from "./workspaceSession";
  * （一个用来审、一个用来打包），拆成两页等于为同一件事跑两遍扫描、还让
  * 「改完 → 打包」多一次跨页跳转。页签层面只保留「版本控制」。
  */
-export type SvnPage = "review" | "req" | "patch";
+export type SvnPage = "review" | "req" | "patch" | "remote" | "history";
 
 /**
  * 版本控制页会话态（P2-9）：页内视图 / 选中项 / 右栏视图模式 / 是否显示忽略文件。
@@ -29,6 +29,7 @@ export interface SvnView {
   selectedPath: string | null;
   mode: RightMode;
   commitOpen: boolean;
+  historyRevision: number | null;
   changeIntent: { path: string; action: "review" | "conflict" | "commit" } | null;
   /** 「按需求审查」视图里选中的需求；`"-"` = 未认领的改动。 */
   reqId: string | null;
@@ -45,6 +46,7 @@ const initial = (): SvnView => ({
   selectedPath: null,
   mode: "diff",
   commitOpen: false,
+  historyRevision: null,
   changeIntent: null,
   reqId: null,
   selectedReq: null,

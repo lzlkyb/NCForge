@@ -1,4 +1,4 @@
-import { trackOperation, updateOperation } from "../lib/operations";
+import { operationActive, trackOperation, updateOperation } from "../lib/operations";
 import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSession, useWorkspaceRoot } from "../lib/workspaceSession";
@@ -87,14 +87,19 @@ export function useSvnStatus() {
     // 提交或更新可能只改工作副本元数据。丢弃写入前已开始的读取，避免旧作者回填。
     const fileCommits = { queryKey: ["svn-file-commits", root] };
     void qc.cancelQueries(fileCommits).then(() => qc.invalidateQueries(fileCommits));
-    // 增量/全量只是 queryFn 的参数差异，用 fetchQuery 才能带上 force；
-    // refetch 永远复用缓存里的 queryFn（也就是 force=false 那一份）。
-    const scan = () => force
-      ? qc.fetchQuery({ queryKey: ["svn-status", root], queryFn: () => svnStatus(true), staleTime: 0, retry: false })
-        .then(data => ({ data, error: null as unknown }))
-        .catch((error: unknown) => ({ data: undefined, error }))
-      : status.refetch({ cancelRefetch: false });
-    const [, s] = await trackOperation({ key: `svn.scan:${root}`, label: "重新扫描 SVN 改动", scope: root, page: "svn", phase: "扫描工作副本条目" }, () => Promise.all([info.refetch(), scan()]), results => ({ state: results[1].error ? "failed" : "success", detail: results[1].error ? String(results[1].error) : `${describeScan(results[1].data)}${results[1].data?.hasConflict ? "；存在冲突待处理" : ""}` }));
+    const scan = async () => {
+      if (!force) return status.refetch({ cancelRefetch:false });
+      const queryKey = ["svn-status",root];
+      try {
+        // React Query shares in-flight work by key. A scan started before a write cannot
+        // verify the result of that write, even if it finishes after the update response.
+        await qc.cancelQueries({queryKey,exact:true});
+        if (getSession().root !== root || workspaceEpoch() !== epoch) throw new Error("工作副本已切换，停止核对");
+        const data = await qc.fetchQuery({queryKey,queryFn:() => svnStatus(true),staleTime:0,retry:false});
+        return {data,error:null as unknown};
+      } catch (error) { return {data:undefined,error}; }
+    };
+    const [, s] = await trackOperation({ key: force ? `svn.verify:${root}` : `svn.scan:${root}`, label: force ? "核对更新后的 SVN 状态" : "重新扫描 SVN 改动", scope: root, page: "svn", phase: "扫描工作副本条目" }, () => Promise.all([info.refetch(), scan()]), results => ({ state: results[1].error ? "failed" : "success", detail: results[1].error ? String(results[1].error) : `${describeScan(results[1].data)}${results[1].data?.hasConflict ? "；存在冲突待处理" : ""}` }));
     if (getSession().root !== root || workspaceEpoch() !== epoch) return undefined;
     // 更新 / 提交 / 撤销 / 解决冲突之后，右侧对比与追溯读的都是盘上的旧内容：
     // 不失效就会一直显示「改动前」的差异，用户以为动作没生效
@@ -117,7 +122,7 @@ export function useSvnStatus() {
     let gone = false;
     let un: (() => void) | undefined;
     const subs = [
-      onSvnScanProgress((p) => { if (getSession().root !== root) return; setScanProgress(p); updateOperation(`svn.scan:${root}`, { progress: { done: p.done ?? p.scanned }, phase: p.total ? `扫描模块 ${p.done ?? 0}/${p.total}` : "扫描工作副本条目" }); }),
+      onSvnScanProgress((p) => { if (getSession().root !== root) return; setScanProgress(p); const verify = `svn.verify:${root}`; updateOperation(operationActive(verify) ? verify : `svn.scan:${root}`, { progress: { done: p.done ?? p.scanned }, phase: p.total ? `扫描模块 ${p.done ?? 0}/${p.total}` : "扫描工作副本条目" }); }),
       // 流式上屏：一个模块的条目到了就并进视图。丢了不影响最终结果，只是那一模块
       // 要等扫描结束才出现，所以这里不做任何补偿处理。
       onSvnScanUnit((u) => { if (getSession().root !== root) return; reduceStreamBy({ type: "unit", unit: u, lastResultEpoch: lastResultEpoch.current }); }),

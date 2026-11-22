@@ -9,10 +9,12 @@ import type { FileBlocks } from "../../hooks/useReqBlocks";
 import { keyOf, reviewProgress, type ChangeItem, type ChangesView } from "../../lib/svn";
 import { SVN_FILTERS, svnFilterCounts, svnVisibleGroups } from "../../lib/svnList";
 import { setSvnListPrefs, useSvnListPrefs } from "../../lib/svnListPrefs";
-import { clearSvnPicked, isSvnCommittable, selectSvnPaths } from "../../lib/svnDraft";
+import { clearSvnPicked, isSvnCommittable, selectSvnReviewed, undoSvnSelection, useSvnDraft } from "../../lib/svnDraft";
 
 export function ChangeList({ view, reviewed, outdated, selected, loading, error, onSelect, showIgnored, onToggleIgnored, root = "", picked = new Set<string>(), busy = false, onOpenFile, onMarkReqAll }: { view: ChangesView; reviewed: Set<string>; outdated?: ReadonlySet<string>; selected: string | null; loading: boolean; error: string | null; onSelect: (item: ChangeItem) => void; showIgnored: boolean; onToggleIgnored: () => void; root?: string; picked?: ReadonlySet<string>; busy?: boolean; onOpenFile?: (path: string) => void; onMarkReqAll?: (reqId: string, items: ChangeItem[], blocks: Map<string, FileBlocks>) => void }) {
   const prefs = useSvnListPrefs(root), list = useRef<HTMLDivElement>(null), reqs = useRequirements();
+  const { selectionUndo } = useSvnDraft(root);
+  const reviewedCount = view.groups.reduce((sum,group) => sum + group.items.filter(it => isSvnCommittable(it) && reviewed.has(keyOf(it.path))).length,0);
   const byReq = prefs.groupBy === "req", hasReqs = reqs.view.reqs.some(r => r.status === "open");
   const initialScroll = useRef(prefs.scroll);
   const groups = useMemo(() => svnVisibleGroups(view,prefs.filter,prefs.search,prefs.sort,showIgnored,reviewed,picked,outdated),[view,prefs,showIgnored,reviewed,picked,outdated]);
@@ -43,8 +45,9 @@ export function ChangeList({ view, reviewed, outdated, selected, loading, error,
             {(Object.keys(SVN_FILTERS) as (keyof typeof SVN_FILTERS)[]).map(f=><MenuItem key={f} label={`${SVN_FILTERS[f]} ${counts[f]}`} checked={prefs.filter===f} onClick={()=>{setSvnListPrefs(root,{filter:f});close();}}/>)}
             <MenuItem label="按文件路径排序" checked={prefs.sort==="path"} onClick={()=>{setSvnListPrefs(root,{sort:"path"});close();}}/>
             <MenuItem label="按最近改动排序" checked={prefs.sort==="mtime"} onClick={()=>{setSvnListPrefs(root,{sort:"mtime"});close();}}/>
-            <MenuItem label="只选已审" disabled={busy} onClick={()=>{selectSvnPaths(root,view.groups.flatMap(g=>g.items).filter(it=>isSvnCommittable(it)&&reviewed.has(keyOf(it.path))).map(it=>it.path));close();}}/>
+            <MenuItem label={`选择已审 ${reviewedCount}`} hint={reviewedCount ? "替换当前选择" : "没有可提交的已审文件"} disabled={busy || loading || !reviewedCount} onClick={()=>{selectSvnReviewed(root,reviewed);close();}}/>
             <MenuItem label="清空选择" disabled={busy || !picked.size} onClick={()=>{clearSvnPicked(root);close();}}/>
+            {selectionUndo && <MenuItem label="撤销选择" disabled={busy} onClick={()=>{undoSvnSelection(root);close();}}/>}
             <MenuItem label={`显示构建产物 ${view.ignored}`} checked={showIgnored} onClick={()=>{onToggleIgnored();close();}}/>
           </>}
         </Menu>

@@ -312,6 +312,7 @@ export const TAURI_COMMANDS = [
   "svn_history",
   "svn_housekeeping",
   "svn_info",
+  "svn_remote_status",
   "svn_resolve",
   "svn_resolve_working",
   "svn_revert",

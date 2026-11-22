@@ -14,6 +14,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
   mark: vi.fn(async () => {}),
   toast: vi.fn(),
+  fetching: false,
   items: [] as { path: string; rel: string; module: string; letter: string; status: string; revision: number; isDir: boolean; ignored: boolean }[],
   reviewed: new Set<string>(),
   blocks: new Map<string, { blocks: unknown[]; infos: unknown[]; done: number }>(),
@@ -22,7 +23,7 @@ const h = vi.hoisted(() => ({
 vi.mock("../ui/toast", () => ({ toast: h.toast }));
 vi.mock("../../hooks/useSvnStatus", () => ({
   useSvnStatus: () => ({
-    info: { data: undefined }, status: { data: { changes: { groups: [{ module: "m", items: h.items }], shown: h.items.length, total: h.items.length, ignored: 0 }, generatedAtMs: 0 }, error: null, isFetching: false },
+    info: { data: undefined }, status: { data: { changes: { groups: [{ module: "m", items: h.items }], shown: h.items.length, total: h.items.length, ignored: 0 }, generatedAtMs: 0 }, error: null, isFetching: h.fetching },
     reviewed: h.reviewed, mark: h.mark, refresh: vi.fn(async () => undefined), scanProgress: null, streamed: null,
   }),
 }));
@@ -45,6 +46,8 @@ vi.mock("./SvnCommitDrawer", () => ({ SvnCommitDrawer: () => null, SVN_COMMIT_DR
 vi.mock("./SvnReviewDialogs", () => ({ SvnReviewDialogs: () => null }));
 vi.mock("./CommitPanel", () => ({ CommitPanel: () => null }));
 vi.mock("./SvnReviewFiles", () => ({ SvnReviewFiles: () => null }));
+vi.mock("./ReqFileSection", () => ({ ReqFileSection: ({ it }: { it: { path: string } }) => <article data-file-key={it.path.toLowerCase()}>{it.path}</article> }));
+vi.mock("./SvnDiffEditor", () => ({ SvnDiffEditor: () => null }));
 vi.mock("../../lib/tauri", () => ({ invoke: vi.fn(async () => []) }));
 
 import { SvnReview } from "./SvnReview";
@@ -52,6 +55,9 @@ import { setSession } from "../../lib/workspaceSession";
 import { setSvnListPrefs } from "../../lib/svnListPrefs";
 import { keyOf } from "../../lib/svn";
 import { syncSvnDraft } from "../../lib/svnDraft";
+import { ReqReview } from "./ReqReview";
+import { setSvnDiffPrefs } from "../../lib/svnDiffPrefs";
+import { svnSession } from "../../lib/svnSession";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const root = "C:\\w";
@@ -61,11 +67,13 @@ let tree: Root, host: HTMLDivElement;
 beforeEach(() => {
   vi.clearAllMocks();
   h.reviewed = new Set();
+  h.fetching = false;
   h.blocks = new Map();
   // A 可标记且未审；B 已审；C 冲突（不可标记）；D 已删除（不可标记）；E 目录
   h.items = [item("A"), item("B"), item("C", "C"), item("D", "D"), { ...item("E"), isDir: true }];
   h.reviewed.add(keyOf(`${root}\\B.java`));
   setSession({ root, tabs: [], activePath: null });
+  svnSession.set({page:"review",selectedPath:null,changeIntent:null,commitOpen:false,reqId:null});
   setSvnListPrefs(root, { groupBy: "req", groupChosen: true, filter: "all", search: "", closed: [] });
   syncSvnDraft(root, h.items as never);
   host = document.createElement("div"); document.body.append(host); tree = createRoot(host);
@@ -98,4 +106,22 @@ it("整组都已审完时不写标记，也不报一个虚高的数字", async (
   await markAll();
   expect(h.mark).not.toHaveBeenCalled();
   expect(h.toast).toHaveBeenCalledWith("已标记 0 个文件为已审", "success");
+});
+it("过滤已审文件后，跳转清单只保留正文中可定位的文件", async () => {
+  setSvnDiffPrefs(root, { onlyNew:true });
+  const qc = new QueryClient({ defaultOptions: { queries: { retry:false } } });
+  await act(async () => tree.render(<QueryClientProvider client={qc}><ReqReview onOpenFile={vi.fn()}/></QueryClientProvider>));
+  expect(host.querySelector(".vc-rq-chips")?.textContent).toContain("A.java");
+  expect(host.querySelector(".vc-rq-chips")?.textContent).not.toContain("B.java");
+  expect([...host.querySelectorAll("[data-file-key]")].some(el => el.textContent?.includes("B.java"))).toBe(false);
+  await act(async () => setSvnDiffPrefs(root,{onlyNew:false}));
+});
+it("代码页加入提交等待扫描时显示文件名，并允许取消定位", async () => {
+  h.fetching = true;
+  const path = h.items[0].path;
+  svnSession.set({changeIntent:{path,action:"commit"},selectedPath:path});
+  await paint();
+  expect(host.textContent).toContain("正在确认提交状态 · A.java");
+  await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "取消定位")?.click());
+  expect(svnSession.get().changeIntent).toBeNull();
 });

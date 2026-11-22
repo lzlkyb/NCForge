@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Modal } from "../ui/Modal";
 import { usePresence } from "../../hooks/usePresence";
-export const SVN_COMMIT_DRAWER_MIN_WIDTH = 960;
+export const SVN_COMMIT_DRAWER_MIN_WIDTH = 730;
 
 export function SvnCommitDrawer({ host, open, onClose, children }: { host: RefObject<HTMLDivElement>; open: boolean; onClose: () => void; children: ReactNode }) {
   const [narrow,setNarrow] = useState(true), surface = useRef<HTMLElement>(null);

@@ -1,35 +1,42 @@
 import { Icon, type IconName } from "../ui/icon";
 import { svnSession, type SvnPage } from "../../lib/svnSession";
+import { useWorkbenchDock } from "../workspace/WorkbenchDock";
+import { Menu, MenuItem } from "../ui/Menu";
 
 const ITEMS: { key: SvnPage; label: string; icon: IconName }[] = [
-  { key: "review", label: "审查改动", icon: "gitBranch" },
-  { key: "req", label: "按需求审查", icon: "check" },
-  { key: "patch", label: "打包补丁", icon: "package" },
+  { key: "review", label: "本地改动", icon: "gitBranch" },
+  { key: "remote", label: "远端更新", icon: "download" },
+  { key: "history", label: "版本历史", icon: "history" },
 ];
 
-/**
- * 版本控制页顶部的视图切换：审查改动 / 按需求审查 / 打包补丁。
- *
- * 低频工作副本操作收进菜单后，视图切换可与工作区工具条共用一行，
- * 文件清单不再为页面切换单独损失一行空间。
- */
 export function SvnPageSwitch({ page }: { page: SvnPage }) {
+  const dock = useWorkbenchDock();
+  const open = (next: SvnPage) => {
+    svnSession.set({ page:next, ...(next === "history" && page !== "history" ? {historyRevision:null} : {}) });
+    dock?.showDocument();
+  };
+  const localPage = page === "req" || page === "patch" ? "review" : page;
   return (
-    <div className="vc-mode" role="tablist" aria-label="版本控制视图">
+    <nav className="vc-mode" aria-label="版本控制视图">
       {ITEMS.map((it) => (
         <button
           key={it.key}
           type="button"
-          role="tab"
-          aria-selected={page === it.key}
+          aria-current={localPage === it.key ? "page" : undefined}
           className="vc-mode-btn"
-          data-on={page === it.key || undefined}
-          onClick={() => svnSession.set({ page: it.key })}
+          data-on={localPage === it.key || undefined}
+          onClick={() => open(it.key)}
         >
           <Icon name={it.icon} size={12} />
-          {it.label}
+          <span>{it.label}</span>
         </button>
       ))}
-    </div>
+      <Menu portal width="w-44" trigger={(expanded,toggle) => <button type="button" className="vc-mode-btn" aria-label="需求审查与补丁" aria-haspopup="menu" aria-expanded={expanded} onClick={toggle}><Icon name="chevronDown" size={13}/></button>}>
+        {close => <>
+          <MenuItem label="按需求审查" icon="check" checked={page === "req"} onClick={() => { close(); open("req"); }}/>
+          <MenuItem label="打包补丁" icon="package" checked={page === "patch"} onClick={() => { close(); open("patch"); }}/>
+        </>}
+      </Menu>
+    </nav>
   );
 }

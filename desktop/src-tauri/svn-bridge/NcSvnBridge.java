@@ -22,13 +22,23 @@ import org.tmatesoft.svn.core.SVNURL;
 import org.tmatesoft.svn.core.io.SVNRepository;
 import org.tmatesoft.svn.core.wc.ISVNAnnotateHandler;
 import org.tmatesoft.svn.core.wc.ISVNInfoHandler;
+import org.tmatesoft.svn.core.wc.ISVNEventHandler;
 import org.tmatesoft.svn.core.ISVNLogEntryHandler;
 import org.tmatesoft.svn.core.wc.SVNRevision;
 import org.tmatesoft.svn.core.wc.SVNClientManager;
 import org.tmatesoft.svn.core.wc.SVNConflictChoice;
+import org.tmatesoft.svn.core.wc.SVNEvent;
+import org.tmatesoft.svn.core.wc.SVNEventAction;
 import org.tmatesoft.svn.core.wc.SVNInfo;
 import org.tmatesoft.svn.core.wc.SVNStatusType;
+import org.tmatesoft.svn.core.wc.SVNUpdateClient;
 import org.tmatesoft.svn.core.wc.SVNWCUtil;
+import org.tmatesoft.svn.core.wc2.SvnGetInfo;
+import org.tmatesoft.svn.core.wc2.SvnGetStatus;
+import org.tmatesoft.svn.core.wc2.ISvnObjectReceiver;
+import org.tmatesoft.svn.core.wc2.SvnInfo;
+import org.tmatesoft.svn.core.wc2.SvnStatus;
+import org.tmatesoft.svn.core.wc2.SvnTarget;
 import org.tmatesoft.svn.core.internal.io.dav.DAVRepositoryFactory;
 import org.tmatesoft.svn.core.internal.io.fs.FSRepositoryFactory;
 import org.tmatesoft.svn.core.internal.io.svn.SVNRepositoryFactoryImpl;
@@ -146,6 +156,9 @@ public class NcSvnBridge {
 		if ("status".equals(cmd)) {
 			return status(f[0], new File(f[2]), f.length > 3 ? f[3] : "");
 		}
+		if ("remote_status".equals(cmd)) {
+			return remoteStatus(new File(f[2]));
+		}
 		if ("diff".equals(cmd)) {
 			return baseContent(new File(f[2]));
 		}
@@ -159,6 +172,7 @@ public class NcSvnBridge {
 			return history(new File(f[2]), Integer.parseInt(f[3]), Long.parseLong(f[4]));
 		}
 		if ("revision_diff".equals(cmd)) {
+			if (f.length > 5) return remoteDiff(new File(f[2]), f[3], Long.parseLong(f[4]), Long.parseLong(f[5]));
 			return revisionDiff(new File(f[2]), f[3], Long.parseLong(f[4]));
 		}
 		if ("blame_snapshot".equals(cmd)) {
@@ -174,7 +188,7 @@ public class NcSvnBridge {
 			return commit(new File(f[2]), tail(f, 3));
 		}
 		if ("update".equals(cmd)) {
-			return update(new File(f[2]));
+			return update(new File(f[2]), f.length > 3 ? Long.parseLong(f[3]) : -1);
 		}
 		if ("revert".equals(cmd)) {
 			return revert("1".equals(f[2]), tail(f, 3));
@@ -663,9 +677,106 @@ public class NcSvnBridge {
 		return box[0];
 	}
 
-	private static String update(File root) throws SVNException {
-		long rev = manager().getUpdateClient().doUpdate(root, SVNRevision.HEAD, SVNDepth.INFINITY, false, false);
-		return "{\"revision\":" + rev + "}";
+	/** svn status -u compares each path against its own working revision, including mixed-revision copies. */
+	private static String remoteStatus(File root) throws SVNException {
+		final SVNInfo info = manager().getWCClient().doInfo(root, SVNRevision.WORKING);
+		final String scope = repositoryPath(info);
+		final java.nio.file.Path localRoot = root.toPath().toAbsolutePath().normalize();
+		final List<String> entries = new ArrayList<String>();
+		final int[] counts = new int[2];
+		SvnGetStatus op = manager().getOperationFactory().createGetStatus();
+		op.setSingleTarget(SvnTarget.fromFile(root));
+		op.setDepth(SVNDepth.INFINITY);
+		op.setRemote(true);
+		op.setReportAll(false);
+		op.setReportExternals(false);
+		op.setReceiver(new ISvnObjectReceiver<SvnStatus>() {
+		  public void receive(SvnTarget target, SvnStatus status) {
+			SVNStatusType node = status.getRepositoryNodeStatus();
+			SVNStatusType props = status.getRepositoryPropertiesStatus();
+			SVNStatusType text = status.getRepositoryTextStatus();
+			if (!changed(node) && !changed(props) && !changed(text)) return;
+			java.nio.file.Path path = status.getPath().toPath().toAbsolutePath().normalize();
+			if (!path.startsWith(localRoot)) return;
+			String rel = localRoot.relativize(path).toString().replace(File.separatorChar, '/');
+			String repoRel = status.getRepositoryRelativePath();
+			String repoPath = repoRel == null ? ("/".equals(scope) ? "" : scope) + "/" + rel : "/" + repoRel;
+			if (rel.isEmpty()) repoPath = scope;
+			boolean overlap = status.isConflicted() || changed(status.getNodeStatus())
+					|| changed(status.getTextStatus()) || changed(status.getPropertiesStatus());
+			counts[0]++;
+			if (overlap) counts[1]++;
+			if (entries.size() >= 3000) return;
+			String kind = node == SVNStatusType.STATUS_ADDED ? "added" : node == SVNStatusType.STATUS_DELETED ? "deleted"
+					: node == SVNStatusType.STATUS_REPLACED ? "replaced" : "modified";
+			entries.add("{\"relativePath\":" + jstr(rel.isEmpty() ? "." : rel) + ",\"repositoryPath\":" + jstr(repoPath)
+					+ ",\"kind\":" + jstr(kind) + ",\"baseRevision\":" + status.getRevision()
+					+ ",\"directory\":" + (status.getKind() == SVNNodeKind.DIR || status.getRepositoryKind() == SVNNodeKind.DIR)
+					+ ",\"overlap\":" + overlap + "}");
+		  }
+		});
+		op.run();
+		return "{\"revision\":" + op.getRemoteRevision() + ",\"baseRevision\":" + info.getRevision().getNumber()
+				+ ",\"total\":" + counts[0] + ",\"overlap\":" + counts[1] + ",\"entries\":[" + join(entries) + "]}";
+	}
+
+	private static boolean changed(SVNStatusType type) {
+		return type != null && type != SVNStatusType.STATUS_NONE && type != SVNStatusType.STATUS_NORMAL
+				&& type != SVNStatusType.STATUS_IGNORED && type != SVNStatusType.STATUS_EXTERNAL;
+	}
+
+	private static String update(File root, long revision) throws SVNException {
+		if (revision > 0) checkPinnedUpdate(root, revision);
+		SVNUpdateClient client = manager().getUpdateClient();
+		boolean ignoreExternals = client.isIgnoreExternals();
+		final int[] counts = new int[4];
+		client.setEventHandler(new ISVNEventHandler() {
+			public void checkCancelled() throws org.tmatesoft.svn.core.SVNCancelException {}
+			public void handleEvent(SVNEvent event, double progress) {
+				SVNEventAction action = event.getAction();
+				if (action == SVNEventAction.UPDATE_ADD) counts[0]++;
+				else if (action == SVNEventAction.UPDATE_DELETE) counts[1]++;
+				else if (action == SVNEventAction.UPDATE_REPLACE || (action == SVNEventAction.UPDATE_UPDATE
+						&& (updateChanged(event.getContentsStatus()) || updateChanged(event.getPropertiesStatus())))) counts[2]++;
+				else if (action == SVNEventAction.SKIP || action == SVNEventAction.UPDATE_SKIP_OBSTRUCTION
+						|| action == SVNEventAction.UPDATE_SKIP_ACCESS_DENINED || action == SVNEventAction.UPDATE_SKIP_WORKING_ONLY
+						|| action == SVNEventAction.FAILED_EXTERNAL) counts[3]++;
+			}
+		});
+		try {
+			if (revision > 0) client.setIgnoreExternals(true);
+			long result = client.doUpdate(root, revision > 0 ? SVNRevision.create(revision) : SVNRevision.HEAD,
+					SVNDepth.INFINITY, false, false);
+			return "{\"revision\":" + result + ",\"added\":" + counts[0] + ",\"deleted\":" + counts[1]
+					+ ",\"modified\":" + counts[2] + ",\"skipped\":" + counts[3] + "}";
+		} finally {
+			client.setEventHandler(null);
+			client.setIgnoreExternals(ignoreExternals);
+		}
+	}
+
+	private static void checkPinnedUpdate(File root, final long revision) throws SVNException {
+		// The root can stay at an older revision after another client updates a single file.
+		// Inspect only local BASE metadata so updating to the preview cannot roll that file back.
+		SvnGetInfo op = manager().getOperationFactory().createGetInfo();
+		op.setSingleTarget(SvnTarget.fromFile(root, SVNRevision.BASE));
+		op.setRevision(SVNRevision.BASE);
+		op.setDepth(SVNDepth.INFINITY);
+		op.setIncludeExternals(false);
+		op.setReceiver(new ISvnObjectReceiver<SvnInfo>() {
+			public void receive(SvnTarget target, SvnInfo info) {
+				if (info.getRevision() > revision) {
+					throw new IllegalStateException("工作副本中的 " + target.getFile().getName()
+							+ " 已处于更高版本 r" + info.getRevision() + "，请重新检查远端改动");
+				}
+			}
+		});
+		op.run();
+	}
+
+	private static boolean updateChanged(SVNStatusType type) {
+		return type == SVNStatusType.CHANGED || type == SVNStatusType.MERGED
+				|| type == SVNStatusType.CONFLICTED || type == SVNStatusType.CONFLICTED_UNRESOLVED;
 	}
 
 	private static String revert(boolean recursive, String[] paths) throws SVNException {
@@ -779,6 +890,24 @@ public class NcSvnBridge {
 		LimitedBytes bytes = new LimitedBytes(MAX_READ_BYTES);
 		repo.getFile(rel, revision, null, bytes);
 		return readableBytes(bytes.toByteArray());
+	}
+
+	private static String remoteDiff(File scopeFile, String path, long revision, long base) throws Exception {
+		validateRepositoryPath(path);
+		SVNInfo local = manager().getWCClient().doInfo(scopeFile, SVNRevision.WORKING);
+		if (!withinRepositoryPath(path, repositoryPath(local))) throw new IllegalArgumentException("远端路径不在当前工作副本范围内");
+		SVNRepository repo = manager().createRepository(local.getRepositoryRootURL(), true);
+		try {
+			String rel = path.substring(1);
+			boolean beforeEmpty = base < 1 || repo.checkPath(rel, base) == SVNNodeKind.NONE;
+			boolean afterEmpty = repo.checkPath(rel, revision) == SVNNodeKind.NONE;
+			byte[] before = beforeEmpty ? new byte[0] : repositoryFile(repo, path, base);
+			byte[] after = afterEmpty ? new byte[0] : repositoryFile(repo, path, revision);
+			return "{\"path\":" + jstr(path) + ",\"beforePath\":" + jstr(path) + ",\"beforeRevision\":" + base
+					+ ",\"revision\":" + revision + ",\"beforeEmpty\":" + beforeEmpty + ",\"afterEmpty\":" + afterEmpty
+					+ ",\"before\":" + jstr(Base64.getEncoder().encodeToString(before))
+					+ ",\"after\":" + jstr(Base64.getEncoder().encodeToString(after)) + "}";
+		} finally { repo.closeSession(); }
 	}
 
 	private static final int MAX_READ_BYTES = 8 * 1024 * 1024;

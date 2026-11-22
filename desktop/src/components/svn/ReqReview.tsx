@@ -25,6 +25,9 @@ import { useRequirements } from "../../lib/requirements";
 import { friendlySvnError, isMarkable, keyOf, type ChangeItem } from "../../lib/svn";
 import { svnSession, useSvnView } from "../../lib/svnSession";
 import { useWorkspaceRoot } from "../../lib/workspaceSession";
+import { isSvnCommittable, selectSvnPaths, syncSvnDraft, useSvnDraft } from "../../lib/svnDraft";
+import { setSvnListPrefs } from "../../lib/svnListPrefs";
+import { useSvnWrite } from "../../lib/svnWrite";
 import "../../svn-workbench.css";
 
 export function ReqReview({ onOpenFile }: { onOpenFile: (path: string) => void }) {
@@ -35,6 +38,7 @@ export function ReqReview({ onOpenFile }: { onOpenFile: (path: string) => void }
 function ReqReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path: string) => void }) {
   const { status, reviewed, mark, refresh } = useSvnStatus();
   const { reqId } = useSvnView(), reqs = useRequirements(), qc = useQueryClient();
+  const write = useSvnWrite(root), draft = useSvnDraft(root);
   const [mixedOnly, setMixedOnly] = useState(false), [marking, setMarking] = useState(false);
   const onlyNew = useSvnDiffPrefs(root).onlyNew;
   const items = useMemo(() => status.data?.changes.groups.flatMap((g) => g.items).filter((it) => !it.ignored) ?? [], [status.data]);
@@ -48,6 +52,14 @@ function ReqReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
   // 「审完」只看算在本需求里的块：混改文件里别的需求的块不拖本需求的进度
   const isDone = (it: ChangeItem) => { const fb = blocks.get(keyOf(it.path)); if (!fb || !fb.blocks.length) return reviewed.has(keyOf(it.path)); const s = statsIn(fb.infos, ctxReq); return s.done === s.total; };
   const shown = files.filter((it) => (!onlyNew || !isDone(it)) && (!mixedOnly || !!active?.mixed.has(keyOf(it.path))));
+  const committable = active?.items.filter(isSvnCommittable) ?? [];
+  const prepareCommit = () => {
+    if (status.isFetching || status.error || write || draft.unknown || !committable.length) return;
+    syncSvnDraft(root,items);
+    selectSvnPaths(root,committable.map(file => file.path),true);
+    setSvnListPrefs(root,{filter:"picked",search:""});
+    svnSession.set({page:"review",mode:"diff",selectedPath:committable[0].path,selectedReq:active?.req.id ?? null,commitOpen:true,changeIntent:null});
+  };
   const openFile = (path: string) => { window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "files" })); onOpenFile(path); };
   const markFiles = (targets: ChangeItem[]) => {
     if (marking) return;
@@ -80,7 +92,10 @@ function ReqReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
         <span className="vc-sp" />
         {!!active?.mixed.size && <label className="vc-rq-toggle" title="只显示也被别的需求改过的文件（出包会把别的需求的改动一起带上）"><input type="checkbox" checked={mixedOnly} onChange={(e) => setMixedOnly(e.target.checked)} />只看混改</label>}
         <label className="vc-rq-toggle" title="已审的改动块与审完的文件不再显示；审完后又被改过的会重新出现"><input type="checkbox" checked={onlyNew} onChange={(e) => setSvnDiffPrefs(root, { onlyNew: e.target.checked })} />只看新改动</label>
-        {active && <button type="button" className="vc-btn vc-btn-sm vc-btn-primary" onClick={() => packRequirement(root, active.req, active.items)}><Icon name="package" size={12} /><span>出包…</span></button>}
+        {active && <>
+          <button type="button" className="vc-btn vc-btn-sm" title={!committable.length ? "这个需求没有可提交文件" : "用需求文件替换当前勾选，可在提交区撤销"} disabled={status.isFetching || !!status.error || !!write || !!draft.unknown || !committable.length} onClick={prepareCommit}><Icon name="upload" size={12}/>准备提交 {committable.length}</button>
+          <button type="button" className="vc-btn vc-btn-sm vc-btn-primary" onClick={() => void packRequirement(root, active.req, active.items)}><Icon name="package" size={12} /><span>出包…</span></button>
+        </>}
         <Menu portal width="w-64" trigger={(isOpen, toggle) => <button type="button" className="vc-btn vc-btn-sm" aria-label={active ? "需求操作" : "归入需求"} aria-haspopup="menu" aria-expanded={isOpen} onClick={toggle}><Icon name="more" size={14} /></button>}>
           {close => active ? <>
             <MenuItem label="改名…" hint="如补上清单号" onClick={() => { close(); void renameRequirement(active.req); }} />
@@ -95,11 +110,11 @@ function ReqReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
           </>}
         </Menu>
       </div>}
-      {files.length > 1 && <div className="vc-rq-chips"><span>跳到：</span>{files.map((it) => {
+      {shown.length > 1 && <div className="vc-rq-chips"><span>跳到：</span>{shown.map((it) => {
         const fb = blocks.get(keyOf(it.path)), done = isDone(it), s = fb && statsIn(fb.infos, ctxReq);
         return <button key={it.path} type="button" className="vc-chip" data-done={done || undefined} onClick={() => jump(it)}>{done && <Icon name="check" size={11} />}{active?.mixed.has(keyOf(it.path)) && <span className="vc-tag" data-tone="mix">混</span>}{it.rel.split("/").pop()}{s && !done ? ` · ${s.done}/${s.total}` : ""}</button>;
       })}</div>}
-      {(onlyNew || mixedOnly) && files.length > 0 && !shown.length && <div className="vc-empty"><Icon name="check" size={24} /><div>{mixedOnly && !onlyNew ? "这个需求没有混改文件" : "这个需求的改动都审完了"}</div></div>}
+      {(onlyNew || mixedOnly) && files.length > 0 && !shown.length && <div className="vc-empty"><Icon name="check" size={24} /><div>{mixedOnly ? "当前筛选没有匹配的混改文件" : "这个需求的改动都审完了"}</div><button type="button" className="vc-btn" onClick={() => { setMixedOnly(false); setSvnDiffPrefs(root,{onlyNew:false}); }}>显示全部文件</button></div>}
       <div className="vc-rq-stack">
         {shown.map((it) => {
           const mixed = active?.mixed.get(keyOf(it.path)) ?? [];

@@ -79,9 +79,9 @@ function PatchPanel({ root, onNavigate }: { root: string | null; onNavigate: (ta
    * 取消不掉，出包必然失败，唯一复位途径是切到别的页再回来。
    */
   const pickedSet = useMemo(() => {
-    const base = new Set(picked ?? selectablePaths(items));
-    for (const it of items) if (it.blocked) base.delete(it.path);
-    return base;
+    if (!picked) return new Set(selectablePaths(items));
+    const normalized = new Set([...picked].map(keyOf));
+    return new Set(items.filter(item => !item.blocked && normalized.has(keyOf(item.path))).map(item => item.path));
   }, [picked, items]);
 
   /** 改判某一层的判定（再点一次 = 回到自动）。 */

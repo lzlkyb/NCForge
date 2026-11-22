@@ -17,6 +17,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::app_error::AppError;
 use crate::config::AppConfig;
 use crate::security::path::{display_path, resolve_safe_path};
 use crate::state::AppState;
@@ -109,6 +110,31 @@ pub struct CommitResult {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateResult {
     pub revision: i64,
+    pub added: Option<u64>,
+    pub deleted: Option<u64>,
+    pub modified: Option<u64>,
+    pub skipped: Option<u64>,
+}
+
+#[derive(Debug, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteStatus {
+    pub revision: i64,
+    pub base_revision: i64,
+    pub total: u64,
+    pub overlap: u64,
+    pub entries: Vec<RemoteChange>,
+}
+
+#[derive(Debug, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteChange {
+    pub relative_path: String,
+    pub repository_path: String,
+    pub kind: String,
+    pub base_revision: i64,
+    pub directory: bool,
+    pub overlap: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -156,9 +182,25 @@ pub(super) fn bridge_for(
 ) -> Result<Arc<Bridge>, String> {
     let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
     let java = PathBuf::from(&home.java);
-    let (jars, _) = svn_bridge::find_jars(&resource_dirs(app, &state.config_dir)).ok_or_else(|| {
+    let (mut jars, _) = svn_bridge::find_jars(&resource_dirs(app, &state.config_dir)).ok_or_else(|| {
         "找不到 SVN 组件（ncsvn.jar / svnkit.jar）。请点击下载按钮，或到设置 → 维护 → 组件与更新下载，然后重新扫描".to_string()
     })?;
+    // The installed dependency pack can outlive an app update. Use the bridge shipped
+    // with the app so new commands still work with the existing SVNKit dependency jars.
+    let bundled = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|dir| dir.join("svnkit/ncsvn.jar"));
+    let development = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/svnkit/ncsvn.jar");
+    let protocol_jar = if cfg!(debug_assertions) && development.is_file() {
+        Some(development)
+    } else {
+        bundled
+    };
+    if let Some(bridge) = protocol_jar.filter(|path| path.is_file()) {
+        jars[0] = bridge;
+    }
     let cfg_dir = state.config_dir.join("svn");
     svn_bridge::ensure_dir(&cfg_dir)?;
 
@@ -837,18 +879,58 @@ pub async fn svn_commit(
     .map_err(|e| format!("提交失败: {e}"))?
 }
 
-/// 更新整个工作副本。
-///
-/// 只做更新，**不在这里再扫一遍 status**：更新后前端一定会 `refresh()`（界面上的改动数、
-/// 审查进度全靠那次扫描），里面再扫一次等于同一件事做两遍、多等 7.6 秒；更要紧的是
-/// 二次扫描一旦失败，整条命令会报错——而更新其实已经成功了，用户可能再点一次更新。
-/// 冲突信息由前端在那次刷新结果里自己读（C 条目就是冲突）。
+/// Inspect incoming paths without changing the working copy.
+#[tauri::command]
+pub async fn svn_remote_status(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    expected_root: String,
+) -> Result<RemoteStatus, AppError> {
+    let cfg = state.config.read().await.clone();
+    validate_expected_root(&cfg, &Some(expected_root)).map_err(|e| AppError::input("svn.wc", e))?;
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = root_of(&cfg).map_err(|e| AppError::input("svn.wc", e))?;
+        let bridge = bridge_for(&app, &st, &cfg).map_err(|e| AppError::env("svn.bridge", e))?;
+        let info = wc_info(&bridge, &root).map_err(|e| AppError::input("svn.wc", e))?;
+        let request_error = |detail: String| {
+            if let Some(message) = detail.strip_prefix("auth|") {
+                AppError::input("svn.auth", message)
+            } else if let Some(message) = detail.strip_prefix("timeout|") {
+                AppError::unavailable("svn.timeout", message)
+            } else {
+                AppError::unavailable("svn.remote", detail)
+            }
+        };
+        ensure_auth(&bridge, &cfg, &info.host).map_err(request_error)?;
+        let value = bridge
+            .call("remote_status", &[&display_path(&root)], T_STATUS)
+            .map_err(|e| request_error(split_code_label(e.code, e.message)))?;
+        let result: RemoteStatus = serde_json::from_value(value)
+            .map_err(|e| AppError::data("svn.remoteStatus", format!("远端清单无效: {e}")))?;
+        if result.revision < 0 {
+            return Err(AppError::data(
+                "svn.remoteRevision",
+                "未能核实远端版本，请重新检查",
+            ));
+        }
+        Ok(result)
+    })
+    .await
+    .map_err(|e| AppError::internal("svn.remoteTask", format!("检查远端失败: {e}")))?
+}
+
+/// 单独返回更新结果；前端复扫失败也不会把已经完成的更新显示成失败。
 #[tauri::command]
 pub async fn svn_update(
     app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     expected_root: Option<String>,
+    revision: Option<i64>,
 ) -> Result<UpdateResult, String> {
+    if revision.is_some_and(|value| value < 1) {
+        return Err("要更新到的版本号必须大于零".to_string());
+    }
     let cfg = state.config.read().await.clone();
     validate_expected_root(&cfg, &expected_root)?;
     let st = state.inner().clone();
@@ -857,11 +939,25 @@ pub async fn svn_update(
         let bridge = bridge_for(&app, &st, &cfg)?;
         let info = wc_info(&bridge, &root)?;
         ensure_auth(&bridge, &cfg, &info.host)?;
+        let root_path = display_path(&root);
+        if revision.is_some_and(|target| info.revision > target) {
+            return Err("工作副本已处于更高版本，请重新检查远端改动".to_string());
+        }
+        let revision_arg = revision.map(|value| value.to_string());
+        let mut args = vec![root_path.as_str()];
+        args.extend(revision_arg.as_deref());
         let v = bridge
-            .call("update", &[&display_path(&root)], T_WRITE)
+            .call("update", &args, T_WRITE)
             .map_err(|e| split_code_label(e.code, e.message))?;
         Ok(UpdateResult {
-            revision: v["revision"].as_i64().unwrap_or(-1),
+            revision: v["revision"]
+                .as_i64()
+                .filter(|value| *value >= 0)
+                .ok_or("服务器未返回更新版本，请重新核对工作副本")?,
+            added: v["added"].as_u64(),
+            deleted: v["deleted"].as_u64(),
+            modified: v["modified"].as_u64(),
+            skipped: v["skipped"].as_u64(),
         })
     })
     .await

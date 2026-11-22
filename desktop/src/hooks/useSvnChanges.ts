@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { toast } from "../components/ui/toast";
-import { friendlySvnError, keyOf, parseSvnError, svnCommit, svnResolve, svnRevert, svnUpdate, type CommitResult, type StatusResult } from "../lib/svn";
+import { friendlySvnError, keyOf, parseSvnError, svnCommit, svnResolve, svnRevert, svnUpdate, type CommitResult, type StatusResult, type UpdateResult } from "../lib/svn";
 import { completeSvnDraft, getSvnDraft, markSvnUnknown } from "../lib/svnDraft";
 import { assertSvnWorkspace, isUnknownSvnCommitError, prepareSvnSubmit } from "../lib/svnSubmit";
 import { getSession } from "../lib/workspaceSession";
@@ -8,16 +8,26 @@ import { workspaceEpoch } from "../lib/workspaceEpoch";
 import { trackOperation, waitForFileOperations } from "../lib/operations";
 import { getSvnWrite, useSvnWrite, withSvnWriteLock } from "../lib/svnWrite";
 import { invalidateBaselines } from "../lib/changedLinesStore";
+import { isUnsaved } from "../lib/tabDirty";
+import { requirementsForPaths } from "../lib/reqGroups";
+import { getRequirements } from "../lib/requirements";
 
 type Busy = null | "commit" | "update" | "revert" | "resolve" | "auth";
+
+export function svnUnsavedUpdateFiles(root: string) {
+  const scope = keyOf(root).replace(/\/+$/, "") + "/";
+  return getSession().tabs.filter(tab => keyOf(tab.path).startsWith(scope) && isUnsaved(tab));
+}
+
+export type SvnUpdateOutcome = { result: UpdateResult; conflicts?: string[] | null };
 
 /** 工作副本写锁从预检起保持到扫描收尾；服务器确认与扫描失败分别记账。 */
 export function useSvnChanges({ setBusy, setAuth, refresh, onCommitted, onReverted }: {
   setBusy: (busy: Busy) => void;
   setAuth: (auth: { open: boolean; error: string | null }) => void;
   refresh: (force?: boolean) => Promise<StatusResult | undefined>;
-  onCommitted: () => void;
-  onReverted: () => void;
+  onCommitted: (paths: readonly string[]) => void;
+  onReverted: (paths: readonly string[]) => void;
 }) {
   const root = getSession().root ?? "";
   const writeBusy = useSvnWrite(root);
@@ -57,6 +67,7 @@ export function useSvnChanges({ setBusy, setAuth, refresh, onCommitted, onRevert
         return trackOperation<CommitResult | null>({ key: `svn.commit:${actionRoot}`, label: "提交 SVN 改动", scope: actionRoot, page: "svn", phase: "检查本次提交范围与未保存内容", errorDetail: error => getSvnDraft(actionRoot).unknown ? "提交结果待确认，请核实服务器历史，确认前不要重试提交" : friendlySvnError(error) }, async operation => {
           const prepared = await prepareSvnSubmit(actionRoot, epoch, snapshot, operation);
           if (!prepared) return null;
+          const requirements = requirementsForPaths(getRequirements().view,prepared.paths);
           operation.update({ phase: "提交选中文件，等待服务器确认" });
           let result: CommitResult;
           try { result = await svnCommit(prepared.paths, prepared.message, guard); }
@@ -64,12 +75,12 @@ export function useSvnChanges({ setBusy, setAuth, refresh, onCommitted, onRevert
             if (isUnknownSvnCommitError(error)) markSvnUnknown(actionRoot, prepared, friendlySvnError(error));
             throw error;
           }
-          completeSvnDraft(actionRoot, prepared, result);
+          completeSvnDraft(actionRoot, prepared, result, requirements);
           toast(`服务器已确认 r${result.revision}，提交 ${prepared.paths.length} 个文件`, "success");
           operation.update({ phase: `服务器已确认 r${result.revision}，刷新工作副本状态` });
           // 旧工程完成只写自己的草稿，不能清空新工程选择或发起新工程扫描。
           if (getSession().root === actionRoot && workspaceEpoch() === epoch) {
-            try { onCommitted(); } catch (error) { console.warn("[svn] commit UI callback failed", error); }
+            try { onCommitted(prepared.paths); } catch (error) { console.warn("[svn] commit UI callback failed", error); }
             await rescan(actionRoot, epoch, `r${result.revision} 已提交`);
           }
           return result;
@@ -84,16 +95,21 @@ export function useSvnChanges({ setBusy, setAuth, refresh, onCommitted, onRevert
     }
   }, [setBusy, onCommitted, rescan, handle]);
 
-  const doUpdate = useCallback(async () => {
+  const doUpdate = useCallback(async (revision?: number, report?: (outcome: SvnUpdateOutcome) => void) => {
     const actionRoot = getSession().root ?? "", epoch = workspaceEpoch();
     try {
       await withSvnWriteLock(actionRoot, "update", async guard => {
         setBusy("update"); await waitForFileOperations(); assertSvnWorkspace(actionRoot, epoch);
-        const result = await svnUpdate(guard);
+        const unsaved = svnUnsavedUpdateFiles(actionRoot);
+        if (unsaved.length) throw new Error(`工作副本有 ${unsaved.length} 个未保存文件（${unsaved[0].name}），请先保存这些编辑，再更新。`);
+        const result = await svnUpdate(guard, revision);
+        report?.({result});
         if (getSession().root !== actionRoot || workspaceEpoch() !== epoch) return;
         const scanned = await rescan(actionRoot, epoch, `已更新到 r${result.revision}`);
+        const conflictPaths = scanned?.changes.groups.flatMap(group => group.items).filter(item => item.letter === "C").map(item => item.path) ?? null;
+        report?.({result,conflicts:conflictPaths});
         if (!scanned) return;
-        const conflicts = scanned.changes.groups.flatMap(group => group.items).filter(item => item.letter === "C").length;
+        const conflicts = conflictPaths?.length ?? 0;
         toast(`已更新到 r${result.revision}${conflicts ? `，${conflicts} 个文件有冲突待处理` : "，工作副本状态已核对"}`, conflicts ? "warning" : "success");
       });
     } catch (error) { handle(error); }
@@ -108,7 +124,7 @@ export function useSvnChanges({ setBusy, setAuth, refresh, onCommitted, onRevert
         const result = await svnRevert([...paths], recursive, guard);
         toast(`已撤销 ${result.count} 处改动，备份在 ${result.backupDir}`, "success");
         if (getSession().root !== actionRoot || workspaceEpoch() !== epoch) return;
-        onReverted(); await rescan(actionRoot, epoch, "本地改动已撤销");
+        onReverted(paths); await rescan(actionRoot, epoch, "本地改动已撤销");
       });
     } catch (error) { handle(error); }
     finally { if (getSession().root === actionRoot && !getSvnWrite(actionRoot)) setBusy(null); }
@@ -122,7 +138,7 @@ export function useSvnChanges({ setBusy, setAuth, refresh, onCommitted, onRevert
         const result = await svnResolve(path, choice, guard);
         toast(result.backupDir ? `冲突已解决，另一版备份在 ${result.backupDir}。请重新编译这个类` : "冲突已解决，请重新编译这个类", "success");
         if (getSession().root !== actionRoot || workspaceEpoch() !== epoch) return;
-        onReverted(); await rescan(actionRoot, epoch, "冲突处理已完成");
+        onReverted([path]); await rescan(actionRoot, epoch, "冲突处理已完成");
       });
     } catch (error) { handle(error); }
     finally { if (getSession().root === actionRoot && !getSvnWrite(actionRoot)) setBusy(null); }

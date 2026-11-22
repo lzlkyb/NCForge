@@ -27,6 +27,17 @@ export function fileIndex(view: ReqView): Map<string, FileReqs> {
   return new Map(view.files.map((f) => [keyOf(f.path), f]));
 }
 
+export function requirementsForPaths(view: ReqView, paths: readonly string[]): Record<string,string[]> {
+  const byFile = fileIndex(view);
+  const names = new Map(view.reqs.map(req => [req.id,req.name]));
+  const entries = paths.flatMap(path => {
+    const key = keyOf(path);
+    const attached = (byFile.get(key)?.reqs ?? []).map(id => names.get(id)).filter((name): name is string => !!name);
+    return attached.length ? [[key, attached] as const] : [];
+  });
+  return Object.fromEntries(entries);
+}
+
 export function groupByRequirement(items: readonly ChangeItem[], view: ReqView): ReqGrouping {
   const index = fileIndex(view);
   const open = view.reqs.filter((r) => r.status === "open");

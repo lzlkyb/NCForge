@@ -11,10 +11,12 @@ import { SvnReviewFiles } from "./SvnReviewFiles";
 import { SVN_COMMIT_DRAWER_MIN_WIDTH, SvnCommitDrawer } from "./SvnCommitDrawer";
 import { SvnCommitOutcome } from "./SvnCommitOutcome";
 import { SvnScanNotice } from "./SvnScanNotice";
+import { SvnRemote } from "./SvnRemote";
+import { HistoryView } from "./HistoryView";
 import { SvnReviewDialogs, type SvnAuth, type SvnBusy } from "./SvnReviewDialogs";
 import { useSvnStatus } from "../../hooks/useSvnStatus";
 import { useSvnChanges } from "../../hooks/useSvnChanges";
-import { svnSession, useSvnView } from "../../lib/svnSession";
+import { openSvnChange, svnSession, useSvnView } from "../../lib/svnSession";
 import { friendlySvnError, isMarkable, keyOf, type ChangeItem } from "../../lib/svn";
 import { getSession, useWorkspaceRoot } from "../../lib/workspaceSession";
 import { nextSvnUnreviewed, svnVisibleGroups } from "../../lib/svnList";
@@ -28,6 +30,8 @@ import { blocksForReq, inScope } from "../../lib/blockState";
 import { fileIndex } from "../../lib/reqGroups";
 import { getRequirements } from "../../lib/requirements";
 import { cachedBlocks, type FileBlocks } from "../../hooks/useReqBlocks";
+import { Icon } from "../ui/icon";
+import { previewWorkingPatch } from "../../lib/reqActions";
 import type { ChangedBlock } from "../../lib/changedLines";
 
 /** 文件级已审只在全部块都审完时才标：混改文件在另一个需求下还有没审的块。取不到块时按文件算。 */
@@ -40,14 +44,22 @@ export function SvnReview({ onOpenFile }: { onOpenFile: (path: string) => void }
 }
 function SvnReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path: string) => void }) {
   const dock = useWorkbenchDock(), workarea = useRef<HTMLDivElement>(null);
-  const {showIgnored,selectedPath,mode,commitOpen,changeIntent} = useSvnView();
+  const {page,showIgnored,selectedPath,mode,commitOpen,changeIntent,historyRevision} = useSvnView();
   const prefs = useSvnListPrefs(root), draft = useSvnDraft(root);
   const [busy,setBusy] = useState<SvnBusy>(null), [auth,setAuth] = useState<SvnAuth>({open:false,error:null});
   const [revertTarget,setRevertTarget] = useState<ChangeItem | null>(null), [hkOpen,setHkOpen] = useState(false), [marking,setMarking] = useState(false);
   const markLock = useRef(false), qc = useQueryClient();
   const [focused,setFocused] = useState(false);
   const {info,status,reviewed,mark,refresh,scanProgress,streamed} = useSvnStatus();
-  const {doUpdate,doCommit,doRevert,doResolve,writeBusy} = useSvnChanges({setBusy,setAuth,refresh,onCommitted:() => svnSession.set({commitOpen:false,selectedPath:null}),onReverted:() => svnSession.set({selectedPath:null})});
+  const clearAffectedSelection = (paths: readonly string[]) => {
+    const path = svnSession.get().selectedPath;
+    if (path && paths.some(item => keyOf(item) === keyOf(path))) svnSession.set({selectedPath:null});
+  };
+  const {doUpdate,doCommit,doRevert,doResolve,writeBusy} = useSvnChanges({
+    setBusy,setAuth,refresh,
+    onCommitted:paths => { svnSession.set({commitOpen:false}); clearAffectedSelection(paths); },
+    onReverted:clearAffectedSelection,
+  });
   // 流式上屏：扫描途中的已扫条目优先显示，最终结果一到整份换掉（后端排好的序）。
   // items（提交面板/草稿/冲突计数的依据）仍然只取最终结果——流式数据绝不进写路径。
   const view = streamed ?? status.data?.changes ?? {groups:[],shown:0,total:0,ignored:0};
@@ -71,11 +83,15 @@ function SvnReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
       toast("此文件当前没有可查看的 SVN 改动", "info");
       return;
     }
+    const reqs = getRequirements().view;
+    const reqIds = fileIndex(reqs).get(keyOf(target.path))?.reqs.filter(id => reqs.reqs.some(req => req.id === id && req.status === "open")) ?? [];
+    const targetGroups = new Set([target.module,...(reqIds.length ? reqIds : ["-"]).map(id => "req:" + id)]);
     setSvnListPrefs(root, {
       search:"",
       filter:changeIntent.action === "conflict" && target.letter === "C" ? "conflict" : "all",
-      closed:prefs.closed.filter(module => module !== target.module),
+      closed:prefs.closed.filter(group => !targetGroups.has(group)),
     });
+    svnSession.set({selectedReq:reqIds[0] ?? "-"});
     if (changeIntent.action !== "commit") return;
     if (selectionLocked) {
       toast("当前提交草稿暂不可更改，请先完成正在进行的操作", "warning");
@@ -96,7 +112,7 @@ function SvnReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
     }
     return paths;
   }, [items, reviewed]);
-  const queue = svnVisibleGroups(view,prefs.filter,prefs.search,prefs.sort,showIgnored,reviewed,draft.picked,outdated).filter(g => !prefs.closed.includes(g.module)).flatMap(g => g.items);
+  const queue = svnVisibleGroups(view,prefs.filter,prefs.search,prefs.sort,showIgnored,reviewed,draft.picked,outdated).filter(g => prefs.groupBy === "req" || !prefs.closed.includes(g.module)).flatMap(g => g.items);
   const openFile = (path: string) => {
     // 不能只 showCode()：那会把代码面露出来却不变 activeTab，SVN 工具条、
     // 变更列表侧栏与文件页状态栏混屏，文档标签随 surface hidden 后根本没有
@@ -106,11 +122,20 @@ function SvnReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
   };
   const pick = (it: ChangeItem) => { dock?.showDocument(); svnSession.set({selectedPath:it.path,mode:"diff",changeIntent:null}); if (window.matchMedia?.("(max-width:640px)").matches) setSideOpen(false); };
   const refreshNow = () => { void refresh().catch(error => toast(friendlySvnError(error),"error")); };
-  const showHistory = () => { svnSession.set({mode:"log",selectedPath:null}); dock?.showDocument(); };
+  const showHistory = (revision?: number) => { svnSession.set({page:"history",historyRevision:revision ?? null}); dock?.showDocument(); };
   const closeCommit = () => { svnSession.set({commitOpen:false}); document.querySelector<HTMLButtonElement>("[data-commit-trigger]")?.focus(); };
   const reviewCommitFile = (item: ChangeItem) => {
     pick(item);
     if ((workarea.current?.clientWidth ?? 0) < SVN_COMMIT_DRAWER_MIN_WIDTH) svnSession.set({ commitOpen: false });
+  };
+  const nextConflict = () => {
+    if (getSession().root !== root || svnSession.get().page !== "review" || svnSession.get().selectedPath !== selectedPath) return;
+    const paths = items.filter(item => item.letter === "C" && keyOf(item.path) !== keyOf(selectedPath ?? ""));
+    if (paths.length) {
+      openSvnChange(paths[0].path,"conflict");
+    } else {
+      svnSession.set({selectedPath:null});
+    }
   };
   const markAndNext = async () => {
     if (!selected || !isMarkable(selected) || markLock.current || locked) return;
@@ -145,19 +170,33 @@ function SvnReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
     markLock.current = true; setMarking(true);
     void mark(selected.path,selected.revision,!reviewed.has(keyOf(selected.path))).catch(error => toast(friendlySvnError(error),"error")).finally(() => { markLock.current = false; setMarking(false); });
   };
+  const dialogs = <SvnReviewDialogs revertTarget={revertTarget} setRevertTarget={setRevertTarget} onRevert={doRevert} auth={auth} setAuth={setAuth} info={info.data} busy={busy} setBusy={setBusy} hkOpen={hkOpen} setHkOpen={setHkOpen} refresh={refresh} />;
+  const conflictPaths = status.data && !status.error ? items.filter(item => item.letter === "C").map(item => item.path) : null;
+  if (page === "remote") return <>
+    <SvnRemote root={root} info={info.data} busy={writeBusy?.kind ?? busy} conflicts={conflictPaths} update={doUpdate} onConflict={path => openSvnChange(path,"conflict")} onHistory={showHistory} onRefresh={() => refresh(true)} onAuth={() => setAuth({open:true,error:null})}/>
+    {dialogs}
+  </>;
+  if (page === "history") return <>
+    <DockRegion region="document">{root ? <HistoryView key={`${root}:${historyRevision}`} path={root} title="工作副本" initialRevision={historyRevision ?? undefined} onBack={() => svnSession.set({page:"review"})}/> : <div className="vc-empty">打开 SVN 工作副本后可以查看版本历史。</div>}</DockRegion>
+    {dialogs}
+  </>;
+  const waitingFile = changeIntent?.path.split(/[\\/]/).pop();
+  const hiddenSelection = selected && !queue.some(item => keyOf(item.path) === keyOf(selected.path));
   return <>
-    <DockRegion region="toolbar"><SvnToolbar rev={info.data?.revision ?? 0} info={info.data} url={info.data?.url ?? null} generatedAtMs={status.data?.generatedAtMs ?? null} shown={(streamed ?? status.data?.changes)?.shown ?? null} fetching={status.isFetching} busy={writeBusy?.kind ?? busy} canRevert={!!selected && !selected.isDir && !locked} revertTitle={selected ? `备份并撤销 ${selected.rel}` : "先选择文件"} committable={eligible.length} pickedCount={pickedCount} conflicts={items.filter(it => it.letter === "C").length} hkOpen={hkOpen} onRefresh={refreshNow} onUpdate={() => void doUpdate()} onRevert={() => setRevertTarget(selected)} onCommit={() => { svnSession.set({commitOpen:!commitOpen}); dock?.showDocument(); }} onHousekeeping={() => setHkOpen(true)} onHistory={showHistory} onFiles={() => setSideOpen(true)} /></DockRegion>
+    <DockRegion region="toolbar"><SvnToolbar rev={info.data?.revision ?? 0} info={info.data} url={info.data?.url ?? null} generatedAtMs={status.data?.generatedAtMs ?? null} shown={(streamed ?? status.data?.changes)?.shown ?? null} fetching={status.isFetching} busy={writeBusy?.kind ?? busy} canRevert={!!selected && !selected.isDir && !locked} revertTitle={selected ? `备份并撤销 ${selected.rel}` : "先选择文件"} committable={eligible.length} pickedCount={pickedCount} conflicts={conflictPaths?.length ?? 0} hkOpen={hkOpen} onRefresh={refreshNow} onUpdate={() => {svnSession.set({page:"remote"});dock?.showDocument();}} onRevert={() => setRevertTarget(selected)} onCommit={() => { svnSession.set({commitOpen:!commitOpen}); dock?.showDocument(); }} onHousekeeping={() => setHkOpen(true)} onFiles={() => setSideOpen(true)} /></DockRegion>
     <DockRegion region="sidebar"><ChangeList view={view} root={root} reviewed={reviewed} outdated={outdated} picked={draft.picked} busy={selectionLocked} selected={selectedPath} loading={status.isFetching} error={status.error ? friendlySvnError(status.error) : null} onSelect={pick} onOpenFile={openFile} showIgnored={showIgnored} onToggleIgnored={() => svnSession.set({showIgnored:!showIgnored})} onMarkReqAll={markReqAll} /></DockRegion>
     <DockRegion region="document"><div className="vc-review-document" data-focus={focused || undefined}>
       {focused && <div className="vc-focus-bar"><SvnReviewFiles items={queue} selected={selectedPath} onSelect={pick}/><button type="button" className="vc-btn vc-btn-sm vc-focus-exit" onClick={()=>{setFocused(false);requestAnimationFrame(()=>workarea.current?.querySelector<HTMLButtonElement>('[aria-label="专注对比"]')?.focus());}}>退出专注对比</button></div>}
       <SvnTaskFeedback root={root} fetching={status.isFetching} scanned={scanProgress} busy={writeBusy?.kind ?? busy} startedAt={writeBusy?.startedAt} hasPrevious={!!status.data} />
       <SvnScanNotice error={status.error} fetching={status.isFetching} onAuth={() => setAuth({open:true,error:null})} onRefresh={refreshNow} />
+      {waitingFile && <div className="vc-alert" role="status" data-tone={status.error ? "warn" : "info"}><Icon name="info" size={14}/><span>{status.error ? "重新扫描后继续定位" : changeIntent?.action === "commit" ? "正在确认提交状态" : "正在定位"} · {waitingFile}</span><button className="vc-btn vc-btn-sm" type="button" onClick={() => svnSession.set({changeIntent:null})}>取消定位</button></div>}
+      {hiddenSelection && !changeIntent && <div className="vc-alert" data-tone="info"><span>当前文件不在清单的可见范围内。</span><button className="vc-btn vc-btn-sm" type="button" onClick={() => openSvnChange(selected.path,selected.letter === "C" ? "conflict" : "review")}>显示并定位</button></div>}
       <SvnCommitOutcome root={root} onHistory={showHistory} onRefresh={refreshNow} />
       <div className="vc-review-workarea" ref={workarea}>
-        <div className="vc-review-main"><RightPane file={selected} mode={mode} onMode={next => svnSession.set({mode:next})} reviewed={selected ? reviewed.has(keyOf(selected.path)) : false} busy={locked} disabled={locked || marking} focused={focused} onFocus={()=>{setFocused(true);requestAnimationFrame(()=>workarea.current?.parentElement?.querySelector<HTMLButtonElement>('.vc-focus-exit')?.focus());}} onToggleReviewed={toggleReviewed} onOpenFile={openFile} onPrepareNew={root && selected && isSvnCommittable(selected) && !selectionLocked ? () => { selectSvnPaths(root, [...draft.picked, selected.path]); svnSession.set({commitOpen:true}); } : undefined} onMarkAndNext={markAndNext} onResolve={choice => selected && void doResolve(selected.path,choice)} onLater={() => svnSession.set({selectedPath:null})} /></div>
-        <SvnCommitDrawer host={workarea} open={commitOpen} onClose={closeCommit}><CommitPanel items={items} root={root} reviewed={reviewed} outdated={outdated} busy={locked} onSubmit={(message,paths) => { void doCommit(message,paths); }} onCancel={closeCommit} onSelect={reviewCommitFile} /></SvnCommitDrawer>
+        <div className="vc-review-main"><RightPane file={selected} mode={mode} onMode={next => svnSession.set({mode:next})} reviewed={selected ? reviewed.has(keyOf(selected.path)) : false} busy={locked} disabled={locked || marking} focused={focused} onFocus={()=>{setFocused(true);requestAnimationFrame(()=>workarea.current?.parentElement?.querySelector<HTMLButtonElement>('.vc-focus-exit')?.focus());}} onToggleReviewed={toggleReviewed} onOpenFile={openFile} onPrepareNew={root && selected && isSvnCommittable(selected) && !selectionLocked ? () => { selectSvnPaths(root, [...draft.picked, selected.path]); svnSession.set({commitOpen:true}); } : undefined} onMarkAndNext={markAndNext} onResolve={choice => selected && void doResolve(selected.path,choice)} onLater={nextConflict} /></div>
+        <SvnCommitDrawer host={workarea} open={commitOpen} onClose={closeCommit}><CommitPanel items={items} root={root} reviewed={reviewed} outdated={outdated} busy={locked} onSubmit={(message,paths) => { void doCommit(message,paths); }} onCancel={closeCommit} onSelect={reviewCommitFile} onPatch={paths => void previewWorkingPatch(root,paths)} /></SvnCommitDrawer>
       </div>
     </div></DockRegion>
-    <SvnReviewDialogs revertTarget={revertTarget} setRevertTarget={setRevertTarget} onRevert={doRevert} auth={auth} setAuth={setAuth} info={info.data} busy={busy} setBusy={setBusy} hkOpen={hkOpen} setHkOpen={setHkOpen} refresh={refresh} />
+    {dialogs}
   </>;
 }

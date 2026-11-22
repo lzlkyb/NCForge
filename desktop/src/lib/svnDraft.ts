@@ -2,13 +2,20 @@ import { useSyncExternalStore } from "react";
 import { keyOf, type ChangeItem, type CommitResult } from "./svn";
 
 export interface SvnCommitSnapshot { message: string; paths: string[]; }
+interface SvnCommitReceipt {
+  revision: number;
+  count: number;
+  message: string;
+  requirements?: Record<string,string[]>;
+}
 export interface SvnDraft {
   message: string;
   picked: Set<string>;
   known: Set<string>;
   initialized: boolean;
+  selectionUndo?: Set<string>;
   unknown: (SvnCommitSnapshot & { at: number; error: string }) | null;
-  lastCommit: { revision: number; count: number; message: string } | null;
+  lastCommit: SvnCommitReceipt | null;
 }
 const empty = (): SvnDraft => ({ message: "", picked: new Set(), known: new Set(), initialized: false, unknown: null, lastCommit: null });
 const noRoot = empty();
@@ -50,6 +57,13 @@ export function getSvnDraft(root: string | null | undefined): SvnDraft {
       if (saved.unknown && typeof saved.unknown.message === "string" && typeof saved.unknown.error === "string" && typeof saved.unknown.at === "number") {
         draft.unknown = { message: saved.unknown.message, paths: strings(saved.unknown.paths), at: saved.unknown.at, error: saved.unknown.error };
       }
+      const receipt = saved.lastCommit;
+      if (receipt && Number.isSafeInteger(receipt.revision) && receipt.revision > 0 && Number.isSafeInteger(receipt.count) && typeof receipt.message === "string") {
+        const requirements = receipt.requirements && typeof receipt.requirements === "object" ? Object.fromEntries(
+          Object.entries(receipt.requirements).map(([path,names]) => [path,strings(names)])
+        ) : undefined;
+        draft.lastCommit = { revision:receipt.revision, count:receipt.count, message:receipt.message, requirements };
+      }
     }
   } catch { /* 本机存储不可用时，本次会话仍保留草稿。 */ }
   drafts.set(key, draft);
@@ -59,7 +73,7 @@ export function getSvnDraft(root: string | null | undefined): SvnDraft {
 function publish(root: string, draft: SvnDraft) {
   drafts.set(keyOf(root), draft);
   try {
-    localStorage.setItem(storageKey(root), JSON.stringify({ ...draft, picked: [...draft.picked], known: [...draft.known] }));
+    localStorage.setItem(storageKey(root), JSON.stringify({ ...draft, selectionUndo: undefined, picked: [...draft.picked], known: [...draft.known] }));
   } catch { /* 隐私模式/存储满不影响当前会话。 */ }
   listeners.forEach(listener => listener());
 }
@@ -84,11 +98,13 @@ export function setSvnMessage(root: string, message: string): void {
   if (message !== draft.message) publish(root, { ...draft, message });
 }
 
-export function selectSvnPaths(root: string, paths: readonly string[]): void {
+export function selectSvnPaths(root: string, paths: readonly string[], reversible = false): void {
   const draft = getSvnDraft(root);
+  if (!root || draft.unknown) return;
   const wanted = new Set(paths.map(keyOf));
   const picked = new Set((available.get(keyOf(root)) ?? []).filter(isSvnCommittable).filter(item => wanted.has(keyOf(item.path))).map(item => item.path));
-  publish(root, { ...draft, picked });
+  if (picked.size === draft.picked.size && [...picked].every(path => isSvnPicked(draft.picked,path))) return;
+  publish(root, { ...draft, picked, selectionUndo: reversible ? draft.picked : undefined });
 }
 
 export function toggleSvnPicked(root: string, path: string): void {
@@ -98,13 +114,23 @@ export function toggleSvnPicked(root: string, path: string): void {
   selectSvnPaths(root, selected);
 }
 
-export const clearSvnPicked = (root: string) => selectSvnPaths(root, []);
-export const selectSvnReviewed = (root: string, reviewed: ReadonlySet<string>) => selectSvnPaths(root, (available.get(keyOf(root)) ?? []).filter(item => reviewed.has(keyOf(item.path))).map(item => item.path));
+export const clearSvnPicked = (root: string) => selectSvnPaths(root, [], true);
+export function selectSvnReviewed(root: string, reviewed: ReadonlySet<string>): void {
+  const paths = (available.get(keyOf(root)) ?? []).filter(item => isSvnCommittable(item) && reviewed.has(keyOf(item.path))).map(item => item.path);
+  if (paths.length) selectSvnPaths(root, paths, true);
+}
+export function undoSvnSelection(root: string): void {
+  const draft = getSvnDraft(root);
+  if (!draft.selectionUndo || draft.unknown) return;
+  const previous = [...draft.selectionUndo];
+  publish(root, { ...draft, selectionUndo: undefined });
+  selectSvnPaths(root, previous);
+}
 
-export function completeSvnDraft(root: string, snapshot: SvnCommitSnapshot, result: CommitResult): void {
+export function completeSvnDraft(root: string, snapshot: SvnCommitSnapshot, result: CommitResult, requirements?: Record<string,string[]>): void {
   const draft = getSvnDraft(root);
   const sent = new Set(snapshot.paths.map(keyOf));
-  publish(root, { ...draft, picked: new Set([...draft.picked].filter(path => !sent.has(keyOf(path)))), message: draft.message.trim() === snapshot.message ? "" : draft.message, unknown: null, lastCommit: { revision: result.revision, count: snapshot.paths.length, message: snapshot.message } });
+  publish(root, { ...draft, selectionUndo: undefined, picked: new Set([...draft.picked].filter(path => !sent.has(keyOf(path)))), message: draft.message.trim() === snapshot.message ? "" : draft.message, unknown: null, lastCommit: { revision: result.revision, count: snapshot.paths.length, message: snapshot.message, requirements } });
 }
 
 export function markSvnUnknown(root: string, snapshot: SvnCommitSnapshot, error: string): void {

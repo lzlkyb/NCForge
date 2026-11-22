@@ -17,7 +17,7 @@ const fixture = { treeConflict: false, propertyConflict: false, textConflict: tr
 beforeEach(() => { setSession({ root: "D:/conflict" }); mocks.snapshot.mockReset(); mocks.keep.mockReset(); });
 afterEach(() => { dispose(); setSession({ root: null }); });
 const flush = async () => { for (let i = 0; i < 4; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
-async function render(data = fixture) {
+async function render(data: typeof fixture & {workingText?: string; workingMtimeMs?: number} = fixture) {
   mocks.snapshot.mockResolvedValue(data); const resolve = vi.fn(), later = vi.fn();
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } }); const invalidate = vi.spyOn(qc, "invalidateQueries");
@@ -39,4 +39,15 @@ it("保留手工结果完成后刷新SVN与补丁，再离开当前项", async (
 it("尚有冲突标记和树冲突时不允许保留手工结果", async () => {
   const { host } = await render({ ...fixture, treeConflict: true, workingHasMarkers: true });
   expect(host.textContent).toContain("这是树冲突"); expect([...host.querySelectorAll("button")].find(button => button.textContent === "保留手工合并结果")!.disabled).toBe(true); expect(mocks.keep).not.toHaveBeenCalled();
+});
+it("逐块保留双方只替换冲突标记，确认时提交待保存的正文与磁盘时间", async () => {
+  mocks.keep.mockResolvedValue({ backupDir: "D:/backup" });
+  const { host } = await render({ ...fixture, workingText:"prefix\n<<<<<<< .mine\nmine\n=======\ntheirs\n>>>>>>> .r9\nsuffix\n", workingHasMarkers:true, workingMtimeMs:42 });
+  const button = (label: string) => [...host.querySelectorAll("button")].find(item => item.textContent === label)!;
+  expect(button("保存并标为已解决").disabled).toBe(true);
+  await act(async () => button("本处保留双方").click());
+  expect(host.querySelector("textarea")?.value).toBe("prefix\nmine\ntheirs\nsuffix\n");
+  expect(mocks.keep).not.toHaveBeenCalled();
+  await act(async () => button("保存并标为已解决").click());
+  expect(mocks.keep).toHaveBeenCalledWith(file.path,{text:"prefix\nmine\ntheirs\nsuffix\n",expectedMtimeMs:42});
 });

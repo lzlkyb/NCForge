@@ -367,6 +367,7 @@ macro_rules! nc_forge_commands {
         $crate::commands::svn_status,
         $crate::commands::svn_diff,
         $crate::commands::svn_history,
+        $crate::commands::svn_remote_status,
         $crate::commands::svn_revision_diff,
         $crate::commands::svn_blame_snapshot,
         $crate::commands::svn_conflict_snapshot,

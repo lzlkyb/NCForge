@@ -9,10 +9,10 @@ import { keyOf, type ChangeItem } from "../../lib/svn";
 const file = (name: string): ChangeItem => ({path:`C:/svn-ui/${name}.java`,rel:`module/src/${name}.java`,module:"module",letter:"M",status:"modified",revision:2,isDir:false,ignored:false});
 let dispose = () => {}, sequence = 0;
 afterEach(() => dispose());
-function render(files = [file("A"),file("B")], outdated = new Set<string>()) {
+function render(files = [file("A"),file("B")], outdated = new Set<string>(), withReviewed = true) {
   const workspace = `C:/svn-ui-${++sequence}`, host = document.createElement("div"), root = createRoot(host), submit = vi.fn(), select = vi.fn();
   document.body.append(host); syncSvnDraft(workspace,files);
-  const paint = () => act(() => root.render(<CommitPanel items={files} root={workspace} outdated={outdated} reviewed={new Set([keyOf(files[0].path)])} busy={false} onSubmit={submit} onCancel={vi.fn()} onSelect={select} />));
+  const paint = () => act(() => root.render(<CommitPanel items={files} root={workspace} outdated={outdated} reviewed={withReviewed ? new Set([keyOf(files[0].path)]) : new Set()} busy={false} onSubmit={submit} onCancel={vi.fn()} onSelect={select} />));
   paint(); dispose = () => { act(() => root.unmount()); host.remove(); };
   const button = (text: string) => [...host.querySelectorAll("button")].find(b => b.textContent === text)!;
   return {host,workspace,submit,select,files,paint,button};
@@ -34,7 +34,15 @@ describe("SVN commit UI", () => {
     expect(t.select).toHaveBeenCalledWith(t.files[0]); expect(getSvnDraft(t.workspace).picked.size).toBe(2);
   });
   it("only-reviewed selection follows review identity", () => {
-    const t = render(); act(() => t.button("只选已审").click()); expect([...getSvnDraft(t.workspace).picked]).toEqual([t.files[0].path]);
+    const t = render(); act(() => t.button("选择已审 1").click()); expect([...getSvnDraft(t.workspace).picked]).toEqual([t.files[0].path]);
+    act(() => t.button("撤销选择").click()); expect(getSvnDraft(t.workspace).picked.size).toBe(2);
+  });
+  it("no reviewed match preserves the current selection and explains the block", () => {
+    const t = render(undefined,undefined,false);
+    expect(t.button("选择已审 0").disabled).toBe(true);
+    act(() => t.button("选择已审 0").click());
+    expect(getSvnDraft(t.workspace).picked.size).toBe(2);
+    expect(t.host.textContent).toContain("填写提交说明后可提交");
   });
   it("distinguishes reviewed, outdated and untracked files while excluding conflicts", () => {
     const stale = { ...file("B"), letter: "?" as const };

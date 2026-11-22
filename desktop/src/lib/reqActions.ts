@@ -8,6 +8,11 @@ import { EMPTY_DRAFT } from "./patch";
 import { getRequirements, reqClaim, reqCreate, reqMerge, reqRecordPackage, reqRename, reqSetStatus, type ReqView, type Requirement } from "./requirements";
 import { openPatchPage } from "./svnSession";
 import type { ChangeItem } from "./svn";
+import { keyOf } from "./svn";
+import { requirementsForPaths } from "./reqGroups";
+import { ask } from "./dbConfirm";
+import { getSession } from "./workspaceSession";
+import { workspaceEpoch } from "./workspaceEpoch";
 
 const fail = (what: string) => (e: unknown) => { toast(`${what}失败：${String(e)}`, "error"); return null; };
 
@@ -60,10 +65,23 @@ export async function copyFileList(items: readonly ChangeItem[]): Promise<void> 
  * 「用这个需求出包」：把补丁草稿的名字换成需求名、勾选换成本需求的文件，再跳到打包页。
  * 草稿里已有的 SQL、手写说明、改判的层都保留（可能就是为这个需求写的）。
  */
-export function packRequirement(root: string, req: Requirement, items: readonly ChangeItem[]): void {
-  const draft = loadPatchDraft(root) ?? { desc: "", draft: { ...EMPTY_DRAFT }, sqls: [], picked: null, layers: [] };
-  savePatchDraft(root, { ...draft, desc: req.name, picked: items.map((it) => it.path) });
+export async function previewWorkingPatch(root: string, paths: readonly string[], description?: string): Promise<void> {
+  if (!root || !paths.length || keyOf(getSession().root ?? "") !== keyOf(root)) return;
+  const epoch = workspaceEpoch(), existing = loadPatchDraft(root);
+  const draft = existing ?? { desc:"", draft:{ ...EMPTY_DRAFT }, sqls:[], picked:null, layers:[] };
+  const mixed = Object.values(requirementsForPaths(getRequirements().view,paths)).filter(names => names.length > 1).length;
+  const replace = !!existing && (existing.picked !== null || (!!description && existing.desc !== description));
+  if (mixed || replace) {
+    const details = [`将预览 ${paths.length} 个工作副本路径。`, mixed ? `其中 ${mixed} 个涉及多个需求，补丁会带入整文件改动。` : "", replace ? "继续将替换现有补丁草稿的文件选择，并保留 SQL 和手写说明。" : ""].filter(Boolean);
+    if (!await ask("核对 NC 补丁范围", details.join("\n"), "继续预览")) return;
+  }
+  if (workspaceEpoch() !== epoch || keyOf(getSession().root ?? "") !== keyOf(root)) return;
+  savePatchDraft(root,{ ...draft, desc:description || draft.desc, picked:[...paths] });
   openPatchPage();
+}
+
+export function packRequirement(root: string, req: Requirement, items: readonly ChangeItem[]): Promise<void> {
+  return previewWorkingPatch(root,items.map(it => it.path),req.name);
 }
 
 /** 打包成功后调：补丁名对得上某个需求（含旧名）就记一笔出包，用于「已出包 +N」。失败只警告。 */

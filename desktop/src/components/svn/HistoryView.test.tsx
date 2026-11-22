@@ -24,3 +24,22 @@ it("历史选择请求真实revision路径，可切换工作副本范围", async
   const scope = host.querySelector<HTMLSelectElement>('[aria-label="历史范围"]')!;
   await act(async () => { scope.value = "root"; scope.dispatchEvent(new Event("change", { bubbles: true })); }); await flush(); expect(mocks.history).toHaveBeenLastCalledWith("D:/root", 30, 0);
 });
+it("旧版本不在首屏时继续分页，并支持带 r 的版本号", async () => {
+  setSession({root:"D:/root"});
+  const entry = (revision: number) => ({revision,author:"dev",date:1,message:"update",paths:[]});
+  mocks.history.mockResolvedValueOnce({repositoryPath:"/",entries:Array.from({length:30},(_,index) => entry(100 - index))});
+  mocks.history.mockResolvedValueOnce({repositoryPath:"/",entries:[entry(70),entry(69)]});
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); const qc = new QueryClient();
+  dispose = () => { act(() => root.unmount()); host.remove(); };
+  await act(async () => root.render(<QueryClientProvider client={qc}><HistoryView path="D:/root" title="工作副本" onBack={vi.fn()}/></QueryClientProvider>));
+  await flush();
+  const input = host.querySelector<HTMLInputElement>('[aria-label="筛选已加载历史"]')!;
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!;
+  await act(async () => { setValue.call(input,"r69"); input.dispatchEvent(new Event("input",{bubbles:true})); });
+  expect(host.textContent).toContain("已读版本未匹配");
+  await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "继续搜索更早版本")!.click());
+  await flush();
+  expect(mocks.history).toHaveBeenLastCalledWith("D:/root",30,71);
+  expect(host.querySelector(".vc-history-record")?.textContent).toContain("r69");
+  expect(host.textContent).toContain("已查 r69–r100");
+});

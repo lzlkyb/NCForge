@@ -75,6 +75,15 @@ pub struct ConflictSnapshot {
     pub theirs: Option<ConflictVersion>,
     pub working_readable: bool,
     pub working_has_markers: bool,
+    pub working_text: Option<String>,
+    pub working_mtime_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SvnMergeDraft {
+    pub text: String,
+    pub expected_mtime_ms: u64,
 }
 
 pub fn decode_content(value: &serde_json::Value) -> Result<(String, String), String> {

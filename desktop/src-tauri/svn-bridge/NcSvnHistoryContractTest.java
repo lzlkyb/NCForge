@@ -135,7 +135,19 @@ public class NcSvnHistoryContractTest {
             File local = new File(b, "A.java"); write(local, "first\nmy work\n");
             check(call("file_commits", b.getPath()).contains("\"revision\":" + r1),
                     "modified file still uses local BASE, even if the repository has newer history");
-            manager.getUpdateClient().doUpdate(b, SVNRevision.HEAD, SVNDepth.INFINITY, false, false);
+            String remote = call("remote_status", b.getPath());
+            check(remote.contains("\"revision\":" + r2) && remote.contains("\"baseRevision\":" + r1),
+                    "remote preview reports working and repository revisions: " + remote);
+            check(remote.contains("\"relativePath\":\"A.java\"") && remote.contains("\"repositoryPath\":\"/A.java\"")
+                    && remote.contains("\"overlap\":true"), "preview identifies overlap on the real path: " + remote);
+            String remoteDiff = call("revision_diff", b.getPath(), "/A.java", Long.toString(r2), Long.toString(r1));
+            check(decodeField(remoteDiff, "before").equals("first\nbase\n") && decodeField(remoteDiff, "after").equals("first\nserver\n"),
+                    "remote diff uses pinned base and target text");
+            check(new String(Files.readAllBytes(local.toPath()), StandardCharsets.UTF_8).equals("first\nmy work\n"),
+                    "remote preview does not change the working file");
+            String update = call("update", b.getPath(), Long.toString(r2));
+            check(update.contains("\"revision\":" + r2) && update.contains("\"modified\":1"),
+                    "update reports the pinned result and changed count: " + update);
             check(call("file_commits", b.getPath()).contains("\"revision\":" + r2),
                     "working-copy update refreshes the visible commit metadata");
             String conflict = call("conflict_snapshot", local.getPath());
@@ -147,11 +159,17 @@ public class NcSvnHistoryContractTest {
             write(local, "first\nmanual merged\n"); call("resolve_working", local.getPath());
             check(new String(Files.readAllBytes(local.toPath()), StandardCharsets.UTF_8).equals("first\nmanual merged\n"), "MERGED keeps saved working content");
             check(call("conflict_snapshot", local.getPath()).contains("\"textConflict\":false"), "text conflict cleared");
+            String currentRemote = call("remote_status", b.getPath());
+            check(currentRemote.contains("\"total\":0") && currentRemote.contains("\"revision\":" + r2),
+                    "a local-only edit is not counted as an incoming change: " + currentRemote);
             manager.getWCClient().doRevert(new File[]{text}, SVNDepth.EMPTY, null);
             manager.getWCClient().doDelete(text, false, false, false);
             long r3 = manager.getCommitClient().doCommit(new File[]{text}, false, "delete file", null, null, false, false, SVNDepth.EMPTY).getNewRevision();
             String deleted = call("revision_diff", a.getPath(), "/A.java", Long.toString(r3));
             check(deleted.contains("\"afterEmpty\":true") && decodeField(deleted, "before").equals("first\nserver\n"), "deleted revision content");
+            String incomingDelete = call("remote_status", b.getPath());
+            check(incomingDelete.contains("\"kind\":\"deleted\"") && incomingDelete.contains("\"relativePath\":\"A.java\""),
+                    "remote preview exposes deletions: " + incomingDelete);
             boolean traversal = false;
             try { call("revision_diff", a.getPath(), "/../A.java", Long.toString(r1)); } catch (Exception error) { traversal = true; }
             check(traversal, "repository path traversal rejected");
@@ -193,6 +211,21 @@ public class NcSvnHistoryContractTest {
             String committed = call("commit", msg.getPath(), viaBridge.getPath());
             check(committed.contains("\"revision\":") && committed.contains("ViaBridge.java"),
                     "新格式副本上桥 commit 自动 add unversioned 文件: " + committed);
+            String pinned = call("update", b.getPath(), Long.toString(r3));
+            check(pinned.contains("\"revision\":" + r3) && !new File(b,"ViaBridge.java").exists(),
+                    "a newer repository commit does not silently change the reviewed update target: " + pinned);
+            String incomingAdd = call("remote_status", b.getPath());
+            check(incomingAdd.contains("\"kind\":\"added\"") && incomingAdd.contains("\"repositoryPath\":\"/ViaBridge.java\""),
+                    "remote preview exposes new paths with their repository location: " + incomingAdd);
+            File newer = new File(b, "ViaBridge.java");
+            long newerRevision = manager.getUpdateClient().doUpdate(newer, SVNRevision.HEAD, SVNDepth.EMPTY, false, false);
+            check(newer.isFile() && newerRevision > r3
+                    && manager.getWCClient().doInfo(b, SVNRevision.WORKING).getRevision().getNumber() == r3,
+                    "an external file-only update leaves the root at the previously reviewed revision");
+            boolean rejectedOlder = false;
+            try { call("update", b.getPath(), Long.toString(r3)); }
+            catch (Exception error) { rejectedOlder = error.getMessage().contains("更高版本"); }
+            check(rejectedOlder && newer.isFile(), "a reviewed update must never roll back a newer working-copy path");
             // 提交后再改一次，status 必须报 modified（旧 API 在新格式上报 normal 被滤掉）
             write(viaBridge, "via bridge modified\n");
             String afterCommit = call("status", a.getPath(), "");

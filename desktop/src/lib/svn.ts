@@ -2,6 +2,7 @@ import { invoke, listen } from "./tauri";
 import { trackOperation } from "./operations";
 import { getSession } from "./workspaceSession";
 import { withSvnWriteLock, getSvnWrite, type SvnWriteHandle } from "./svnWrite";
+import { appErrorOf } from "./ipcError";
 
 /**
  * 版本控制（SVN）的命令封装与纯函数。
@@ -104,7 +105,32 @@ export interface CommitResult {
 
 export interface UpdateResult {
   revision: number;
+  added?: number | null;
+  deleted?: number | null;
+  modified?: number | null;
+  skipped?: number | null;
 }
+
+export interface SvnRemoteChange {
+  relativePath: string;
+  repositoryPath: string;
+  kind: "added" | "deleted" | "modified" | "replaced";
+  baseRevision: number;
+  directory: boolean;
+  overlap: boolean;
+}
+export interface SvnRemoteStatus {
+  revision: number;
+  baseRevision: number;
+  total: number;
+  overlap: number;
+  entries: SvnRemoteChange[];
+}
+export const svnRemoteStatus = (root: string) => trackOperation(
+  { key: `svn.remote:${root}`, label: "检查 SVN 远端改动", scope: root, page: "svn", phase: "读取服务器改动清单" },
+  () => invoke<SvnRemoteStatus>("svn_remote_status", { expectedRoot: root }),
+  result => ({ state: "success", detail: `已核对 r${result.revision}，${result.total} 个路径需更新` }),
+);
 
 export interface ResolveResult {
   /** 冲突临时文件（.mine / .rN）的备份目录；没有可备份的文件时为 null。 */
@@ -183,9 +209,9 @@ export const svnCommit = (paths: string[], message: string, guard?: SvnWriteHand
     ? invoke<CommitResult>("svn_commit", { ...snapshot, expectedRoot: root })
     : trackOperation({ key: `svn.commit:${root}`, label: "提交 SVN 改动", scope: root, page: "svn", phase: "提交选中文件，等待服务器确认" }, () => invoke<CommitResult>("svn_commit", { ...snapshot, expectedRoot: root }), r => ({ state: "success", detail: `服务器已确认提交 r${r.revision}` })), guard);
 };
-export const svnUpdate = (guard?: SvnWriteHandle) => {
+export const svnUpdate = (guard?: SvnWriteHandle, revision?: number) => {
   const root = getSession().root ?? "";
-  return withSvnWriteLock(root, "update", () => trackOperation({ key: `svn.update:${root}`, label: "更新 SVN 工作副本", scope: root, page: "svn", phase: "更新文件，等待服务器返回" }, () => invoke<UpdateResult>("svn_update", { expectedRoot: root }), r => ({ state: "success", detail: `已更新到 r${r.revision}；冲突由后续扫描确认` })), guard);
+  return withSvnWriteLock(root, "update", () => trackOperation({ key: `svn.update:${root}`, label: "更新 SVN 工作副本", scope: root, page: "svn", phase: "更新文件，等待服务器返回" }, () => invoke<UpdateResult>("svn_update", { expectedRoot: root, ...(revision !== undefined ? { revision } : {}) }), r => ({ state: "success", detail: `已更新到 r${r.revision}，正在核对冲突` })), guard);
 };
 export const svnRevert = (paths: string[], recursive: boolean, guard?: SvnWriteHandle) => {
   const root = getSession().root ?? "";
@@ -283,6 +309,10 @@ const KNOWN_CODES = new Set(["auth", "conflict", "wc", "timeout", "spawn", "othe
  * 不认识的（普通字符串错误）整体当消息，code 记 `other`。
  */
 export function parseSvnError(e: unknown): { code: string; message: string } {
+  const structured = appErrorOf(e);
+  if (structured?.code.startsWith("svn.")) {
+    return {code:structured.code.slice(4),message:structured.message};
+  }
   const text = typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
   const idx = text.indexOf("|");
   if (idx > 0) {

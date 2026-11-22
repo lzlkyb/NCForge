@@ -76,8 +76,8 @@ export function SvnToolbar({
         />
       )}
       <button type="button" className="vc-btn" aria-busy={fetching || undefined} disabled={fetching} onClick={onRefresh}>
-        <Icon name="refresh" size={13} />
-        刷新
+        <Icon name={fetching ? "spinner" : "refresh"} size={13} className={fetching ? "animate-spin" : undefined} />
+        {fetching ? "刷新中…" : "刷新"}
       </button>
       <button
         type="button"
@@ -85,10 +85,10 @@ export function SvnToolbar({
         data-commit-trigger
         // 有冲突时不再禁用：提交面板本来就会把冲突文件从清单里剔掉
         //（「将提交 N 个文件（不含 M 个冲突）」），按钮一禁，那套逻辑全成了不可达。
-        disabled={busy !== null || committable === 0}
+        aria-label={`准备提交 ${pickedCount}`}
         onClick={onCommit}
         title={
-          committable === 0
+          busy !== null ? "查看提交草稿，操作结束后可提交" : committable === 0
             ? "没有可提交的文件（只有冲突文件时要先解决冲突）"
             : conflicts > 0
               ? `可提交 ${committable} 个；${conflicts} 个冲突会被自动排除`
@@ -114,7 +114,7 @@ export function SvnToolbar({
       )}>
         {(close) => (
           <>
-            <MenuItem label="更新工作副本" icon="download" disabled={busy !== null} onClick={()=>{close();onUpdate();}} />
+            <MenuItem label="查看远端更新" icon="download" onClick={()=>{close();onUpdate();}} />
             {onHistory && <MenuItem label="工作副本历史" icon="history" onClick={() => { close(); onHistory(); }} />}
             <MenuItem label="打包 NC 补丁" icon="package" onClick={() => { close(); openPatchPage(); }} />
             <MenuItem

@@ -57,7 +57,7 @@ export function ReqGroupRows(p: Props) {
   const menuTrigger = (label: string) => (isOpen: boolean, flip: () => void) => <button type="button" className="vc-btn vc-btn-sm vc-grp-more" aria-label={label} aria-haspopup="menu" aria-expanded={isOpen} onClick={flip}><Icon name="more" size={13} /></button>;
   const reqMenu = (req: Requirement, items: ChangeItem[]) => <Menu portal width="w-56" trigger={menuTrigger(`需求操作 ${req.name}`)}>
     {close => <>
-      <MenuItem label="用这个需求出包…" hint="带入打包页" onClick={() => { close(); packRequirement(p.root, req, items); }} />
+      <MenuItem label="用这个需求出包…" hint="带入打包页" onClick={() => { close(); void packRequirement(p.root, req, items); }} />
       <MenuItem label="改名…" hint="如补上清单号" onClick={() => { close(); void renameRequirement(req); }} />
       {req.mergeHint && <MenuItem label={`并入「${reqName(p.reqs, req.mergeHint)}」`} hint="名字很像" onClick={() => { close(); if (req.mergeHint) void mergeRequirement(req, req.mergeHint); }} />}
       {p.onMarkAll && <MenuItem label="本需求全部标为已审" hint="只标本需求的块" onClick={() => { close(); p.onMarkAll?.(req.id, items, blocks); }} />}
